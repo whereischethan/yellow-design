@@ -1,225 +1,195 @@
-import { router, useLocalSearchParams } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { YL } from "../../constants/theme";
+import React from 'react'
+import { View, Text, ScrollView, Share, Pressable } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter, useLocalSearchParams } from 'expo-router'
+import Svg, { Path } from 'react-native-svg'
+import { YL, FONTS } from '../../constants/theme'
+import YAppChrome from '../../components/YAppChrome'
+import YButton from '../../components/YButton'
+import GulmoharSpray from '../../components/GulmoharSpray'
+import type { Booking } from '../../types/booking'
 
-function rideLabel(b: any) {
-  if (!b?.rideType) return "Ride";
-  if (b.rideType === "airport") return b.tripType === "pickup" ? "Airport Pickup" : "Airport Drop";
-  if (b.rideType === "outstation") return b.tripVariant === "round_trip" ? "Outstation · Round Trip" : "Outstation · One Way";
-  if (b.rideType === "hourly") return `Hourly · ${b.hours}h`;
-  return "Ride";
-}
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function routeFrom(b: any) {
-  if (!b) return "";
-  if (b.rideType === "airport" && b.tripType === "pickup") return "BLR Airport";
-  return b.origin || "Pickup";
-}
-
-function routeTo(b: any) {
-  if (!b) return "";
-  if (b.rideType === "airport" && b.tripType === "drop") return "BLR Airport";
-  if (b.rideType === "hourly") return `${b.hours}h from pickup`;
-  return b.destination || "Destination";
-}
-
-function vehicleLabel(key: string) {
-  return key === "yellowSky" ? "Yellow Sky" : "Yellow";
-}
-
-export default function ConfirmedScreen() {
-  const params = useLocalSearchParams<{ bookingId: string; tripCode: string; booking: string }>();
-  const bookingId = params.bookingId || "";
-  const tripCode = params.tripCode || bookingId.slice(-8).toUpperCase();
-
-  let booking: any = null;
+function formatDateTime(iso: string): string {
   try {
-    booking = JSON.parse(params.booking || "{}");
-  } catch {}
+    const d = new Date(iso)
+    const h = d.getHours()
+    const m = d.getMinutes().toString().padStart(2, '0')
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]} · ${h % 12 || 12}:${m} ${ampm}`
+  } catch {
+    return ''
+  }
+}
 
-  const totalPrice = booking?.vehiclePricing?.totalPrice ?? booking?.pricing?.totalPrice ?? 0;
-  const vehicle = booking?.vehicle || "yellow";
+function PinIcon({ color = YL.ink3 }: { color?: string }) {
+  return (
+    <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+      <Path d="M7 1.5C4.791 1.5 3 3.291 3 5.5c0 3 4 7 4 7s4-4 4-7c0-2.209-1.791-4-4-4Z" stroke={color} strokeWidth={1.4} strokeLinejoin="round" />
+      <Path d="M7 6.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" fill={color} />
+    </Svg>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+      <Path d="M7 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z" stroke={YL.ink3} strokeWidth={1.4} />
+      <Path d="M7 4v3l2 1.5" stroke={YL.ink3} strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  )
+}
+
+export default function ScreenConfirmed() {
+  const router = useRouter()
+  const params = useLocalSearchParams<{ booking: string }>()
+  const booking: Booking | null = (() => {
+    try { return params.booking ? JSON.parse(params.booking) : null } catch { return null }
+  })()
+
+  const handleShare = async () => {
+    if (!booking) return
+    const pickupTime = booking.pickup?.dateTime ? formatDateTime(booking.pickup.dateTime) : ''
+    const code = booking.tripCode ?? booking.id ?? ''
+    try {
+      await Share.share({
+        message: `My Yellow ride is confirmed!\nBooking: ${code}\nPickup: ${pickupTime}\nFrom: ${booking.pickup?.placeName || ''}\nTo: ${booking.drop?.placeName || ''}`,
+      })
+    } catch {}
+  }
+
+  const bookingCode = booking?.tripCode ?? (booking?.id ? `#${booking.id.slice(0, 8).toUpperCase()}` : '#YL-XXXXXX')
+  const pickupLabel = booking?.pickup?.placeName || booking?.pickup?.location || 'Pickup location'
+  const dropLabel = booking?.drop?.placeName || booking?.drop?.location || 'Drop location'
+  const pickupDateTime = booking?.pickup?.dateTime ? formatDateTime(booking.pickup.dateTime) : null
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: YL.bg, overflow: 'hidden' }}>
+      <GulmoharSpray
+        style={{ position: 'absolute', right: -80, top: -20, width: 280, height: 280 }}
+        color={YL.gulmohar}
+        opacity={0.1}
+      />
+      <GulmoharSpray
+        style={{ position: 'absolute', left: -100, bottom: -40, width: 260, height: 260, transform: [{ rotate: '180deg' }] }}
+        color={YL.gulmohar}
+        opacity={0.08}
+      />
+
+      <YAppChrome
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: YL.leaf }} />
+            <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3 }}>confirmed</Text>
+          </View>
+        }
+      />
+
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
+        style={{ flex: 1, zIndex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Success mark */}
-        <View style={styles.successRing}>
-          <View style={styles.successCircle}>
-            <Text style={styles.successCheck}>✓</Text>
+        {/* Check badge */}
+        <View style={{
+          width: 64, height: 64, borderRadius: 32,
+          backgroundColor: YL.yellow, borderWidth: 2, borderColor: YL.ink,
+          alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+          shadowColor: YL.yellowDeep, shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+        }}>
+          <Svg width={30} height={24} viewBox="0 0 30 24" fill="none">
+            <Path d="M4 13L11 20L26 4" stroke={YL.ink} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </View>
+
+        {/* Headline */}
+        <Text style={{ fontFamily: FONTS.display, fontSize: 34, fontWeight: '500', color: YL.ink, letterSpacing: -1 }}>
+          Your <Text style={{ fontStyle: 'italic' }}>Yellow</Text>{'\nis locked in.'}
+        </Text>
+        <Text style={{ fontFamily: FONTS.display, fontSize: 14, color: YL.ink2, marginTop: 8 }}>
+          Booking{' '}
+          <Text style={{ fontFamily: FONTS.mono, color: YL.ink }}>{bookingCode}</Text>
+        </Text>
+
+        {/* Trip details card */}
+        <View style={{
+          marginTop: 20, padding: 18, backgroundColor: YL.card,
+          borderWidth: 1, borderColor: YL.line, borderRadius: 22,
+          gap: 14,
+        }}>
+          {pickupDateTime && (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+              <View style={{ marginTop: 1 }}><ClockIcon /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: YL.ink3, letterSpacing: 0.3, marginBottom: 3 }}>
+                  PICKUP TIME
+                </Text>
+                <Text style={{ fontFamily: FONTS.display, fontSize: 14, fontWeight: '500', color: YL.ink }}>
+                  {pickupDateTime}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          <View style={{ height: 1, backgroundColor: YL.lineSoft }} />
+
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <View style={{ marginTop: 1 }}><PinIcon color={YL.leaf} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: YL.ink3, letterSpacing: 0.3, marginBottom: 3 }}>
+                FROM
+              </Text>
+              <Text style={{ fontFamily: FONTS.display, fontSize: 14, fontWeight: '500', color: YL.ink }}>
+                {pickupLabel}
+              </Text>
+            </View>
+          </View>
+
+          <View style={{ height: 1, backgroundColor: YL.lineSoft }} />
+
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <View style={{ marginTop: 1 }}><PinIcon color={YL.gulmohar} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: YL.ink3, letterSpacing: 0.3, marginBottom: 3 }}>
+                TO
+              </Text>
+              <Text style={{ fontFamily: FONTS.display, fontSize: 14, fontWeight: '500', color: YL.ink }}>
+                {dropLabel}
+              </Text>
+            </View>
           </View>
         </View>
 
-        <Text style={styles.headline}>Booking Confirmed!</Text>
-        <Text style={styles.headlineKn}>ಬುಕಿಂಗ್ ಖಚಿತವಾಗಿದೆ</Text>
-
-        {/* Booking reference card */}
-        <View style={styles.refCard}>
-          <Text style={styles.refLabel}>BOOKING REFERENCE</Text>
-          <Text style={styles.refCode}>{tripCode}</Text>
-          <Text style={styles.refSub}>
-            Save this number · You&apos;ll receive SMS confirmation
+        {/* Chauffeur notice */}
+        <View style={{
+          marginTop: 12, padding: 14, paddingHorizontal: 16,
+          backgroundColor: YL.bg2, borderRadius: 14,
+          borderWidth: 1, borderColor: YL.lineSoft,
+        }}>
+          <Text style={{ fontFamily: FONTS.display, fontSize: 13, color: YL.ink2, lineHeight: 19 }}>
+            Your chauffeur will be confirmed closer to the trip. We'll send you a notification.
           </Text>
         </View>
-
-        {/* Ride summary */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeader}>
-            <Text style={styles.summaryType}>{rideLabel(booking)}</Text>
-            {totalPrice > 0 && (
-              <View style={styles.paidChip}>
-                <Text style={styles.paidText}>PAID ₹{totalPrice.toLocaleString("en-IN")}</Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.routeRow}>
-            <View style={styles.routeDots}>
-              <View style={styles.dotOrigin} />
-              <View style={styles.routeLine} />
-              <View style={styles.dotDest} />
-            </View>
-            <View style={styles.routeTexts}>
-              <View style={styles.routeStop}>
-                <Text style={styles.routeStopLabel}>FROM</Text>
-                <Text style={styles.routeStopText} numberOfLines={2}>{routeFrom(booking)}</Text>
-              </View>
-              <View style={{ height: 12 }} />
-              <View style={styles.routeStop}>
-                <Text style={styles.routeStopLabel}>TO</Text>
-                <Text style={styles.routeStopText} numberOfLines={2}>{routeTo(booking)}</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.summaryDivider} />
-
-          <View style={styles.vehicleRow}>
-            <Text style={styles.vehicleEmoji}>🚗</Text>
-            <Text style={styles.vehicleName}>{vehicleLabel(vehicle)}</Text>
-            <Text style={styles.vehicleSub}>· Kia Carens Clavis EV</Text>
-          </View>
-        </View>
-
-        {/* What happens next */}
-        <View style={styles.nextCard}>
-          <Text style={styles.nextTitle}>What happens next</Text>
-          <View style={styles.nextItem}>
-            <View style={styles.nextDot}><Text style={styles.nextDotText}>1</Text></View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nextLabel}>Partner assigned 60 min before pickup</Text>
-              <Text style={styles.nextSub}>You&apos;ll get an SMS with driver name & number</Text>
-            </View>
-          </View>
-          <View style={styles.nextItem}>
-            <View style={styles.nextDot}><Text style={styles.nextDotText}>2</Text></View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nextLabel}>Track live on this app</Text>
-              <Text style={styles.nextSub}>Driver location updates in My Trips</Text>
-            </View>
-          </View>
-          <View style={styles.nextItem}>
-            <View style={styles.nextDot}><Text style={styles.nextDotText}>3</Text></View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nextLabel}>Need help? We&apos;re here</Text>
-              <Text style={styles.nextSub}>WhatsApp +91 98765 43210 anytime</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Actions */}
-        <Pressable
-          style={styles.ctaPrimary}
-          onPress={() => router.replace("/(app)/mytrips")}
-        >
-          <Text style={styles.ctaPrimaryText}>View My Trips →</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.ctaSecondary}
-          onPress={() => router.replace("/(app)/home")}
-        >
-          <Text style={styles.ctaSecondaryText}>Book Another Ride</Text>
-        </Pressable>
       </ScrollView>
+
+      {/* Bottom buttons */}
+      <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 20, zIndex: 1 }}>
+        <YButton variant="outline" full={false} style={{ flex: 1 }} onPress={handleShare}>
+          Share
+        </YButton>
+        <YButton variant="ink" full={false} style={{ flex: 2 }} onPress={() => {
+          if (booking) {
+            router.replace({ pathname: '/(app)/awaiting', params: { booking: params.booking } })
+          } else {
+            router.replace('/(app)/home')
+          }
+        }}>
+          {booking ? 'Track booking' : 'Back to home'}
+        </YButton>
+      </View>
     </SafeAreaView>
-  );
+  )
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: YL.bg },
-  content: { paddingHorizontal: 20, paddingBottom: 48, paddingTop: 24, gap: 16, alignItems: "stretch" },
-
-  successRing: {
-    alignSelf: "center", width: 80, height: 80, borderRadius: 40,
-    backgroundColor: YL.leafSoft, justifyContent: "center", alignItems: "center",
-  },
-  successCircle: {
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: YL.leaf, justifyContent: "center", alignItems: "center",
-  },
-  successCheck: { fontSize: 28, color: "#fff", fontWeight: "700" },
-
-  headline: { fontSize: 26, fontWeight: "700", color: YL.ink, textAlign: "center", letterSpacing: -0.5 },
-  headlineKn: { fontSize: 13, color: YL.ink3, textAlign: "center", marginTop: -8 },
-
-  refCard: {
-    backgroundColor: YL.yellow, borderRadius: 18, padding: 20, alignItems: "center", gap: 6,
-  },
-  refLabel: { fontSize: 10, fontWeight: "700", color: YL.ink, letterSpacing: 1, textTransform: "uppercase" },
-  refCode: { fontSize: 32, fontWeight: "800", color: YL.ink, letterSpacing: 2 },
-  refSub: { fontSize: 12, color: YL.ink, opacity: 0.65, textAlign: "center" },
-
-  summaryCard: {
-    backgroundColor: YL.card, borderRadius: 18, borderWidth: 1, borderColor: YL.line, padding: 16, gap: 14,
-  },
-  summaryHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  summaryType: { fontSize: 14, fontWeight: "600", color: YL.ink },
-  paidChip: { backgroundColor: YL.leafSoft, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4 },
-  paidText: { fontSize: 10, fontWeight: "700", color: YL.leaf, letterSpacing: 0.4 },
-
-  routeRow: { flexDirection: "row", gap: 12 },
-  routeDots: { width: 16, alignItems: "center", paddingTop: 4 },
-  dotOrigin: { width: 10, height: 10, borderRadius: 5, backgroundColor: YL.ink },
-  routeLine: { flex: 1, width: 1.5, backgroundColor: YL.line, marginVertical: 4 },
-  dotDest: { width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: YL.ink },
-  routeTexts: { flex: 1 },
-  routeStop: {},
-  routeStopLabel: { fontSize: 10, fontWeight: "600", color: YL.ink3, letterSpacing: 0.5, textTransform: "uppercase" },
-  routeStopText: { fontSize: 14, fontWeight: "500", color: YL.ink, lineHeight: 20 },
-
-  summaryDivider: { height: 1, backgroundColor: YL.line },
-  vehicleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  vehicleEmoji: { fontSize: 22 },
-  vehicleName: { fontSize: 14, fontWeight: "600", color: YL.ink },
-  vehicleSub: { fontSize: 13, color: YL.ink2 },
-
-  nextCard: {
-    backgroundColor: YL.card, borderRadius: 18, borderWidth: 1, borderColor: YL.line, padding: 16, gap: 14,
-  },
-  nextTitle: { fontSize: 13, fontWeight: "600", color: YL.ink3, textTransform: "uppercase", letterSpacing: 0.4 },
-  nextItem: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
-  nextDot: {
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: YL.yellow, justifyContent: "center", alignItems: "center",
-  },
-  nextDotText: { fontSize: 12, fontWeight: "700", color: YL.ink },
-  nextLabel: { fontSize: 14, fontWeight: "500", color: YL.ink },
-  nextSub: { fontSize: 12, color: YL.ink3, marginTop: 2 },
-
-  ctaPrimary: {
-    backgroundColor: YL.ink, borderRadius: 16, paddingVertical: 16,
-    alignItems: "center",
-  },
-  ctaPrimaryText: { fontSize: 16, fontWeight: "600", color: YL.yellow },
-  ctaSecondary: {
-    backgroundColor: YL.card, borderRadius: 16, paddingVertical: 14,
-    alignItems: "center", borderWidth: 1, borderColor: YL.line,
-  },
-  ctaSecondaryText: { fontSize: 15, fontWeight: "500", color: YL.ink },
-});

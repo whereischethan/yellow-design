@@ -56,11 +56,17 @@ router.post('/login/send-otp', async (req: Request, res: Response) => {
 
     const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || ''
     const MSG91_TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID || ''
+    // MSG91 needs full number with country code (no +): 10-digit Indian → prepend 91
+    const mobile = phone.length === 10 ? `91${phone}` : phone
     if (MSG91_AUTH_KEY) {
-      const url = `https://control.msg91.com/api/v5/otp?template_id=${MSG91_TEMPLATE_ID}&mobile=${phone}&otp=${otp}&authkey=${MSG91_AUTH_KEY}`
-      await fetch(url)
+      const url = `https://control.msg91.com/api/v5/otp?template_id=${MSG91_TEMPLATE_ID}&mobile=${mobile}&otp=${otp}&authkey=${MSG91_AUTH_KEY}`
+      const r = await fetch(url)
+      if (!r.ok) {
+        const body = await r.text().catch(() => '')
+        console.error(`[ADMIN OTP] MSG91 error for ${mobile}: ${r.status} ${body}`)
+      }
     } else {
-      console.log(`[ADMIN OTP] ${phone}: ${otp}`)
+      console.log(`[ADMIN OTP] ${mobile}: ${otp}`)
     }
 
     return res.json({ message: 'OTP sent' })

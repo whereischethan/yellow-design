@@ -349,7 +349,6 @@ router.patch('/vehicles/:id', async (req, res) => {
 router.get('/customers', async (_req, res) => {
   try {
     const rows = await prisma.user.findMany({ orderBy: { createdAt: 'desc' } })
-    // Fetch trip counts via groupBy
     const tripCounts = await prisma.booking.groupBy({
       by: ['userId'],
       _count: { id: true },
@@ -365,6 +364,37 @@ router.get('/customers', async (_req, res) => {
       trip_count: countMap.get(u.id) ?? 0,
     }))
     res.json({ customers })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.patch('/customers/:id', async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: String(req.params.id) } })
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    const allowed = ['name', 'email']
+    const data: any = {}
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) data[key] = req.body[key] || null
+    }
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Nothing to update' })
+
+    const updated = await prisma.user.update({ where: { id: String(req.params.id) }, data })
+    res.json({ customer: { id: updated.id, phone: updated.phone, name: updated.name, email: updated.email, created_at: updated.createdAt } })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.get('/customers/:id/bookings', async (req, res) => {
+  try {
+    const rows = await prisma.booking.findMany({
+      where: { userId: String(req.params.id) },
+      orderBy: { createdAt: 'desc' },
+    })
+    res.json({ bookings: rows.map(buildBooking) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }

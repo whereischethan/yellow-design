@@ -74,6 +74,9 @@ export const patchVehicle  = (id: string, body: object) =>
   adminFetch(`/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 
 export const getCustomers = () => adminFetch('/customers')
+export const patchCustomer = (id: string, body: object) =>
+  adminFetch(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+export const getCustomerBookings = (id: string) => adminFetch(`/customers/${id}/bookings`)
 
 export const getLeads   = ()             => adminFetch('/leads')
 export const createLead = (body: object) => adminFetch('/leads', { method: 'POST', body: JSON.stringify(body) })

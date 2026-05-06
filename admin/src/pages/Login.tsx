@@ -78,8 +78,9 @@ export default function Login({ onLogin }: Props) {
               type="tel"
               value={phone}
               onChange={e => setPhone(e.target.value)}
-              placeholder="Phone number (with country code)"
+              placeholder="10-digit Indian mobile number"
               autoFocus
+              maxLength={10}
               style={inputStyle}
             />
             <button type="submit" disabled={loading || !phone.trim()} style={btnStyle(loading || !phone.trim())}>

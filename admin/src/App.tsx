@@ -10,7 +10,6 @@ import VehiclesPage from './pages/Vehicles'
 import CustomersPage from './pages/Customers'
 import LeadsPage from './pages/Leads'
 import PricingPage from './pages/Pricing'
-import ContentPage from './pages/Content'
 import { CreateBookingModal, AddDriverModal, AddVehicleModal } from './pages/Modals'
 import Login from './pages/Login'
 
@@ -159,7 +158,6 @@ export default function App() {
           />
         )}
         {page === 'pricing'    && <PricingPage/>}
-        {page === 'content'    && <ContentPage/>}
 
         <BookingDrawer booking={openBooking} drivers={drivers} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate}/>
 

@@ -1,4 +1,7 @@
 const TOKEN_KEY = 'yellow_admin_token'
+const USER_KEY  = 'yellow_admin_user'
+
+export interface AdminProfile { phone: string; name: string | null; role: string }
 
 export function getStoredAdminToken(): string {
   return localStorage.getItem(TOKEN_KEY) || ''
@@ -10,9 +13,18 @@ export function setStoredAdminToken(token: string) {
 
 export function clearAdminToken() {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
 }
 
-// Legacy key helpers kept for backward compat during transition
+export function getStoredAdminUser(): AdminProfile | null {
+  try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null') } catch { return null }
+}
+
+export function setStoredAdminUser(user: AdminProfile) {
+  localStorage.setItem(USER_KEY, JSON.stringify(user))
+}
+
+// Legacy key helpers kept for backward compat
 export function getStoredAdminKey(): string { return getStoredAdminToken() }
 export function setStoredAdminKey(key: string) { setStoredAdminToken(key) }
 export function clearAdminKey() { clearAdminToken() }
@@ -50,7 +62,7 @@ export const verifyAdminOtp = (phone: string, otp: string) =>
     body: JSON.stringify({ phone, otp }),
   }).then(async (r) => {
     if (!r.ok) throw new Error((await r.json()).error || 'Invalid OTP')
-    return r.json() as Promise<{ token: string }>
+    return r.json() as Promise<{ token: string; admin: AdminProfile }>
   })
 
 // Legacy key verify (kept so existing sessions survive)
@@ -88,3 +100,9 @@ export const savePricing = (config: object) =>
   adminFetch('/pricing', { method: 'PUT', body: JSON.stringify({ config }) })
 
 export const getStats = () => adminFetch('/stats')
+
+export const getTeam        = ()                  => adminFetch('/team')
+export const addTeamMember  = (body: object)      => adminFetch('/team', { method: 'POST', body: JSON.stringify(body) })
+export const removeTeamMember = (id: string)      => adminFetch(`/team/${id}`, { method: 'DELETE' })
+export const updateMyProfile  = (body: { name: string }) =>
+  adminFetch('/team/me', { method: 'PATCH', body: JSON.stringify(body) })

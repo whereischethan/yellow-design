@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id
+  phone     String   @unique
+  name      String?
+  email     String?
+  role      String   @default("rider")
+  createdAt String   @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  refreshTokens RefreshToken[]
+  bookings      Booking[]
+  leads         Lead[]
+
+  @@map("users")
+}
+
+model OtpSession {
+  id        String @id
+  phone     String
+  otp       String
+  expiresAt BigInt @map("expires_at")
+  verified  Int    @default(0)
+  createdAt BigInt @default(0) @map("created_at")
+
+  @@map("otp_sessions")
+}
+
+model RefreshToken {
+  token     String @id
+  userId    String @map("user_id")
+  expiresAt BigInt @map("expires_at")
+  createdAt BigInt @default(0) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Booking {
+  id                  String  @id
+  tripCode            String  @unique @map("trip_code")
+  userId              String  @map("user_id")
+  status              String  @default("confirmed")
+  tripType            String? @map("trip_type")
+  vehicleType         String? @default("yellowSky") @map("vehicle_type")
+  price               Int?    @default(0)
+  passengerCount      Int?    @default(1) @map("passenger_count")
+  bags                Int?    @default(0)
+  meetAndGreet        Int?    @default(0) @map("meet_and_greet")
+  petFriendly         Int?    @default(0) @map("pet_friendly")
+  pickupJson          String? @map("pickup_json")
+  dropJson            String? @map("drop_json")
+  flightJson          String? @map("flight_json")
+  pricingJson         String? @map("pricing_json")
+  guestName           String? @map("guest_name")
+  guestPhone          String? @map("guest_phone")
+  assignedDriverJson  String? @map("assigned_driver_json")
+  assignedVehicleJson String? @map("assigned_vehicle_json")
+  createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("bookings")
+}
+
+model Driver {
+  id      String  @id
+  name    String
+  phone   String  @unique
+  status  String  @default("available")
+  rating  Float   @default(5.0)
+  plate   String?
+  vehicle String?
+  joined  String?
+  trips   Int     @default(0)
+
+  vehicles Vehicle[]
+
+  @@map("drivers")
+}
+
+model Vehicle {
+  id              String  @id
+  plate           String  @unique
+  make            String
+  model           String
+  color           String  @default("Yellow")
+  type            String  @default("yellowSky")
+  classKey        String  @default("yellowSky") @map("class_key")
+  year            Int     @default(2024)
+  status          String  @default("available")
+  driverId        String? @map("driver_id")
+  trips           Int     @default(0)
+  isEv            Int     @default(1) @map("is_ev")
+  soc             Int     @default(80)
+  odometer        Int     @default(0)
+  insuranceExpiry String? @map("insurance_expiry")
+  maintenanceNote String? @map("maintenance_note")
+
+  driver Driver? @relation(fields: [driverId], references: [id])
+
+  @@map("vehicles")
+}
+
+model Lead {
+  id         String  @id
+  userId     String  @map("user_id")
+  status     String  @default("new")
+  tripType   String? @map("trip_type")
+  pickupJson String? @map("pickup_json")
+  dropJson   String? @map("drop_json")
+  price      Int?    @default(0)
+  pickupTime String? @map("pickup_time")
+  flight     String?
+  quotedAt   String? @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("quoted_at")
+  callerNote String? @map("caller_note")
+  tripCode   String? @map("trip_code")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("leads")
+}
+
+model PricingConfig {
+  key   String @id
+  value String
+
+  @@map("pricing_config")
+}
+
+model AdminUser {
+  id        String  @id
+  phone     String  @unique
+  name      String?
+  role      String  @default("ops")
+  createdAt String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  @@map("admin_users")
+}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { sendAdminOtp, verifyAdminOtp, setStoredAdminToken } from '../api'
+import { sendAdminOtp, verifyAdminOtp, setStoredAdminToken, setStoredAdminUser, type AdminProfile } from '../api'
 
-interface Props { onLogin: () => void }
+interface Props { onLogin: (admin?: AdminProfile) => void }
 
 const inputStyle: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', height: 48,
@@ -48,9 +48,10 @@ export default function Login({ onLogin }: Props) {
     setLoading(true)
     setError('')
     try {
-      const { token } = await verifyAdminOtp(phone.replace(/\s/g, ''), otp.trim())
+      const { token, admin } = await verifyAdminOtp(phone.replace(/\s/g, ''), otp.trim())
       setStoredAdminToken(token)
-      onLogin()
+      setStoredAdminUser(admin)
+      onLogin(admin)
     } catch (err: any) {
       setError(err.message || 'Invalid OTP')
     } finally {

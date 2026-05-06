@@ -183,15 +183,21 @@ export const Avatar = ({ name, size = 28 }: { name: string; size?: number }) => 
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────
 
-export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing'
+export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'team'
 
 interface SidebarProps {
   active: Page
   setActive: (p: Page) => void
   counts: { bookings: number; drivers: number }
+  adminName: string | null
+  adminPhone: string
+  onSignOut: () => void
+  onEditProfile: () => void
 }
 
-export const Sidebar = ({ active, setActive, counts }: SidebarProps) => {
+export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, onSignOut, onEditProfile }: SidebarProps) => {
+  const [profileOpen, setProfileOpen] = React.useState(false)
+
   const items: { id: Page; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Icons.dashboard },
     { id: 'bookings',  label: 'Bookings',  icon: Icons.bookings,  badge: counts.bookings },
@@ -200,9 +206,15 @@ export const Sidebar = ({ active, setActive, counts }: SidebarProps) => {
     { id: 'customers', label: 'Customers', icon: Icons.customers },
     { id: 'leads',     label: 'Leads',     icon: Icons.funnel },
     { id: 'pricing',   label: 'Pricing',   icon: Icons.pricing },
+    { id: 'team',      label: 'Admin users', icon: Icons.drivers },
   ]
+
+  const initials = adminName
+    ? adminName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    : adminPhone.slice(-2)
+
   return (
-    <div style={{ width: 224, background: YL.yellow, color: YL.ink, display: 'flex', flexDirection: 'column', padding: '18px 14px', flexShrink: 0, borderRight: `1px solid ${YL.yellowDeep}` }}>
+    <div style={{ width: 224, background: YL.yellow, color: YL.ink, display: 'flex', flexDirection: 'column', padding: '18px 14px', flexShrink: 0, borderRight: `1px solid ${YL.yellowDeep}`, position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px 22px' }}>
         <div style={{ width: 30, height: 30, borderRadius: 8, background: YL.ink, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="18" height="18" viewBox="0 0 32 32">
@@ -240,20 +252,72 @@ export const Sidebar = ({ active, setActive, counts }: SidebarProps) => {
       <div style={{ flex: 1 }}/>
 
       <div style={{ padding: '10px 12px', background: 'rgba(43,39,32,0.06)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10 }}>
-        <span style={{ width: 7, height: 7, borderRadius: 999, background: YL.leaf, animation: 'yl-pulse-ring 1.8s ease-in-out infinite' }}/>
+        <span style={{ width: 7, height: 7, borderRadius: 999, background: YL.leaf }}/>
         <Stack gap={1}>
           <span style={{ fontSize: 11.5, color: YL.ink, fontWeight: 600 }}>System live</span>
           <span style={{ fontSize: 10.5, color: YL.ink2, fontFamily: '"JetBrains Mono", monospace' }}>BLR · ops</span>
         </Stack>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 6px 4px', borderTop: '1px solid rgba(43,39,32,0.12)' }}>
-        <div style={{ width: 28, height: 28, borderRadius: 999, background: YL.ink, color: YL.yellow, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700 }}>AN</div>
+      {/* Profile section — clickable */}
+      <div
+        onClick={() => setProfileOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 8px', borderTop: '1px solid rgba(43,39,32,0.12)',
+          cursor: 'pointer', borderRadius: 10,
+          background: profileOpen ? 'rgba(43,39,32,0.08)' : 'transparent',
+          transition: 'background 120ms',
+        }}
+        onMouseEnter={e => { if (!profileOpen) (e.currentTarget as HTMLDivElement).style.background = 'rgba(43,39,32,0.06)' }}
+        onMouseLeave={e => { if (!profileOpen) (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+      >
+        <div style={{ width: 28, height: 28, borderRadius: 999, background: YL.ink, color: YL.yellow, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+          {initials}
+        </div>
         <Stack gap={1} style={{ minWidth: 0, flex: 1 }}>
-          <span style={{ fontSize: 12.5, color: YL.ink, fontWeight: 600 }}>Anjali N.</span>
-          <span style={{ fontSize: 10.5, color: YL.ink2 }}>Ops · Admin</span>
+          <span style={{ fontSize: 12.5, color: YL.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {adminName || adminPhone}
+          </span>
+          <span style={{ fontSize: 10.5, color: YL.ink2 }}>Admin</span>
         </Stack>
+        <span style={{ display: 'flex', width: 14, height: 14, color: YL.ink2, transform: profileOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms', flexShrink: 0 }}>{Icons.chevRight}</span>
       </div>
+
+      {/* Profile popover */}
+      {profileOpen && (
+        <>
+          <div onClick={() => setProfileOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 50 }}/>
+          <div style={{
+            position: 'absolute', bottom: 80, left: 14, right: 14,
+            background: YL.card, borderRadius: 12, border: `1.5px solid ${YL.line}`,
+            boxShadow: '0 8px 24px rgba(43,39,32,0.14)', zIndex: 51, overflow: 'hidden',
+          }}>
+            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${YL.line}` }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: YL.ink }}>{adminName || '—'}</div>
+              <div style={{ fontSize: 11.5, color: YL.ink3, fontFamily: '"JetBrains Mono", monospace', marginTop: 2 }}>{adminPhone}</div>
+            </div>
+            {[
+              { label: 'Edit profile', icon: Icons.edit, action: () => { setProfileOpen(false); onEditProfile() } },
+              { label: 'Sign out',     icon: Icons.close, action: () => { setProfileOpen(false); onSignOut() }, danger: true },
+            ].map(item => (
+              <button key={item.label} onClick={item.action} style={{
+                width: '100%', padding: '11px 14px', background: 'transparent', border: 'none',
+                display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 13.5, fontWeight: 500,
+                color: (item as any).danger ? YL.redInk : YL.ink, textAlign: 'left',
+                transition: 'background 100ms',
+              }}
+                onMouseEnter={e => (e.currentTarget.style.background = (item as any).danger ? YL.redSoft : YL.bg)}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <span style={{ display: 'flex', width: 15, height: 15, color: 'inherit' }}>{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }

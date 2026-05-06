@@ -7,10 +7,6 @@ const router = Router()
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_prod'
 const ADMIN_KEY = process.env.ADMIN_KEY || 'yellow-ops-dev'
-const ADMIN_PHONES_RAW = process.env.ADMIN_PHONES || ''
-const ADMIN_PHONES: Set<string> = new Set(
-  ADMIN_PHONES_RAW.split(',').map((p) => p.trim()).filter(Boolean)
-)
 
 function signAdminToken(phone: string): string {
   return jwt.sign({ adminPhone: phone, role: 'admin' }, JWT_SECRET, { expiresIn: '12h' })
@@ -45,7 +41,8 @@ router.post('/login/send-otp', async (req: Request, res: Response) => {
     const { phone } = req.body
     if (!phone) return res.status(400).json({ error: 'phone required' })
 
-    if (ADMIN_PHONES.size > 0 && !ADMIN_PHONES.has(phone)) {
+    const adminUser = await prisma.adminUser.findUnique({ where: { phone } })
+    if (!adminUser) {
       return res.status(403).json({ error: 'Phone not authorised as admin' })
     }
 
@@ -90,8 +87,12 @@ router.post('/login/verify-otp', async (req: Request, res: Response) => {
 
     await prisma.otpSession.update({ where: { id: session.id }, data: { verified: 1 } })
 
+    const adminUser = await prisma.adminUser.findUnique({ where: { phone } })
     const token = signAdminToken(phone)
-    return res.json({ token })
+    return res.json({
+      token,
+      admin: { phone, name: adminUser?.name ?? null, role: adminUser?.role ?? 'ops' },
+    })
   } catch (e: any) {
     return res.status(500).json({ error: e.message })
   }
@@ -548,6 +549,64 @@ router.get('/stats', async (_req, res) => {
     const openLeads = await prisma.lead.count({ where: { status: { in: ['new', 'called'] } } })
 
     res.json({ ridesToday, revenueToday, driversActive, pendingCount, nextTwoHours, openLeads })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Admin team management ────────────────────────────────────────────────────
+
+router.get('/team', async (_req, res) => {
+  try {
+    const users = await prisma.adminUser.findMany({ orderBy: { createdAt: 'asc' } })
+    res.json({ users })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.post('/team', async (req, res) => {
+  try {
+    const { phone, name, role = 'ops' } = req.body
+    if (!phone) return res.status(400).json({ error: 'phone required' })
+
+    const existing = await prisma.adminUser.findUnique({ where: { phone } })
+    if (existing) return res.status(409).json({ error: 'Admin user with this phone already exists' })
+
+    const id = 'au-' + randomUUID().slice(0, 8)
+    const user = await prisma.adminUser.create({ data: { id, phone, name: name || null, role } })
+    res.json({ user })
+  } catch (e: any) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+router.patch('/team/me', async (req: Request, res: Response) => {
+  try {
+    const auth = req.headers.authorization || ''
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+    const payload = jwt.verify(token, JWT_SECRET) as any
+    const phone = payload?.adminPhone
+    if (!phone) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { name } = req.body
+    const updated = await prisma.adminUser.update({
+      where: { phone },
+      data: { name: name ?? null },
+    })
+    res.json({ admin: { phone: updated.phone, name: updated.name, role: updated.role } })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.delete('/team/:id', async (req, res) => {
+  try {
+    const user = await prisma.adminUser.findUnique({ where: { id: String(req.params.id) } })
+    if (!user) return res.status(404).json({ error: 'Admin user not found' })
+    if (user.role === 'superadmin') return res.status(403).json({ error: 'Cannot remove superadmin' })
+    await prisma.adminUser.delete({ where: { id: String(req.params.id) } })
+    res.json({ ok: true })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }

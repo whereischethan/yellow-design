@@ -1,7 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHmac } from 'crypto'
 import jwt from 'jsonwebtoken'
 import prisma from '../lib/prisma'
+import { sendStatusSms, collectPhones } from '../lib/sms'
+import { genTripCode } from '../lib/tripcode'
+
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || ''
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || ''
 
 const router = Router()
 
@@ -36,26 +42,41 @@ function genOtp(): string {
   return String(Math.floor(1000 + Math.random() * 9000))
 }
 
+const ADMIN_PHONES = (process.env.ADMIN_PHONES || '')
+  .split(',').map(p => p.trim().replace(/\D/g, '').slice(-10)).filter(Boolean)
+
+// Compare on last 10 digits so +91/91 prefix variations don't matter
+const last10 = (s: string) => s.replace(/\D/g, '').slice(-10)
+
+async function isAdminPhone(phone: string): Promise<boolean> {
+  const n = last10(phone)
+  try {
+    const all = await prisma.adminUser.findMany({ select: { phone: true } })
+    if (all.some(r => last10(r.phone) === n)) return true
+  } catch {}
+  if (ADMIN_PHONES.length > 0) return ADMIN_PHONES.includes(n)
+  return false
+}
+
 router.post('/login/send-otp', async (req: Request, res: Response) => {
   try {
-    const { phone } = req.body
+    const { phone, countryCode = '+91' } = req.body
     if (!phone) return res.status(400).json({ error: 'phone required' })
 
-    const adminUser = await prisma.adminUser.findUnique({ where: { phone } })
-    if (!adminUser) {
+    const mobile = `${countryCode.replace('+', '')}${phone}`
+
+    if (!(await isAdminPhone(mobile))) {
       return res.status(403).json({ error: 'Phone not authorised as admin' })
     }
 
     const otp = genOtp()
     const id = randomUUID()
     const expiresAt = BigInt(Math.floor(Date.now() / 1000) + OTP_TTL_SECS)
-    await prisma.otpSession.create({ data: { id, phone, otp, expiresAt } })
+    await prisma.otpSession.create({ data: { id, phone: mobile, otp, expiresAt } })
 
-    const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || ''
+    const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || process.env.MSG91_AUTHKEY || ''
     const MSG91_TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID || ''
-    // MSG91 needs full number with country code (no +): 10-digit Indian → prepend 91
-    const mobile = phone.length === 10 ? `91${phone}` : phone
-    if (MSG91_AUTH_KEY) {
+    if (MSG91_AUTH_KEY && countryCode === '+91') {
       const url = `https://control.msg91.com/api/v5/otp?template_id=${MSG91_TEMPLATE_ID}&mobile=${mobile}&otp=${otp}&authkey=${MSG91_AUTH_KEY}`
       const r = await fetch(url)
       if (!r.ok) {
@@ -74,12 +95,13 @@ router.post('/login/send-otp', async (req: Request, res: Response) => {
 
 router.post('/login/verify-otp', async (req: Request, res: Response) => {
   try {
-    const { phone, otp } = req.body
+    const { phone, otp, countryCode = '+91' } = req.body
     if (!phone || !otp) return res.status(400).json({ error: 'phone and otp required' })
+    const mobile = phone.includes(countryCode.replace('+', '')) ? phone : `${countryCode.replace('+', '')}${phone}`
 
     const now = BigInt(Math.floor(Date.now() / 1000))
     const session = await prisma.otpSession.findFirst({
-      where: { phone, otp, expiresAt: { gt: now }, verified: 0 },
+      where: { phone: mobile, otp, expiresAt: { gt: now }, verified: 0 },
       orderBy: { createdAt: 'desc' },
     })
 
@@ -87,14 +109,54 @@ router.post('/login/verify-otp', async (req: Request, res: Response) => {
 
     await prisma.otpSession.update({ where: { id: session.id }, data: { verified: 1 } })
 
-    const adminUser = await prisma.adminUser.findUnique({ where: { phone } })
-    const token = signAdminToken(phone)
+    const normalizedPhone = last10(mobile)
+    let adminName: string | null = null
+    let adminRole = 'ops'
+    try {
+      const adminUser = await prisma.adminUser.upsert({
+        where: { phone: normalizedPhone },
+        update: {},
+        create: { id: randomUUID(), phone: normalizedPhone, role: 'superadmin' },
+      })
+      adminName = adminUser.name ?? null
+      adminRole = adminUser.role
+    } catch {}
+    const token = signAdminToken(normalizedPhone)
     return res.json({
       token,
-      admin: { phone, name: adminUser?.name ?? null, role: adminUser?.role ?? 'ops' },
+      admin: { phone: mobile, name: adminName, role: adminRole },
     })
   } catch (e: any) {
     return res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Razorpay webhook (public — no auth) ─────────────────────────────────────
+
+router.post('/razorpay-webhook', async (req: Request, res: Response) => {
+  try {
+    if (RAZORPAY_WEBHOOK_SECRET) {
+      const sig = req.headers['x-razorpay-signature'] as string
+      const rawBody: Buffer = (req as any).rawBody
+      if (!sig || !rawBody) return res.status(400).json({ error: 'Missing signature or body' })
+      const computed = createHmac('sha256', RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest('hex')
+      if (computed !== sig) return res.status(400).json({ error: 'Invalid signature' })
+    }
+
+    const event = req.body?.event as string
+    if (event === 'payment_link.paid') {
+      const linkId = req.body?.payload?.payment_link?.entity?.id as string
+      const paymentId = req.body?.payload?.payment?.entity?.id as string
+      if (linkId) {
+        await prisma.booking.updateMany({
+          where: { razorpayLinkId: linkId },
+          data: { paymentStatus: 'paid', razorpayPaymentId: paymentId ?? null },
+        })
+      }
+    }
+    res.json({ ok: true })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
   }
 })
 
@@ -106,6 +168,24 @@ router.get('/me', (_req, res) => {
   res.json({ ok: true })
 })
 
+// ─── OTP lookup (for WhatsApp verification relay) ─────────────────────────────
+
+router.get('/otp-lookup', async (req, res) => {
+  try {
+    const { phone } = req.query
+    if (!phone) return res.status(400).json({ error: 'phone required' })
+    const now = BigInt(Math.floor(Date.now() / 1000))
+    const session = await prisma.otpSession.findFirst({
+      where: { phone: String(phone), expiresAt: { gt: now }, verified: 0 },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!session) return res.status(404).json({ error: 'No active OTP found for this phone' })
+    return res.json({ phone: session.phone, otp: session.otp })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function buildBooking(row: any) {
@@ -113,6 +193,8 @@ function buildBooking(row: any) {
     id: row.id,
     tripCode: row.tripCode,
     userId: row.userId,
+    userName: row.user?.name ?? null,
+    userPhone: row.user?.phone ?? null,
     status: row.status,
     tripType: row.tripType,
     vehicleType: row.vehicleType,
@@ -126,7 +208,10 @@ function buildBooking(row: any) {
     guestPhone: row.guestPhone,
     assignedDriver: row.assignedDriverJson ? JSON.parse(row.assignedDriverJson) : null,
     assignedVehicle: row.assignedVehicleJson ? JSON.parse(row.assignedVehicleJson) : null,
-    paymentStatus: row.paymentStatus || 'paid',
+    paymentStatus: row.paymentStatus || 'pending',
+    razorpayPaymentId: row.razorpayPaymentId ?? null,
+    razorpayLinkId: row.razorpayLinkId ?? null,
+    razorpayLinkUrl: row.razorpayLinkUrl ?? null,
     createdAt: row.createdAt,
   }
 }
@@ -136,7 +221,10 @@ function buildBooking(row: any) {
 router.get('/bookings', async (_req, res) => {
   try {
     const rows = await prisma.booking.findMany({ orderBy: { createdAt: 'desc' } })
-    res.json({ bookings: rows.map(buildBooking) })
+    const userIds = [...new Set(rows.map(r => r.userId))]
+    const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
+    const userMap = new Map(users.map(u => [u.id, u]))
+    res.json({ bookings: rows.map(r => buildBooking({ ...r, user: userMap.get(r.userId) ?? null })) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -149,9 +237,7 @@ router.post('/bookings', async (req, res) => {
     if (!pickup || !drop || !pricing) return res.status(400).json({ error: 'pickup, drop, pricing required' })
 
     const id = randomUUID()
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-    let tripCode = 'YL-'
-    for (let i = 0; i < 6; i++) tripCode += chars[Math.floor(Math.random() * chars.length)]
+    const tripCode = await genTripCode()
 
     const row = await prisma.booking.create({
       data: {
@@ -170,8 +256,21 @@ router.post('/bookings', async (req, res) => {
         guestName: guestName ?? null,
         guestPhone: guestPhone ?? null,
         status: 'confirmed',
+        paymentStatus: 'pending',
       },
     })
+    // Fire confirmation SMS (non-blocking)
+    ;(async () => {
+      try {
+        const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { phone: true } }) : null
+        const phones = collectPhones(user?.phone, guestPhone ?? null)
+        const pickupDateTime = pickup?.dateTime
+        for (const phone of phones) {
+          sendStatusSms(phone, row.tripCode, 'confirmed', { tripType, pickupDateTime }).catch(() => {})
+        }
+      } catch {}
+    })()
+
     res.json({ booking: buildBooking(row) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
@@ -198,7 +297,78 @@ router.patch('/bookings/:id', async (req, res) => {
       await prisma.driver.update({ where: { id: assignedDriver.id }, data: { status: 'on-trip' } }).catch(() => {})
     }
 
+    // Fire SMS notifications (non-blocking)
+    if (status && ['confirmed', 'assigned', 'in_progress', 'arrived', 'completed', 'cancelled'].includes(status)) {
+      ;(async () => {
+        try {
+          const user = await prisma.user.findUnique({ where: { id: updated.userId }, select: { phone: true } })
+          const phones = collectPhones(user?.phone, updated.guestPhone)
+          const driver = assignedDriver ?? (updated.assignedDriverJson ? JSON.parse(updated.assignedDriverJson) : null)
+          const vehicle = updated.assignedVehicleJson ? JSON.parse(updated.assignedVehicleJson) : null
+          const pickup = updated.pickupJson ? JSON.parse(updated.pickupJson) : null
+          const ctx = {
+            tripType: updated.tripType ?? undefined,
+            pickupDateTime: pickup?.dateTime,
+            driverName: driver?.name,
+            vehiclePlate: vehicle?.licensePlate ?? driver?.plate,
+          }
+          for (const phone of phones) {
+            sendStatusSms(phone, updated.tripCode, status, ctx).catch(() => {})
+          }
+        } catch {}
+      })()
+    }
+
     res.json({ booking: buildBooking(updated) })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Payment link ─────────────────────────────────────────────────────────────
+
+router.post('/bookings/:id/payment-link', async (req, res) => {
+  try {
+    const row = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
+    if (!row) return res.status(404).json({ error: 'Booking not found' })
+    if (row.paymentStatus === 'paid' && row.razorpayPaymentId) return res.status(400).json({ error: 'Booking already paid' })
+
+    // Return existing link if already generated
+    if (row.razorpayLinkUrl) {
+      return res.json({ linkUrl: row.razorpayLinkUrl, linkId: row.razorpayLinkId })
+    }
+
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      return res.status(500).json({ error: 'Razorpay not configured (set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)' })
+    }
+
+    const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')
+    const r = await fetch('https://api.razorpay.com/v1/payment_links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
+      body: JSON.stringify({
+        upi_link: true,
+        amount: (row.price ?? 0) * 100,
+        currency: 'INR',
+        description: `Trip ${row.tripCode}`,
+        reference_id: row.tripCode,
+        notify: { sms: false, email: false },
+      }),
+    })
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      return res.status(502).json({ error: `Razorpay error: ${body}` })
+    }
+    const data = await r.json() as any
+    const linkId: string = data.id
+    const linkUrl: string = data.short_url
+
+    await prisma.booking.update({
+      where: { id: row.id },
+      data: { razorpayLinkId: linkId, razorpayLinkUrl: linkUrl },
+    })
+
+    res.json({ linkUrl, linkId })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -216,7 +386,7 @@ router.get('/drivers', async (_req, res) => {
 })
 
 router.post('/drivers', async (req, res) => {
-  const { name, phone, plate, vehicle } = req.body
+  const { name, phone, plate, vehicle, doc_license, doc_aadhaar, doc_pan, doc_police, license_no, license_exp, photo_url } = req.body
   if (!name || !phone) return res.status(400).json({ error: 'name and phone required' })
   try {
     const id = 'd' + randomUUID().slice(0, 8)
@@ -229,6 +399,13 @@ router.post('/drivers', async (req, res) => {
         plate: plate ?? null,
         vehicle: vehicle ?? 'Kia Carens Clavis',
         joined: today,
+        docLicense: doc_license ?? null,
+        docAadhaar: doc_aadhaar ?? null,
+        docPan: doc_pan ?? null,
+        docPolice: doc_police ?? null,
+        licenseNo: license_no ?? null,
+        licenseExp: license_exp ?? null,
+        photoUrl: photo_url ?? null,
       },
     })
     res.json({ driver: row })
@@ -242,10 +419,14 @@ router.patch('/drivers/:id', async (req, res) => {
     const row = await prisma.driver.findUnique({ where: { id: String(req.params.id) } })
     if (!row) return res.status(404).json({ error: 'Driver not found' })
 
-    const allowed = ['status', 'name', 'phone', 'rating', 'plate', 'vehicle']
+    const fieldMap: Record<string, string> = {
+      status: 'status', name: 'name', phone: 'phone', rating: 'rating', plate: 'plate', vehicle: 'vehicle',
+      doc_license: 'docLicense', doc_aadhaar: 'docAadhaar', doc_pan: 'docPan', doc_police: 'docPolice',
+      license_no: 'licenseNo', license_exp: 'licenseExp', photo_url: 'photoUrl',
+    }
     const data: any = {}
-    for (const key of allowed) {
-      if (req.body[key] !== undefined) data[key] = req.body[key]
+    for (const [rawKey, prismaKey] of Object.entries(fieldMap)) {
+      if (req.body[rawKey] !== undefined) data[prismaKey] = req.body[rawKey]
     }
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Nothing to update' })
 
@@ -279,7 +460,7 @@ router.get('/vehicles', async (_req, res) => {
 
 router.post('/vehicles', async (req, res) => {
   const { plate, make, model, color = 'Yellow', type = 'yellowSky', class_key = 'yellowSky',
-    year = 2024, is_ev = 1, soc = 80, odometer = 0, insurance_expiry, driver_id } = req.body
+    year = 2024, is_ev = 1, soc = 80, odometer = 0, insurance_expiry, fc_expiry, driver_id } = req.body
   if (!plate || !make || !model) return res.status(400).json({ error: 'plate, make, model required' })
   try {
     const id = 'v' + randomUUID().slice(0, 8)
@@ -297,6 +478,7 @@ router.post('/vehicles', async (req, res) => {
         soc,
         odometer,
         insuranceExpiry: insurance_expiry ?? null,
+        fcExpiry: fc_expiry ?? null,
         driverId: driver_id ?? null,
       },
       include: { driver: { select: { name: true } } },
@@ -323,7 +505,7 @@ router.patch('/vehicles/:id', async (req, res) => {
     const fieldMap: Record<string, string> = {
       status: 'status', driver_id: 'driverId', make: 'make', model: 'model',
       color: 'color', plate: 'plate', soc: 'soc', odometer: 'odometer',
-      insurance_expiry: 'insuranceExpiry', maintenance_note: 'maintenanceNote',
+      insurance_expiry: 'insuranceExpiry', fc_expiry: 'fcExpiry', maintenance_note: 'maintenanceNote',
       class_key: 'classKey', year: 'year',
     }
     const data: any = {}
@@ -401,7 +583,8 @@ router.get('/customers/:id/bookings', async (req, res) => {
       where: { userId: String(req.params.id) },
       orderBy: { createdAt: 'desc' },
     })
-    res.json({ bookings: rows.map(buildBooking) })
+    const user = await prisma.user.findUnique({ where: { id: String(req.params.id) }, select: { id: true, name: true, phone: true } })
+    res.json({ bookings: rows.map(r => buildBooking({ ...r, user: user ?? null })) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -411,18 +594,34 @@ router.get('/customers/:id/bookings', async (req, res) => {
 
 router.get('/leads', async (_req, res) => {
   try {
+    // Auto-expire open leads older than 24 hours to 'lost'
+    const cutoff = new Date(Date.now() - 24 * 3600000).toISOString()
+    await prisma.lead.updateMany({
+      where: { status: { in: ['new', 'called'] }, quotedAt: { lt: cutoff } },
+    data: { status: 'lost' },
+    })
+
     const rows = await prisma.lead.findMany({
       include: { user: { select: { name: true, phone: true } } },
       orderBy: { quotedAt: 'desc' },
     })
     res.json({
       leads: rows.map(r => ({
-        ...r,
+        id: r.id,
+        user_id: r.userId,
+        status: r.status,
+        trip_type: r.tripType,
+        price: r.price,
+        pickup_time: r.pickupTime,
+        flight: r.flight,
+        quoted_at: r.quotedAt,
+        caller_note: r.callerNote,
+        trip_code: r.tripCode,
         user_name: r.user?.name ?? null,
         user_phone: r.user?.phone ?? null,
         pickup: r.pickupJson ? JSON.parse(r.pickupJson) : null,
         drop: r.dropJson ? JSON.parse(r.dropJson) : null,
-        user: undefined,
+        pricing: r.pricingJson ? JSON.parse(r.pricingJson) : null,
       })),
     })
   } catch (e: any) {
@@ -431,7 +630,7 @@ router.get('/leads', async (_req, res) => {
 })
 
 router.post('/leads', async (req, res) => {
-  const { userId, tripType, pickup, drop, price, pickupTime, flight } = req.body
+  const { userId, tripType, pickup, drop, price, pickupTime, flight, pricing } = req.body
   if (!userId || !pickup || !price) return res.status(400).json({ error: 'userId, pickup, price required' })
   try {
     const id = 'l' + randomUUID().slice(0, 8)
@@ -445,6 +644,8 @@ router.post('/leads', async (req, res) => {
         price,
         pickupTime: pickupTime ?? null,
         flight: flight ?? null,
+        pricingJson: pricing ? JSON.stringify(pricing) : null,
+        quotedAt: new Date().toISOString(),
       },
     })
     res.json({ lead: row })
@@ -509,6 +710,59 @@ router.put('/pricing', async (req, res) => {
   }
 })
 
+router.post('/pricing/calculate', async (req, res) => {
+  try {
+    const { originPlaceId, tripType = 'airport', distanceKm: manualKm } = req.body
+    const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || ''
+    const BLR_AIRPORT_PLACE_ID = 'ChIJZWJEdf4crjsRjkEpoelwbCk'
+
+    let distanceKm: number
+    let durationMinutes: number
+
+    if (manualKm !== undefined) {
+      distanceKm = parseFloat(manualKm)
+      durationMinutes = Math.round(distanceKm * 1.5)
+    } else if (originPlaceId && GOOGLE_MAPS_KEY) {
+      const destPlaceId = BLR_AIRPORT_PLACE_ID
+      const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=place_id:${encodeURIComponent(originPlaceId)}&destinations=place_id:${encodeURIComponent(destPlaceId)}&key=${GOOGLE_MAPS_KEY}&mode=driving`
+      const r = await fetch(url)
+      const data = await r.json() as any
+      const element = data?.rows?.[0]?.elements?.[0]
+      if (!element || element.status !== 'OK') return res.status(400).json({ error: 'Could not calculate distance' })
+      distanceKm = Math.round((element.distance.value / 1000) * 10) / 10
+      durationMinutes = Math.round(element.duration.value / 60)
+    } else {
+      return res.status(400).json({ error: 'originPlaceId or distanceKm required' })
+    }
+
+    const rows = await prisma.pricingConfig.findMany()
+    const cfg: Record<string, number> = rows.reduce((acc, r) => ({ ...acc, [r.key]: parseFloat(r.value) }), {} as Record<string, number>)
+
+    if (tripType === 'outstation') {
+      const perKm = cfg.outstation_per_km ?? 18
+      const driverBata = cfg.outstation_driver_bata ?? 500
+      const gstRate = (cfg.outstation_gst ?? 5) / 100
+      const base = distanceKm * perKm
+      const total = Math.round((base + driverBata) * (1 + gstRate))
+      return res.json({ distanceKm, durationMinutes, tripType, basePrice: Math.round(base), totalPrice: total,
+        breakdown: { distanceFare: `₹${Math.round(base)} @ ₹${perKm}/km`, driverBata: `₹${driverBata}`, gst: `${cfg.outstation_gst ?? 5}%` } })
+    }
+
+    const perKm = cfg.airport_per_km ?? 32
+    const tripCharge = cfg.airport_trip_charge ?? 100
+    const toll = cfg.airport_toll ?? 185
+    const gstRate = (cfg.airport_gst ?? 5) / 100
+    const kmFare = Math.round(distanceKm * perKm)
+    const fareBeforeTax = kmFare + tripCharge
+    const gst = Math.round(fareBeforeTax * gstRate)
+    const total = fareBeforeTax + gst + toll
+    res.json({ distanceKm, durationMinutes, tripType, fareBeforeTax, gst, toll, totalPrice: total, basePrice: fareBeforeTax,
+      breakdown: { kmFare: `₹${kmFare} @ ₹${perKm}/km`, tripCharge: `₹${tripCharge}`, gst: `${cfg.airport_gst ?? 5}% on ₹${fareBeforeTax}`, toll: `₹${toll} (pass-through)` } })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 router.get('/stats', async (_req, res) => {
@@ -518,18 +772,24 @@ router.get('/stats', async (_req, res) => {
     const tomorrow = new Date(today)
     tomorrow.setDate(tomorrow.getDate() + 1)
 
-    const todayStr = today.toISOString().slice(0, 19)
-    const tomorrowStr = tomorrow.toISOString().slice(0, 19)
+    // Count bookings with pickup date today (not created_at today — bookings can be made in advance)
+    const todayStart = today.toISOString()
+    const todayEnd = tomorrow.toISOString()
 
-    // Use raw for date range since createdAt is stored as TEXT
     const todayBookings = await prisma.$queryRaw<any[]>`
-      SELECT * FROM bookings WHERE created_at >= ${todayStr} AND created_at < ${tomorrowStr}
+      SELECT * FROM bookings
+      WHERE status != 'cancelled'
+      AND pickup_json::json->>'dateTime' >= ${todayStart}
+      AND pickup_json::json->>'dateTime' < ${todayEnd}
     `
 
-    const ridesToday = todayBookings.filter((b: any) => b.status !== 'cancelled').length
-    const revenueToday = todayBookings
-      .filter((b: any) => b.status !== 'cancelled')
-      .reduce((s: number, b: any) => s + (b.price || 0), 0)
+    const ridesToday = todayBookings.length
+    const revenueToday = todayBookings.reduce((s: number, b: any) => {
+      try {
+        const pricing = typeof b.pricing_json === 'string' ? JSON.parse(b.pricing_json) : (b.pricing_json ?? {})
+        return s + (pricing.totalPrice ?? pricing.total_price ?? b.price ?? 0)
+      } catch { return s + (b.price ?? 0) }
+    }, 0)
 
     const driversActive = await prisma.driver.count({ where: { status: { not: 'offline' } } })
     const pendingCount = await prisma.booking.count({ where: { status: 'pending' } })
@@ -559,7 +819,9 @@ router.get('/stats', async (_req, res) => {
 router.get('/team', async (_req, res) => {
   try {
     const users = await prisma.adminUser.findMany({ orderBy: { createdAt: 'asc' } })
-    res.json({ users })
+    // Normalize phone to last 10 digits in response
+    const normalized = users.map(u => ({ ...u, phone: u.phone.replace(/\D/g, '').slice(-10) }))
+    res.json({ users: normalized })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -567,15 +829,20 @@ router.get('/team', async (_req, res) => {
 
 router.post('/team', async (req, res) => {
   try {
-    const { phone, name, role = 'ops' } = req.body
-    if (!phone) return res.status(400).json({ error: 'phone required' })
+    const { phone: rawPhone, name, role = 'ops' } = req.body
+    if (!rawPhone) return res.status(400).json({ error: 'phone required' })
+    const phone = String(rawPhone).replace(/\D/g, '').slice(-10)
+    if (phone.length !== 10) return res.status(400).json({ error: 'Phone must be 10 digits' })
 
-    const existing = await prisma.adminUser.findUnique({ where: { phone } })
-    if (existing) return res.status(409).json({ error: 'Admin user with this phone already exists' })
+    // Check by last-10 match to avoid duplicates from different formats
+    const all = await prisma.adminUser.findMany({ select: { id: true, phone: true } })
+    if (all.some(u => u.phone.replace(/\D/g, '').slice(-10) === phone)) {
+      return res.status(409).json({ error: 'Admin user with this phone already exists' })
+    }
 
     const id = 'au-' + randomUUID().slice(0, 8)
     const user = await prisma.adminUser.create({ data: { id, phone, name: name || null, role } })
-    res.json({ user })
+    res.json({ user: { ...user, phone: user.phone.replace(/\D/g, '').slice(-10) } })
   } catch (e: any) {
     res.status(400).json({ error: e.message })
   }
@@ -590,9 +857,10 @@ router.patch('/team/me', async (req: Request, res: Response) => {
     if (!phone) return res.status(401).json({ error: 'Unauthorized' })
 
     const { name } = req.body
-    const updated = await prisma.adminUser.update({
+    const updated = await prisma.adminUser.upsert({
       where: { phone },
-      data: { name: name ?? null },
+      update: { name: name ?? null },
+      create: { id: randomUUID(), phone, name: name ?? null, role: 'superadmin' },
     })
     res.json({ admin: { phone: updated.phone, name: updated.name, role: updated.role } })
   } catch (e: any) {

@@ -18,6 +18,7 @@ model User {
   refreshTokens RefreshToken[]
   bookings      Booking[]
   leads         Lead[]
+  savedPlaces   SavedPlace[]
 
   @@map("users")
 }
@@ -64,6 +65,12 @@ model Booking {
   guestPhone          String? @map("guest_phone")
   assignedDriverJson  String? @map("assigned_driver_json")
   assignedVehicleJson String? @map("assigned_vehicle_json")
+  razorpayOrderId     String? @map("razorpay_order_id")
+  razorpayPaymentId   String? @map("razorpay_payment_id")
+  razorpayLinkId      String? @map("razorpay_link_id")
+  razorpayLinkUrl     String? @map("razorpay_link_url")
+  paymentStatus       String  @default("paid") @map("payment_status")
+  stopsJson           String? @map("stops_json")
   createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
@@ -72,15 +79,22 @@ model Booking {
 }
 
 model Driver {
-  id      String  @id
-  name    String
-  phone   String  @unique
-  status  String  @default("available")
-  rating  Float   @default(5.0)
-  plate   String?
-  vehicle String?
-  joined  String?
-  trips   Int     @default(0)
+  id          String  @id
+  name        String
+  phone       String  @unique
+  status      String  @default("available")
+  rating      Float   @default(5.0)
+  plate       String?
+  vehicle     String?
+  joined      String?
+  trips       Int     @default(0)
+  docLicense  String? @map("doc_license")
+  docAadhaar  String? @map("doc_aadhaar")
+  docPan      String? @map("doc_pan")
+  docPolice   String? @map("doc_police")
+  licenseNo   String? @map("license_no")
+  licenseExp  String? @map("license_exp")
+  photoUrl    String? @map("photo_url")
 
   vehicles Vehicle[]
 
@@ -103,6 +117,7 @@ model Vehicle {
   soc             Int     @default(80)
   odometer        Int     @default(0)
   insuranceExpiry String? @map("insurance_expiry")
+  fcExpiry        String? @map("fc_expiry")
   maintenanceNote String? @map("maintenance_note")
 
   driver Driver? @relation(fields: [driverId], references: [id])
@@ -120,9 +135,11 @@ model Lead {
   price      Int?    @default(0)
   pickupTime String? @map("pickup_time")
   flight     String?
-  quotedAt   String? @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("quoted_at")
-  callerNote String? @map("caller_note")
-  tripCode   String? @map("trip_code")
+  quotedAt    String? @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("quoted_at")
+  callerNote  String? @map("caller_note")
+  tripCode    String? @map("trip_code")
+  pricingJson String? @map("pricing_json")
+  stopsJson   String? @map("stops_json")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -144,4 +161,19 @@ model AdminUser {
   createdAt String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
   @@map("admin_users")
+}
+
+model SavedPlace {
+  id        String  @id
+  userId    String  @map("user_id")
+  label     String
+  address   String
+  placeId   String? @map("place_id")
+  lat       Float?
+  lng       Float?
+  createdAt String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("saved_places")
 }

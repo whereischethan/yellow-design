@@ -433,6 +433,7 @@ export async function logLead(data: {
   tripType?: string
   pickup?: object
   drop?: object
+  stops?: object[]
   price?: number
   pickupTime?: string
   flight?: string

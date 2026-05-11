@@ -202,6 +202,7 @@ function buildBooking(row: any) {
     luggage: row.bags,
     pickup: row.pickupJson ? JSON.parse(row.pickupJson) : null,
     drop: row.dropJson ? JSON.parse(row.dropJson) : null,
+    stops: row.stopsJson ? JSON.parse(row.stopsJson) : null,
     flight: row.flightJson ? JSON.parse(row.flightJson) : null,
     pricing: row.pricingJson ? JSON.parse(row.pricingJson) : null,
     guestName: row.guestName,
@@ -233,7 +234,7 @@ router.get('/bookings', async (_req, res) => {
 router.post('/bookings', async (req, res) => {
   try {
     const { tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0,
-      pickup, drop, flight, pricing, guestName, guestPhone, userId } = req.body
+      pickup, drop, stops, flight, pricing, guestName, guestPhone, userId } = req.body
     if (!pickup || !drop || !pricing) return res.status(400).json({ error: 'pickup, drop, pricing required' })
 
     const id = randomUUID()
@@ -251,6 +252,7 @@ router.post('/bookings', async (req, res) => {
         bags: luggage,
         pickupJson: JSON.stringify(pickup),
         dropJson: JSON.stringify(drop),
+        stopsJson: stops?.length ? JSON.stringify(stops) : null,
         flightJson: flight ? JSON.stringify(flight) : null,
         pricingJson: JSON.stringify(pricing),
         guestName: guestName ?? null,
@@ -712,7 +714,7 @@ router.put('/pricing', async (req, res) => {
 
 router.post('/pricing/calculate', async (req, res) => {
   try {
-    const { originPlaceId, tripType = 'airport', distanceKm: manualKm } = req.body
+    const { originPlaceId, tripType = 'airport', distanceKm: manualKm, stopPlaceIds = [] } = req.body
     const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || ''
     const BLR_AIRPORT_PLACE_ID = 'ChIJZWJEdf4crjsRjkEpoelwbCk'
 
@@ -723,14 +725,21 @@ router.post('/pricing/calculate', async (req, res) => {
       distanceKm = parseFloat(manualKm)
       durationMinutes = Math.round(distanceKm * 1.5)
     } else if (originPlaceId && GOOGLE_MAPS_KEY) {
-      const destPlaceId = BLR_AIRPORT_PLACE_ID
-      const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=place_id:${encodeURIComponent(originPlaceId)}&destinations=place_id:${encodeURIComponent(destPlaceId)}&key=${GOOGLE_MAPS_KEY}&mode=driving`
-      const r = await fetch(url)
-      const data = await r.json() as any
-      const element = data?.rows?.[0]?.elements?.[0]
-      if (!element || element.status !== 'OK') return res.status(400).json({ error: 'Could not calculate distance' })
-      distanceKm = Math.round((element.distance.value / 1000) * 10) / 10
-      durationMinutes = Math.round(element.duration.value / 60)
+      // Sum leg distances: origin → stop1 → stop2 → ... → airport
+      const waypoints: string[] = [originPlaceId, ...stopPlaceIds, BLR_AIRPORT_PLACE_ID]
+      const legResults = await Promise.all(
+        waypoints.slice(0, -1).map(async (from, i) => {
+          const to = waypoints[i + 1]
+          const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=place_id:${encodeURIComponent(from)}&destinations=place_id:${encodeURIComponent(to)}&key=${GOOGLE_MAPS_KEY}&mode=driving`
+          const r = await fetch(url)
+          const data = await r.json() as any
+          const el = data?.rows?.[0]?.elements?.[0]
+          if (!el || el.status !== 'OK') throw new Error('Could not calculate distance for a leg')
+          return { km: el.distance.value / 1000, mins: el.duration.value / 60 }
+        })
+      )
+      distanceKm = Math.round(legResults.reduce((s, l) => s + l.km, 0) * 10) / 10
+      durationMinutes = Math.round(legResults.reduce((s, l) => s + l.mins, 0))
     } else {
       return res.status(400).json({ error: 'originPlaceId or distanceKm required' })
     }

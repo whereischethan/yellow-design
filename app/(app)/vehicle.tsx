@@ -1,265 +1,326 @@
-import { router, useLocalSearchParams } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { YL } from "../../constants/theme";
+import React, { useEffect, useState } from 'react'
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  StyleSheet,
+  ActivityIndicator,
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter, useLocalSearchParams } from 'expo-router'
+import Svg, { Path, Circle } from 'react-native-svg'
+import { YL, FONTS } from '../../constants/theme'
+import YAppChrome from '../../components/YAppChrome'
+import YButton from '../../components/YButton'
+import { IconPerson, IconBag } from '../../components/icons'
+import { checkAvailability, logLead } from '../../lib/api'
+import type { PricingResponse, BookingLocation, FlightInfo } from '../../types/booking'
 
-const VEHICLES = [
-  {
-    key: "yellow" as const,
-    name: "Yellow",
-    nameKn: "ಯೆಲ್ಲೋ",
-    model: "Kia Carens Clavis EV",
-    seats: 6,
-    tags: ["AC", "Zero Emissions", "USB Charging"],
-    recommended: true,
-  },
-  {
-    key: "yellowSky" as const,
-    name: "Yellow Sky",
-    nameKn: "ಯೆಲ್ಲೋ ಸ್ಕೈ",
-    model: "Kia Carens Clavis EV · Panoramic Sunroof",
-    seats: 6,
-    tags: ["AC", "Panoramic Sunroof", "USB Charging"],
-    recommended: false,
-  },
-];
+function VehicleSvg() {
+  return (
+    <Svg width={78} height={50} viewBox="0 0 80 36">
+      <Path
+        d="M8 22 L16 14 Q22 10 32 10 L58 10 Q65 12 70 18 L74 22 Q76 23 76 25 L76 28 Q76 30 74 30 L10 30 Q8 30 8 28 L8 24 Q8 23 8 22 Z"
+        fill={YL.ink}
+      />
+      <Path d="M20 18 L28 13 L42 13 L42 21 L20 21 Z" fill={YL.yellow} />
+      <Path d="M44 13 L55 13 Q62 14 66 20 L66 21 L44 21 Z" fill={YL.yellow} />
+      <Circle cx={24} cy={30} r={5} fill={YL.ink} />
+      <Circle cx={60} cy={30} r={5} fill={YL.ink} />
+    </Svg>
+  )
+}
 
-export default function VehicleScreen() {
-  const params = useLocalSearchParams<{ booking: string }>();
-  let booking: any = {};
-  try {
-    booking = JSON.parse(params.booking || "{}");
-  } catch {}
+function CheckMark() {
+  return (
+    <View style={styles.checkCircle}>
+      <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+        <Path d="M2 7L5.5 10.5L12 3.5" stroke="white" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
+    </View>
+  )
+}
 
-  const pricing = booking.pricing || {};
-  const vehicleOptions = pricing.vehicleOptions || {};
+export default function ScreenVehicle() {
+  const router = useRouter()
+  const params = useLocalSearchParams<{
+    passengers: string
+    bags: string
+    meetAndGreet: string
+    petFriendly: string
+    tripType: string
+    terminal: string
+    pickup: string
+    drop: string
+    stops: string
+    flight: string
+    pricing: string
+  }>()
 
-  function selectVehicle(key: "yellow" | "yellowSky") {
-    const vp = vehicleOptions[key] || {};
-    const updated = {
-      ...booking,
-      vehicle: key,
-      vehiclePricing: vp,
-    };
-    router.push({ pathname: "/(app)/review", params: { booking: JSON.stringify(updated) } });
-  }
+  const passengers = parseInt(params.passengers ?? '1', 10)
+  const bags = parseInt(params.bags ?? '0', 10)
+  const meetAndGreet = params.meetAndGreet === '1'
+  const petFriendly = params.petFriendly === '1'
 
-  function rideLabel() {
-    if (booking.rideType === "airport") {
-      return booking.tripType === "pickup" ? "Airport Pickup" : "Airport Drop";
-    }
-    if (booking.rideType === "outstation") {
-      return booking.tripVariant === "round_trip" ? "Outstation · Round Trip" : "Outstation · One Way";
-    }
-    if (booking.rideType === "hourly") {
-      return `Hourly · ${booking.hours}h`;
-    }
-    return "Ride";
-  }
+  const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup) : null
+  const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
-  function routeSummary() {
-    if (booking.rideType === "airport") {
-      if (booking.tripType === "pickup") {
-        return `BLR Airport → ${booking.destination || "Your location"}`;
-      }
-      return `${booking.origin || "Your location"} → BLR Airport`;
+  const yellowSkyPrice = pricing?.vehicleOptions?.yellowSky?.totalPrice
+    ?? pricing?.vehicleOptions?.suv?.totalPrice
+    ?? pricing?.totalPrice
+    ?? 0
+
+  const distanceKm = pricing?.distanceKm
+
+  const [availability, setAvailability] = useState<{
+    checked: boolean
+    available: boolean
+  }>({ checked: false, available: true })
+
+  useEffect(() => {
+    if (!pickup?.dateTime) {
+      setAvailability({ checked: true, available: true })
+      return
     }
-    if (booking.rideType === "outstation") {
-      return `${booking.origin || "Bengaluru"} → ${booking.destination || "Destination"}`;
-    }
-    if (booking.rideType === "hourly") {
-      return `From ${booking.origin || "Pickup"}`;
-    }
-    return "";
+    checkAvailability(pickup.dateTime)
+      .then((result) => {
+        setAvailability({ checked: true, available: result.available })
+      })
+      .catch(() => {
+        setAvailability({ checked: true, available: true })
+      })
+  }, [pickup?.dateTime])
+
+  // Log this pricing view as a lead
+  useEffect(() => {
+    if (!pickup || !pricing) return
+    const drop = params.drop ? JSON.parse(params.drop) : null
+    const stops = params.stops ? JSON.parse(params.stops) : undefined
+    logLead({
+      tripType: params.tripType,
+      pickup,
+      drop,
+      stops,
+      price: yellowSkyPrice,
+      pickupTime: pickup.dateTime,
+      flight: params.flight || undefined,
+      pricing: pricing ?? undefined,
+    })
+  }, [])
+
+  const handleReview = () => {
+    router.push({
+      pathname: '/(app)/review',
+      params: {
+        passengers: String(passengers),
+        bags: String(bags),
+        meetAndGreet: meetAndGreet ? '1' : '0',
+        petFriendly: petFriendly ? '1' : '0',
+        tripType: params.tripType,
+        terminal: params.terminal,
+        pickup: params.pickup,
+        drop: params.drop,
+        stops: params.stops || '',
+        flight: params.flight,
+        pricing: params.pricing,
+        vehicleType: 'yellowSky',
+        vehiclePrice: String(yellowSkyPrice),
+      },
+    })
   }
 
   return (
-    <SafeAreaView style={styles.root}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable style={styles.back} onPress={() => router.back()}>
-          <Text style={styles.backText}>←</Text>
-        </Pressable>
-        <View>
-          <Text style={styles.title}>Choose Vehicle</Text>
-          <Text style={styles.titleKn}>ವಾಹನ ಆಯ್ಕೆ</Text>
-        </View>
-        <View style={{ width: 40 }} />
-      </View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: YL.bg }}>
+      <YAppChrome right={
+        <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: YL.ink3 }}>Step 2</Text>
+      } />
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Trip summary strip */}
-        <View style={styles.tripStrip}>
-          <View style={styles.tripStripLeft}>
-            <Text style={styles.tripStripLabel}>{rideLabel()}</Text>
-            <Text style={styles.tripStripRoute} numberOfLines={1}>{routeSummary()}</Text>
-          </View>
-          {pricing.distanceKm > 0 && (
-            <View style={styles.tripStripDistance}>
-              <Text style={styles.tripStripDistText}>{pricing.distanceKm} km</Text>
-            </View>
-          )}
+        <Text style={styles.headline}>
+          Your{'  '}
+          <Text style={{ fontStyle: 'italic' }}>ride</Text>
+        </Text>
+
+        {/* Context chip */}
+        <View style={styles.contextChip}>
+          <IconPerson size={14} color={YL.ink2} />
+          <Text style={styles.contextText}>
+            <Text style={{ fontWeight: '600', color: YL.ink }}>{passengers} passenger{passengers !== 1 ? 's' : ''}</Text>
+          </Text>
+          <View style={styles.chipDivider} />
+          <IconBag size={14} color={YL.ink2} large />
+          <Text style={styles.contextText}>
+            <Text style={{ fontWeight: '600', color: YL.ink }}>{bags} bag{bags !== 1 ? 's' : ''}</Text>
+          </Text>
+          <Pressable onPress={() => router.back()}>
+            <Text style={styles.editText}>edit</Text>
+          </Pressable>
         </View>
 
-        {/* Vehicle cards */}
-        {VEHICLES.map((v) => {
-          const vp = vehicleOptions[v.key] || {};
-          const total = vp.totalPrice ?? pricing.totalPrice ?? 0;
-          return (
-            <Pressable key={v.key} style={styles.vehicleCard} onPress={() => selectVehicle(v.key)}>
-              {v.recommended && (
-                <View style={styles.recommendedBadge}>
-                  <Text style={styles.recommendedText}>RECOMMENDED</Text>
+        {/* Availability notice */}
+        {!availability.checked && (
+          <View style={styles.availabilityRow}>
+            <ActivityIndicator size="small" color={YL.ink3} />
+            <Text style={styles.availabilityText}>Checking availability…</Text>
+          </View>
+        )}
+
+        {availability.checked && !availability.available && (
+          <View style={styles.unavailableBanner}>
+            <Text style={styles.unavailableText}>
+              No vehicles available at this time. Please go back and choose a different pickup time.
+            </Text>
+          </View>
+        )}
+
+        {/* Vehicle card */}
+        <View style={styles.vehicleCard}>
+          <View style={styles.recommendedBadge}>
+            <Text style={styles.recommendedText}>YELLOW SKY</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <VehicleSvg />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.vehicleName}>Kia Carens Clavis EV</Text>
+              <View style={styles.vehicleStats}>
+                <View style={styles.statRow}>
+                  <IconPerson size={14} color={YL.ink2} />
+                  <Text style={styles.statText}>{passengers} pax</Text>
                 </View>
+                <View style={styles.statRow}>
+                  <IconBag size={14} color={YL.ink2} large />
+                  <Text style={styles.statText}>{bags} bag{bags !== 1 ? 's' : ''}</Text>
+                </View>
+              </View>
+              {!!distanceKm && (
+                <Text style={styles.distanceText}>{distanceKm} km</Text>
               )}
+            </View>
 
-              {/* Car illustration placeholder */}
-              <View style={[styles.carIllustration, v.key === "yellowSky" && styles.carIllustrationSky]}>
-                <Text style={styles.carEmoji}>🚗</Text>
-                {v.key === "yellowSky" && (
-                  <View style={styles.sunroofBadge}>
-                    <Text style={styles.sunroofText}>☀️</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.vehicleInfo}>
-                <View style={styles.vehicleNameRow}>
-                  <View>
-                    <Text style={styles.vehicleName}>{v.name}</Text>
-                    <Text style={styles.vehicleNameKn}>{v.nameKn}</Text>
-                  </View>
-                  <View style={styles.priceBox}>
-                    <Text style={styles.priceText}>₹{total.toLocaleString("en-IN")}</Text>
-                  </View>
-                </View>
-
-                <Text style={styles.vehicleModel}>{v.model}</Text>
-
-                <View style={styles.tagsRow}>
-                  {v.tags.map((tag) => (
-                    <View key={tag} style={styles.tag}>
-                      <Text style={styles.tagText}>{tag}</Text>
-                    </View>
-                  ))}
-                  <View style={styles.tag}>
-                    <Text style={styles.tagText}>{v.seats} Seats</Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.selectRow}>
-                <Text style={styles.selectText}>Select {v.name} →</Text>
-              </View>
-            </Pressable>
-          );
-        })}
-
-        {/* Why Yellow */}
-        <View style={styles.whyCard}>
-          <Text style={styles.whyTitle}>Why Yellow?</Text>
-          <View style={styles.whyGrid}>
-            {[
-              { icon: "⚡", text: "100% Electric" },
-              { icon: "🌿", text: "Zero Emissions" },
-              { icon: "👔", text: "Vetted Chauffeurs" },
-              { icon: "📍", text: "Live Tracking" },
-            ].map((w) => (
-              <View key={w.text} style={styles.whyItem}>
-                <Text style={styles.whyIcon}>{w.icon}</Text>
-                <Text style={styles.whyText}>{w.text}</Text>
-              </View>
-            ))}
+            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+              <Text style={styles.price}>₹{yellowSkyPrice.toLocaleString('en-IN')}</Text>
+              <CheckMark />
+            </View>
           </View>
         </View>
       </ScrollView>
+
+      {/* Bottom */}
+      <View style={styles.bottom}>
+        <YButton
+          variant="primary"
+          onPress={handleReview}
+          disabled={availability.checked && !availability.available}
+        >
+          Review booking →
+        </YButton>
+      </View>
     </SafeAreaView>
-  );
+  )
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: YL.bg },
-  header: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12,
+  headline: {
+    fontFamily: FONTS.display,
+    fontSize: 30,
+    fontWeight: '500',
+    color: YL.ink,
+    letterSpacing: -0.9,
+    marginBottom: 6,
   },
-  back: { width: 40, height: 40, justifyContent: "center", alignItems: "center" },
-  backText: { fontSize: 22, color: YL.ink },
-  title: { fontSize: 20, fontWeight: "600", color: YL.ink, textAlign: "center" },
-  titleKn: { fontSize: 11, color: YL.ink3, textAlign: "center" },
-
-  content: { paddingHorizontal: 20, paddingBottom: 40, gap: 14 },
-
-  tripStrip: {
-    backgroundColor: YL.card, borderRadius: 14, borderWidth: 1, borderColor: YL.line,
-    padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+  headlineSub: { fontFamily: FONTS.display, fontSize: 13.5, color: YL.ink3, marginBottom: 20 },
+  contextChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: YL.card,
+    borderWidth: 1,
+    borderColor: YL.line,
+    borderRadius: 100,
+    alignSelf: 'flex-start',
+    gap: 8,
+    marginBottom: 16,
   },
-  tripStripLeft: { flex: 1, gap: 2 },
-  tripStripLabel: { fontSize: 11, fontWeight: "600", color: YL.ink3, textTransform: "uppercase", letterSpacing: 0.4 },
-  tripStripRoute: { fontSize: 14, fontWeight: "500", color: YL.ink },
-  tripStripDistance: {
-    backgroundColor: YL.bg2, borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4,
+  contextText: { fontFamily: FONTS.display, fontSize: 12.5, color: YL.ink2 },
+  chipDivider: { width: 1, height: 14, backgroundColor: YL.line },
+  editText: {
+    fontFamily: FONTS.display,
+    fontSize: 12.5,
+    color: YL.ink3,
+    marginLeft: 6,
+    textDecorationLine: 'underline',
   },
-  tripStripDistText: { fontSize: 12, fontWeight: "600", color: YL.ink },
-
-  vehicleCard: {
-    backgroundColor: YL.card, borderRadius: 20, borderWidth: 1, borderColor: YL.line,
-    overflow: "hidden",
+  availabilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
+  availabilityText: { fontSize: 13, color: YL.ink3 },
+  unavailableBanner: {
+    backgroundColor: '#FDF2F2',
+    borderWidth: 1,
+    borderColor: '#E8B4B4',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  unavailableText: { fontSize: 13.5, color: '#C0392B', lineHeight: 20 },
   recommendedBadge: {
-    backgroundColor: YL.yellow, paddingHorizontal: 12, paddingVertical: 5,
-    alignSelf: "flex-start", borderBottomRightRadius: 10,
+    position: 'absolute',
+    top: -10,
+    left: 14,
+    backgroundColor: YL.yellow,
+    borderRadius: 100,
+    borderWidth: 1.5,
+    borderColor: YL.ink,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    zIndex: 10,
   },
-  recommendedText: { fontSize: 10, fontWeight: "700", color: YL.ink, letterSpacing: 0.5 },
-
-  carIllustration: {
-    backgroundColor: YL.bg2, height: 120, justifyContent: "center", alignItems: "center",
-    position: "relative",
+  recommendedText: {
+    fontFamily: FONTS.mono,
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: YL.ink,
+    letterSpacing: 0.4,
   },
-  carIllustrationSky: { backgroundColor: YL.yellowSoft },
-  carEmoji: { fontSize: 64 },
-  sunroofBadge: {
-    position: "absolute", top: 12, right: 16,
-    backgroundColor: YL.yellow, borderRadius: 20, width: 32, height: 32,
-    justifyContent: "center", alignItems: "center",
+  vehicleCard: {
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: YL.yellow,
+    borderWidth: 1.5,
+    borderColor: YL.ink,
+    position: 'relative',
+    overflow: 'visible',
+    marginTop: 16,
   },
-  sunroofText: { fontSize: 16 },
-
-  vehicleInfo: { padding: 16, gap: 8 },
-  vehicleNameRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  vehicleName: { fontSize: 20, fontWeight: "700", color: YL.ink },
-  vehicleNameKn: { fontSize: 11, color: YL.ink3, marginTop: 1 },
-  priceBox: {
-    backgroundColor: YL.ink, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6,
+  vehicleName: {
+    fontFamily: FONTS.display,
+    fontSize: 18,
+    fontWeight: '500',
+    color: YL.ink,
+    letterSpacing: -0.4,
   },
-  priceText: { fontSize: 16, fontWeight: "700", color: YL.yellow },
-
-  vehicleModel: { fontSize: 12, color: YL.ink2 },
-
-  tagsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  tag: {
-    backgroundColor: YL.bg2, borderRadius: 100,
-    paddingHorizontal: 10, paddingVertical: 3,
+  vehicleStats: { flexDirection: 'row', marginTop: 6, gap: 10, alignItems: 'center', flexWrap: 'wrap' },
+  distanceText: { fontFamily: FONTS.mono, fontSize: 11, color: YL.ink3, marginTop: 6, letterSpacing: 0.2 },
+  statRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statText: { fontFamily: FONTS.display, fontSize: 12, color: YL.ink2 },
+  price: { fontFamily: FONTS.display, fontSize: 20, fontWeight: '600', color: YL.ink, letterSpacing: -0.4 },
+  checkCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: YL.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  tagText: { fontSize: 11, color: YL.ink2 },
-
-  selectRow: {
-    borderTopWidth: 1, borderTopColor: YL.line,
-    paddingVertical: 14, paddingHorizontal: 16, alignItems: "center",
-  },
-  selectText: { fontSize: 14, fontWeight: "600", color: YL.ink },
-
-  whyCard: {
-    backgroundColor: YL.card, borderRadius: 16, borderWidth: 1, borderColor: YL.line,
-    padding: 16, gap: 12,
-  },
-  whyTitle: { fontSize: 13, fontWeight: "600", color: YL.ink },
-  whyGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  whyItem: { width: "45%", flexDirection: "row", alignItems: "center", gap: 8 },
-  whyIcon: { fontSize: 20 },
-  whyText: { fontSize: 12, color: YL.ink2, flex: 1 },
-});
+  bottom: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 },
+})

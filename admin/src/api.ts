@@ -45,21 +45,21 @@ async function adminFetch(path: string, init?: RequestInit) {
 
 // ─── Admin OTP login ──────────────────────────────────────────────────────────
 
-export const sendAdminOtp = (phone: string) =>
+export const sendAdminOtp = (phone: string, countryCode = '+91') =>
   fetch('/admin/login/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, countryCode }),
   }).then(async (r) => {
     if (!r.ok) throw new Error((await r.json()).error || 'Failed to send OTP')
     return r.json() as Promise<{ message: string }>
   })
 
-export const verifyAdminOtp = (phone: string, otp: string) =>
+export const verifyAdminOtp = (phone: string, otp: string, countryCode = '+91') =>
   fetch('/admin/login/verify-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone, otp }),
+    body: JSON.stringify({ phone, otp, countryCode }),
   }).then(async (r) => {
     if (!r.ok) throw new Error((await r.json()).error || 'Invalid OTP')
     return r.json() as Promise<{ token: string; admin: AdminProfile }>
@@ -98,6 +98,11 @@ export const patchLead  = (id: string, body: object) =>
 export const getPricing  = ()               => adminFetch('/pricing')
 export const savePricing = (config: object) =>
   adminFetch('/pricing', { method: 'PUT', body: JSON.stringify({ config }) })
+export const calcPricing = (body: { originPlaceId?: string; tripType?: string; distanceKm?: number; stopPlaceIds?: string[] }) =>
+  adminFetch('/pricing/calculate', { method: 'POST', body: JSON.stringify(body) })
+
+export const generatePaymentLink = (id: string) =>
+  adminFetch(`/bookings/${id}/payment-link`, { method: 'POST' })
 
 export const getStats = () => adminFetch('/stats')
 

@@ -469,7 +469,19 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
             <div style={{ display: 'flex', gap: 14 }}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 6 }}>
                 <div style={{ width: 10, height: 10, borderRadius: 999, background: YL.leaf, boxShadow: `0 0 0 1.5px ${YL.leaf}` }}/>
-                <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 36, margin: '4px 0' }}/>
+                {booking.stops?.length ? (
+                  <>
+                    <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 24, margin: '4px 0' }}/>
+                    {booking.stops.map((_, si) => (
+                      <React.Fragment key={si}>
+                        <div style={{ width: 8, height: 8, borderRadius: 999, border: `1.5px solid ${YL.ink2}`, background: '#fff' }}/>
+                        <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 24, margin: '4px 0' }}/>
+                      </React.Fragment>
+                    ))}
+                  </>
+                ) : (
+                  <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 36, margin: '4px 0' }}/>
+                )}
                 <div style={{ width: 10, height: 10, background: YL.gulmohar, boxShadow: `0 0 0 1.5px ${YL.gulmohar}` }}/>
               </div>
               <Stack gap={20} style={{ flex: 1 }}>
@@ -489,6 +501,22 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
                     </a>
                   )}
                 </Stack>
+                {booking.stops?.map((stop, si) => (
+                  <Stack key={si} gap={3}>
+                    <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Stop {si + 1}</div>
+                    <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{stop.placeName || stop.location}</div>
+                    {stop.location && stop.placeName && stop.location !== stop.placeName && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.location)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}
+                      >
+                        {stop.location}
+                      </a>
+                    )}
+                  </Stack>
+                ))}
                 <Stack gap={3}>
                   <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Drop</div>
                   <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{booking.drop?.placeName}</div>

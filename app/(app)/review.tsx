@@ -62,6 +62,7 @@ export default function ScreenReview() {
     terminal: string
     pickup: string
     drop: string
+    stops: string
     flight: string
     pricing: string
     vehicleType: string
@@ -76,6 +77,7 @@ export default function ScreenReview() {
 
   const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup) : null
   const drop: BookingLocation | null = params.drop ? JSON.parse(params.drop) : null
+  const stops: { location: string; placeName?: string; placeId: string }[] = params.stops ? JSON.parse(params.stops) : []
   const flight: FlightInfo | null = params.flight ? JSON.parse(params.flight) : null
   const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
@@ -93,6 +95,7 @@ export default function ScreenReview() {
       tripType: params.tripType,
       pickup,
       drop: drop ?? undefined,
+      stops: stops.length ? stops : undefined,
       price: total,
       pickupTime: pickup.dateTime,
       flight: params.flight || undefined,
@@ -119,6 +122,7 @@ export default function ScreenReview() {
     luggage: bags,
     pickup: pickup!,
     drop: drop!,
+    stops: stops.length ? stops : undefined,
     flight: flight ?? undefined,
     pricing: {
       distanceKm: pricing!.distanceKm,

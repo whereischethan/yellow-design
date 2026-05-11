@@ -392,7 +392,10 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
       setFlightLoading(true)
       lookupFlight(booking.flight.flightNumber, date)
         .then(setFlightData)
-        .catch((e: any) => setFlightError(e.message || 'Flight lookup failed'))
+        .catch((e: any) => {
+          try { setFlightError(JSON.parse(e.message)?.error ?? e.message) }
+          catch { setFlightError(e.message) }
+        })
         .finally(() => setFlightLoading(false))
     }
   }, [booking?.id])
@@ -601,7 +604,10 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
                   setFlightLoading(true); setFlightError('')
                   lookupFlight(booking.flight.flightNumber, date)
                     .then(setFlightData)
-                    .catch((e: any) => setFlightError(e.message || 'Flight lookup failed'))
+                    .catch((e: any) => {
+                      try { setFlightError(JSON.parse(e.message)?.error ?? e.message) }
+                      catch { setFlightError(e.message) }
+                    })
                     .finally(() => setFlightLoading(false))
                 }} style={{ background: 'none', border: `1px solid ${YL.line}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 11, color: YL.ink2, fontFamily: 'inherit' }}>
                   {flightLoading ? 'Loading…' : '↻ Refresh'}

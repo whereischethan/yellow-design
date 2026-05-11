@@ -924,10 +924,14 @@ router.get('/flights/lookup', requireAdmin, async (req: Request, res: Response) 
     const apiRes = await fetch(url, {
       headers: { 'x-rapidapi-host': 'aerodatabox.p.rapidapi.com', 'x-rapidapi-key': FLIGHT_API_KEY },
     })
-    if (apiRes.status === 404) return res.status(404).json({ error: 'Flight not found' })
-    if (!apiRes.ok) return res.status(502).json({ error: 'Flight lookup failed' })
+    if (apiRes.status === 404) return res.status(404).json({ error: 'Flight not found in database' })
+    if (!apiRes.ok) {
+      const body = await apiRes.text().catch(() => '')
+      return res.status(502).json({ error: `Flight API error ${apiRes.status}: ${body.slice(0, 200)}` })
+    }
     const data = await apiRes.json() as any
     const f = Array.isArray(data) ? data[0] : data
+    if (!f) return res.status(404).json({ error: 'Flight not found in database' })
     return res.json({
       flightNumber: f?.number ?? flight_number,
       airline: f?.airline?.name ?? '',
@@ -935,8 +939,8 @@ router.get('/flights/lookup', requireAdmin, async (req: Request, res: Response) 
       arrival: f?.arrival?.scheduledTimeLocal ?? f?.arrival?.scheduledTimeUtc ?? '',
       status: f?.status ?? 'scheduled',
     })
-  } catch {
-    return res.status(500).json({ error: 'Flight lookup failed' })
+  } catch (e: any) {
+    return res.status(500).json({ error: `Flight lookup error: ${e?.message ?? 'unknown'}` })
   }
 })
 

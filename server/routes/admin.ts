@@ -920,7 +920,7 @@ router.get('/flights/lookup', requireAdmin, async (req: Request, res: Response) 
 
   try {
     const iata = flight_number.toUpperCase().replace(/\s/g, '')
-    const url = `https://aerodatabox.p.rapidapi.com/flights/iata/${iata}${date ? `/${date}` : ''}`
+    const url = `https://aerodatabox.p.rapidapi.com/flights/number/${iata}${date ? `/${date}` : ''}`
     const apiRes = await fetch(url, {
       headers: { 'x-rapidapi-host': 'aerodatabox.p.rapidapi.com', 'x-rapidapi-key': FLIGHT_API_KEY },
     })

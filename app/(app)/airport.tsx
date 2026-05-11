@@ -284,7 +284,7 @@ export default function ScreenAirport() {
                 <View style={styles.routeDivider} />
 
                 {stops.map((stop, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, zIndex: 50 - i }}>
                     <View style={{ flex: 1 }}>
                       <LocationAutocomplete
                         label={`STOP ${i + 1}`}
@@ -330,7 +330,7 @@ export default function ScreenAirport() {
                 <View style={styles.routeDivider} />
 
                 {stops.map((stop, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, zIndex: 50 - i }}>
                     <View style={{ flex: 1 }}>
                       <LocationAutocomplete
                         label={`STOP ${i + 1}`}

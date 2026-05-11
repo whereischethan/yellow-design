@@ -17,6 +17,8 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
 }) {
   const [suggestions, setSuggestions] = React.useState<PlaceSuggestion[]>([])
   const [open, setOpen] = React.useState(false)
+  const [dropdownRect, setDropdownRect] = React.useState<{ top: number; left: number; width: number } | null>(null)
+  const wrapperRef = React.useRef<HTMLDivElement>(null)
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchSuggestions = async (text: string) => {
@@ -40,7 +42,13 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
         .map((s: any) => ({ placeId: s.placePrediction?.placeId, description: s.placePrediction?.text?.text }))
         .filter((s: PlaceSuggestion) => s.placeId && s.description)
       setSuggestions(items)
-      setOpen(items.length > 0)
+      if (items.length > 0 && wrapperRef.current) {
+        const rect = wrapperRef.current.getBoundingClientRect()
+        setDropdownRect({ top: rect.bottom + 2, left: rect.left, width: rect.width })
+        setOpen(true)
+      } else {
+        setOpen(false)
+      }
     } catch {
       setSuggestions([]); setOpen(false)
     }
@@ -60,7 +68,7 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
   }
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={wrapperRef} style={{ position: 'relative' }}>
       <FormInput
         label={label} required={required}
         placeholder="Area, street, Bangalore"
@@ -68,10 +76,22 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
         onChange={(e: any) => handleChange(e.target.value)}
         icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.pin}</span>}
       />
-      {open && suggestions.length > 0 && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: YL.card, border: `1px solid ${YL.line}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', zIndex: 100, maxHeight: 220, overflow: 'auto', marginTop: 2 }}>
+      {open && suggestions.length > 0 && dropdownRect && (
+        <div style={{
+          position: 'fixed',
+          top: dropdownRect.top,
+          left: dropdownRect.left,
+          width: dropdownRect.width,
+          background: YL.card,
+          border: `1px solid ${YL.line}`,
+          borderRadius: 8,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+          zIndex: 9999,
+          maxHeight: 220,
+          overflow: 'auto',
+        }}>
           {suggestions.map(s => (
-            <button key={s.placeId} onClick={() => handleSelect(s)} style={{
+            <button key={s.placeId} onMouseDown={(e) => { e.preventDefault(); handleSelect(s) }} style={{
               width: '100%', padding: '9px 12px', display: 'block', textAlign: 'left',
               background: 'transparent', border: 'none', borderBottom: `1px solid ${YL.line}`,
               cursor: 'pointer', fontSize: 12.5, color: YL.ink,

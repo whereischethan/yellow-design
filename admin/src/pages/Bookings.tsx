@@ -1,6 +1,6 @@
 import React from 'react'
 import type { Booking, Driver, Vehicle } from '../types'
-import { patchBooking, generatePaymentLink } from '../api'
+import { patchBooking, generatePaymentLink, lookupFlight } from '../api'
 import {
   YL, STATUS_STYLE, Icons, Mono, Stack, Button, Input, Chip, Card,
   PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, formatPhone, useIsMobile,
@@ -375,11 +375,23 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
   const [generatingLink, setGeneratingLink] = React.useState(false)
   const [linkError, setLinkError] = React.useState('')
   const [copied, setCopied] = React.useState(false)
+  const [flightData, setFlightData] = React.useState<any>(null)
+  const [flightLoading, setFlightLoading] = React.useState(false)
 
   React.useEffect(() => {
     setLinkUrl(booking?.razorpayLinkUrl ?? null)
     setLinkError('')
     setCopied(false)
+    setFlightData(null)
+    // Auto-fetch flight if flightNumber exists but departure is missing
+    if (booking?.flight?.flightNumber && !booking.flight.departure) {
+      const date = booking.pickup?.dateTime ? booking.pickup.dateTime.split('T')[0] : undefined
+      setFlightLoading(true)
+      lookupFlight(booking.flight.flightNumber, date)
+        .then(setFlightData)
+        .catch(() => {})
+        .finally(() => setFlightLoading(false))
+    }
   }, [booking?.id])
 
   if (!booking) return null
@@ -505,14 +517,14 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
                   <Stack key={si} gap={3}>
                     <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Stop {si + 1}</div>
                     <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{stop.placeName || stop.location}</div>
-                    {stop.location && stop.placeName && stop.location !== stop.placeName && (
+                    {stop.location && (
                       <a
                         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.location)}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}
                       >
-                        {stop.location}
+                        {stop.placeName && stop.placeName !== stop.location ? stop.location : 'Open in Maps'}
                       </a>
                     )}
                   </Stack>
@@ -568,19 +580,47 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
           {/* Flight */}
           {booking.flight && (
             <div style={{ padding: '18px 24px', borderBottom: `1px solid ${YL.line}` }}>
-              <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600, marginBottom: 14 }}>Flight</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 10, alignItems: 'center', padding: '12px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}` }}>
-                <Stack gap={3}><Mono size={16} weight={600}>{booking.flight.departure}</Mono><span style={{ fontSize: 11, color: YL.ink2 }}>Departure</span></Stack>
-                <Stack gap={4} align="center">
-                  <span style={{ width: 16, height: 16, color: YL.ink2, display: 'flex' }}>{Icons.flight}</span>
-                  <Mono size={11} color={YL.ink2}>{booking.flight.flightNumber}</Mono>
-                  <span style={{ fontSize: 10, color: YL.ink2 }}>{booking.flight.airline}</span>
-                </Stack>
-                <Stack gap={3} style={{ textAlign: 'right' }}><Mono size={16} weight={600} style={{ display: 'block' }}>{booking.flight.arrival}</Mono><span style={{ fontSize: 11, color: YL.ink2 }}>Arrival</span></Stack>
-                <div style={{ gridColumn: '1 / -1', borderTop: `1px dashed ${YL.line}`, paddingTop: 8, fontSize: 11.5, color: YL.ink2 }}>
-                  Status: <span style={{ color: YL.greenInk, fontWeight: 500 }}>{booking.flight.status}</span>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600 }}>Flight</div>
+                <button onClick={() => {
+                  const date = booking.pickup?.dateTime ? booking.pickup.dateTime.split('T')[0] : undefined
+                  setFlightLoading(true)
+                  lookupFlight(booking.flight!.flightNumber, date)
+                    .then(setFlightData).catch(() => {}).finally(() => setFlightLoading(false))
+                }} style={{ background: 'none', border: `1px solid ${YL.line}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 11, color: YL.ink2, fontFamily: 'inherit' }}>
+                  {flightLoading ? 'Loading…' : '↻ Refresh'}
+                </button>
               </div>
+              {(() => {
+                const f = flightData || booking.flight
+                const dep = f.departure ? new Date(f.departure) : null
+                const arr = f.arrival ? new Date(f.arrival) : null
+                const fmtHM = (d: Date) => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours() >= 12 ? 'PM' : 'AM'}`
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 10, alignItems: 'center', padding: '12px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}` }}>
+                    <Stack gap={3}>
+                      <Mono size={18} weight={700}>{dep ? fmtHM(dep) : '—'}</Mono>
+                      <span style={{ fontSize: 11, color: YL.ink2 }}>Departure</span>
+                      {dep && <span style={{ fontSize: 10.5, color: YL.ink3 }}>{dep.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+                    </Stack>
+                    <Stack gap={4} style={{ alignItems: 'center' }}>
+                      <span style={{ width: 16, height: 16, color: YL.ink2, display: 'flex' }}>{Icons.flight}</span>
+                      <Mono size={12} color={YL.ink}>{f.flightNumber}</Mono>
+                      {f.airline && <span style={{ fontSize: 10, color: YL.ink3 }}>{f.airline}</span>}
+                    </Stack>
+                    <Stack gap={3} style={{ textAlign: 'right' }}>
+                      <Mono size={18} weight={700} style={{ display: 'block' }}>{arr ? fmtHM(arr) : '—'}</Mono>
+                      <span style={{ fontSize: 11, color: YL.ink2 }}>Arrival</span>
+                      {arr && <span style={{ fontSize: 10.5, color: YL.ink3 }}>{arr.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+                    </Stack>
+                    {f.status && (
+                      <div style={{ gridColumn: '1 / -1', borderTop: `1px dashed ${YL.line}`, paddingTop: 8, fontSize: 11.5, color: YL.ink2 }}>
+                        Status: <span style={{ color: YL.greenInk, fontWeight: 500, textTransform: 'capitalize' }}>{f.status}</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )}
 

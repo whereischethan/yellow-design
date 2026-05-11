@@ -106,6 +106,9 @@ export const generatePaymentLink = (id: string) =>
 
 export const getStats = () => adminFetch('/stats')
 
+export const lookupFlight = (flightNumber: string, date?: string) =>
+  adminFetch(`/flights/lookup?flight_number=${encodeURIComponent(flightNumber)}${date ? `&date=${date}` : ''}`)
+
 export const getTeam        = ()                  => adminFetch('/team')
 export const addTeamMember  = (body: object)      => adminFetch('/team', { method: 'POST', body: JSON.stringify(body) })
 export const removeTeamMember = (id: string)      => adminFetch(`/team/${id}`, { method: 'DELETE' })

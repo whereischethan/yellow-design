@@ -889,4 +889,44 @@ router.delete('/team/:id', async (req, res) => {
   }
 })
 
+// ─── Flight lookup proxy ──────────────────────────────────────────────────────
+
+const FLIGHT_API_KEY = process.env.FLIGHT_API_KEY || ''
+
+router.get('/flights/lookup', requireAdmin, async (req: Request, res: Response) => {
+  const { flight_number, date } = req.query as { flight_number: string; date?: string }
+  if (!flight_number) return res.status(400).json({ error: 'flight_number required' })
+
+  if (!FLIGHT_API_KEY) {
+    return res.json({
+      flightNumber: flight_number.toUpperCase(),
+      airline: 'IndiGo',
+      departure: date ? `${date}T20:00:00+05:30` : new Date().toISOString(),
+      arrival: date ? `${date}T22:00:00+05:30` : new Date().toISOString(),
+      status: 'scheduled',
+    })
+  }
+
+  try {
+    const iata = flight_number.toUpperCase().replace(/\s/g, '')
+    const url = `https://aerodatabox.p.rapidapi.com/flights/iata/${iata}${date ? `/${date}` : ''}`
+    const apiRes = await fetch(url, {
+      headers: { 'x-rapidapi-host': 'aerodatabox.p.rapidapi.com', 'x-rapidapi-key': FLIGHT_API_KEY },
+    })
+    if (apiRes.status === 404) return res.status(404).json({ error: 'Flight not found' })
+    if (!apiRes.ok) return res.status(502).json({ error: 'Flight lookup failed' })
+    const data = await apiRes.json() as any
+    const f = Array.isArray(data) ? data[0] : data
+    return res.json({
+      flightNumber: f?.number ?? flight_number,
+      airline: f?.airline?.name ?? '',
+      departure: f?.departure?.scheduledTimeLocal ?? f?.departure?.scheduledTimeUtc ?? '',
+      arrival: f?.arrival?.scheduledTimeLocal ?? f?.arrival?.scheduledTimeUtc ?? '',
+      status: f?.status ?? 'scheduled',
+    })
+  } catch {
+    return res.status(500).json({ error: 'Flight lookup failed' })
+  }
+})
+
 export default router

@@ -1,4 +1,5 @@
 import React from 'react'
+import ReactDOM from 'react-dom'
 import type { Driver, Customer } from '../types'
 import { createBooking, createDriver, createVehicle, calcPricing } from '../api'
 import { YL, Icons, Stack, Button, Input, Avatar, Mono, ModalShell, ModalHeader, Stepper, FieldLabel, TilePicker, FormInput } from '../components/ui'
@@ -17,9 +18,20 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
 }) {
   const [suggestions, setSuggestions] = React.useState<PlaceSuggestion[]>([])
   const [open, setOpen] = React.useState(false)
-  const [dropdownRect, setDropdownRect] = React.useState<{ top: number; left: number; width: number } | null>(null)
+  const [anchor, setAnchor] = React.useState<{ top: number; left: number; width: number } | null>(null)
   const wrapperRef = React.useRef<HTMLDivElement>(null)
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const updateAnchor = () => {
+    if (!wrapperRef.current) return
+    // Walk up the DOM to find the nearest element WITHOUT a CSS transform so
+    // we can compute viewport-relative coordinates ourselves. getBoundingClientRect
+    // already gives viewport coords, but position:fixed children of a transformed
+    // ancestor are positioned relative to that ancestor — so we portal the dropdown
+    // to document.body to escape transforms entirely.
+    const rect = wrapperRef.current.getBoundingClientRect()
+    setAnchor({ top: rect.bottom + window.scrollY + 2, left: rect.left + window.scrollX, width: rect.width })
+  }
 
   const fetchSuggestions = async (text: string) => {
     if (text.length < 2) { setSuggestions([]); setOpen(false); return }
@@ -42,13 +54,7 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
         .map((s: any) => ({ placeId: s.placePrediction?.placeId, description: s.placePrediction?.text?.text }))
         .filter((s: PlaceSuggestion) => s.placeId && s.description)
       setSuggestions(items)
-      if (items.length > 0 && wrapperRef.current) {
-        const rect = wrapperRef.current.getBoundingClientRect()
-        setDropdownRect({ top: rect.bottom + 2, left: rect.left, width: rect.width })
-        setOpen(true)
-      } else {
-        setOpen(false)
-      }
+      if (items.length > 0) { updateAnchor(); setOpen(true) } else { setOpen(false) }
     } catch {
       setSuggestions([]); setOpen(false)
     }
@@ -67,25 +73,17 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
     setOpen(false)
   }
 
-  return (
-    <div ref={wrapperRef} style={{ position: 'relative' }}>
-      <FormInput
-        label={label} required={required}
-        placeholder="Area, street, Bangalore"
-        value={value}
-        onChange={(e: any) => handleChange(e.target.value)}
-        icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.pin}</span>}
-      />
-      {open && suggestions.length > 0 && dropdownRect && (
+  const dropdown = open && suggestions.length > 0 && anchor
+    ? ReactDOM.createPortal(
         <div style={{
-          position: 'fixed',
-          top: dropdownRect.top,
-          left: dropdownRect.left,
-          width: dropdownRect.width,
+          position: 'absolute',
+          top: anchor.top,
+          left: anchor.left,
+          width: anchor.width,
           background: YL.card,
           border: `1px solid ${YL.line}`,
           borderRadius: 8,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
           zIndex: 9999,
           maxHeight: 220,
           overflow: 'auto',
@@ -102,8 +100,21 @@ function PlacesInput({ label, value, onChange, onSelect, required }: {
               {s.description}
             </button>
           ))}
-        </div>
-      )}
+        </div>,
+        document.body
+      )
+    : null
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative' }}>
+      <FormInput
+        label={label} required={required}
+        placeholder="Area, street, Bangalore"
+        value={value}
+        onChange={(e: any) => handleChange(e.target.value)}
+        icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.pin}</span>}
+      />
+      {dropdown}
     </div>
   )
 }

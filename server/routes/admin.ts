@@ -231,6 +231,17 @@ router.get('/bookings', async (_req, res) => {
   }
 })
 
+router.get('/bookings/:id', async (req, res) => {
+  try {
+    const row = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
+    if (!row) return res.status(404).json({ error: 'Booking not found' })
+    const user = row.userId ? await prisma.user.findUnique({ where: { id: row.userId }, select: { id: true, name: true, phone: true } }) : null
+    res.json({ booking: buildBooking({ ...row, user }) })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 router.post('/bookings', async (req, res) => {
   try {
     const { tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0,

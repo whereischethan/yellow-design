@@ -70,6 +70,7 @@ export const verifyAdminKey = (key: string) =>
   fetch('/admin/me', { headers: { 'x-admin-key': key } }).then(r => r.ok)
 
 export const getBookings   = ()             => adminFetch('/bookings')
+export const getBooking    = (id: string)   => adminFetch(`/bookings/${id}`)
 export const patchBooking  = (id: string, body: object) =>
   adminFetch(`/bookings/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const createBooking = (body: object) =>

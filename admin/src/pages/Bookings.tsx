@@ -1,6 +1,6 @@
 import React from 'react'
 import type { Booking, Driver, Vehicle } from '../types'
-import { patchBooking, generatePaymentLink, lookupFlight } from '../api'
+import { patchBooking, generatePaymentLink, lookupFlight, getBooking } from '../api'
 import {
   YL, STATUS_STYLE, Icons, Mono, Stack, Button, Input, Chip, Card,
   PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, formatPhone, useIsMobile,
@@ -377,22 +377,35 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
   const [copied, setCopied] = React.useState(false)
   const [flightData, setFlightData] = React.useState<any>(null)
   const [flightLoading, setFlightLoading] = React.useState(false)
+  const [flightError, setFlightError] = React.useState('')
+  const [refreshingBooking, setRefreshingBooking] = React.useState(false)
 
   React.useEffect(() => {
     setLinkUrl(booking?.razorpayLinkUrl ?? null)
     setLinkError('')
     setCopied(false)
     setFlightData(null)
+    setFlightError('')
     // Auto-fetch flight if flightNumber exists but departure is missing
     if (booking?.flight?.flightNumber && !booking.flight.departure) {
       const date = booking.pickup?.dateTime ? booking.pickup.dateTime.split('T')[0] : undefined
       setFlightLoading(true)
       lookupFlight(booking.flight.flightNumber, date)
         .then(setFlightData)
-        .catch(() => {})
+        .catch((e: any) => setFlightError(e.message || 'Flight lookup failed'))
         .finally(() => setFlightLoading(false))
     }
   }, [booking?.id])
+
+  const handleRefreshBooking = async () => {
+    if (!booking) return
+    setRefreshingBooking(true)
+    try {
+      const r: any = await getBooking(booking.id)
+      onUpdate(r.booking)
+    } catch {}
+    finally { setRefreshingBooking(false) }
+  }
 
   if (!booking) return null
 
@@ -583,10 +596,13 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                 <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600 }}>Flight</div>
                 <button onClick={() => {
+                  if (!booking.flight?.flightNumber) return
                   const date = booking.pickup?.dateTime ? booking.pickup.dateTime.split('T')[0] : undefined
-                  setFlightLoading(true)
-                  lookupFlight(booking.flight!.flightNumber, date)
-                    .then(setFlightData).catch(() => {}).finally(() => setFlightLoading(false))
+                  setFlightLoading(true); setFlightError('')
+                  lookupFlight(booking.flight.flightNumber, date)
+                    .then(setFlightData)
+                    .catch((e: any) => setFlightError(e.message || 'Flight lookup failed'))
+                    .finally(() => setFlightLoading(false))
                 }} style={{ background: 'none', border: `1px solid ${YL.line}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 11, color: YL.ink2, fontFamily: 'inherit' }}>
                   {flightLoading ? 'Loading…' : '↻ Refresh'}
                 </button>
@@ -621,13 +637,19 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
                   </div>
                 )
               })()}
+              {flightError && <div style={{ marginTop: 8, fontSize: 11.5, color: YL.gulmohar }}>{flightError}</div>}
             </div>
           )}
 
           {/* Pricing */}
           {booking.pricing && (
             <div style={{ padding: '18px 24px', borderBottom: `1px solid ${YL.line}` }}>
-              <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600, marginBottom: 14 }}>Pricing</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600 }}>Pricing</div>
+                <button onClick={handleRefreshBooking} style={{ background: 'none', border: `1px solid ${YL.line}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 11, color: YL.ink2, fontFamily: 'inherit' }}>
+                  {refreshingBooking ? 'Loading…' : '↻ Refresh'}
+                </button>
+              </div>
               <Stack gap={9}>
                 {(() => {
                   const p = booking.pricing

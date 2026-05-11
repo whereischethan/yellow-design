@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom'
 import type { Driver, Customer } from '../types'
 import { createBooking, createDriver, createVehicle, calcPricing } from '../api'
-import { YL, Icons, Stack, Button, Input, Avatar, Mono, ModalShell, ModalHeader, Stepper, FieldLabel, TilePicker, FormInput } from '../components/ui'
+import { YL, Icons, Stack, Button, Input, Avatar, Mono, ModalShell, ModalHeader, Stepper, FieldLabel, TilePicker, FormInput, DateTimePicker } from '../components/ui'
 
 const PLACES_KEY = (import.meta as any).env?.VITE_GOOGLE_API_KEY || ''
 const BLR_CENTER = { latitude: 12.9716, longitude: 77.5946 }
@@ -377,9 +377,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers, onCreate
               ]}/>
             </Stack>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <FormInput label="Date & time" required placeholder="YYYY-MM-DDTHH:MM" value={dateTime}
-                onChange={(e: any) => setDateTime(e.target.value)} type="datetime-local"
-                icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.clock}</span>}/>
+              <DateTimePicker label="Date & time" required value={dateTime} onChange={setDateTime}/>
               <FormInput label="Flight number" hint="optional" placeholder="6E 184" value={flightNumber}
                 onChange={(e: any) => setFlightNumber(e.target.value)}
                 icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.flight}</span>}/>
@@ -438,15 +436,15 @@ export function CreateBookingModal({ open, onClose, drivers, customers, onCreate
                 ['Direction', tripType === 'drop' ? `Drop → BLR ${terminal}` : `Pickup ← BLR ${terminal}`],
                 ['Address', address || '—'],
                 ...stops.filter(s => s.address).map((s, i) => [`Stop ${i + 1}`, s.address]),
-                ['Date & time', dateTime || '—'],
+                ['Date & time', dateTime ? (() => { const d = new Date(dateTime); const h = d.getHours(), m = d.getMinutes(), ap = h>=12?'PM':'AM'; return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]} ${d.getFullYear()} · ${h%12||12}:${String(m).padStart(2,'0')} ${ap}` })() : '—'],
                 ...(flightNumber ? [['Flight', flightNumber]] : []),
                 ['Passengers', `${passengers} pax · ${bags} bags`],
                 ['Vehicle', vehicleType === 'yellowSky' ? 'Yellow Sky' : vehicleType],
                 ...(assignedDriverId ? [['Driver', drivers.find(d => d.id === assignedDriverId)?.name || '—']] : []),
               ].map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderBottom: `1px solid ${YL.line}`, fontSize: 12.5 }}>
-                  <span style={{ color: YL.ink2 }}>{k}</span>
-                  <span style={{ color: YL.ink, fontWeight: 500 }}>{v}</span>
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '10px 14px', borderBottom: `1px solid ${YL.line}`, fontSize: 12.5 }}>
+                  <span style={{ color: YL.ink2, flexShrink: 0, minWidth: 90 }}>{k}</span>
+                  <span style={{ color: YL.ink, fontWeight: 500, textAlign: 'right', wordBreak: 'break-word' }}>{v}</span>
                 </div>
               ))}
               <div style={{ padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: YL.yellow }}>

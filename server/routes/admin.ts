@@ -7,7 +7,7 @@ import { genTripCode } from '../lib/tripcode'
 
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || ''
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''
-const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || ''
+const RAZORPAY_WEBHOOK_SECRET = (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim()
 
 const router = Router()
 
@@ -150,7 +150,7 @@ router.post('/razorpay-webhook', async (req: Request, res: Response) => {
       if (linkId) {
         await prisma.booking.updateMany({
           where: { razorpayLinkId: linkId },
-          data: { paymentStatus: 'paid', razorpayPaymentId: paymentId ?? null },
+          data: { paymentStatus: 'paid', paymentMethod: 'upi', razorpayPaymentId: paymentId ?? null },
         })
       }
     }
@@ -200,6 +200,7 @@ function buildBooking(row: any) {
     vehicleType: row.vehicleType,
     passengers: row.passengerCount,
     luggage: row.bags,
+    cabinBags: row.cabinBags ?? 0,
     pickup: row.pickupJson ? JSON.parse(row.pickupJson) : null,
     drop: row.dropJson ? JSON.parse(row.dropJson) : null,
     stops: row.stopsJson ? JSON.parse(row.stopsJson) : null,
@@ -210,6 +211,7 @@ function buildBooking(row: any) {
     assignedDriver: row.assignedDriverJson ? JSON.parse(row.assignedDriverJson) : null,
     assignedVehicle: row.assignedVehicleJson ? JSON.parse(row.assignedVehicleJson) : null,
     paymentStatus: row.paymentStatus || 'pending',
+    paymentMethod: row.paymentMethod ?? null,
     razorpayPaymentId: row.razorpayPaymentId ?? null,
     razorpayLinkId: row.razorpayLinkId ?? null,
     razorpayLinkUrl: row.razorpayLinkUrl ?? null,
@@ -244,23 +246,37 @@ router.get('/bookings/:id', async (req, res) => {
 
 router.post('/bookings', async (req, res) => {
   try {
-    const { tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0,
-      pickup, drop, stops, flight, pricing, guestName, guestPhone, userId } = req.body
+    const { tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0, cabinBags = 0,
+      pickup, drop, stops, flight, pricing, guestName, guestPhone, userId,
+      assignedDriver, assignedVehicle } = req.body
     if (!pickup || !drop || !pricing) return res.status(400).json({ error: 'pickup, drop, pricing required' })
 
     const id = randomUUID()
     const tripCode = await genTripCode()
+    const bookingStatus = assignedDriver ? 'assigned' : 'confirmed'
+
+    // Resolve userId: explicit > find/create by guestPhone > null
+    let resolvedUserId: string | null = userId || null
+    if (!resolvedUserId && guestPhone) {
+      const normalizedPhone = guestPhone.replace(/\D/g, '').replace(/^0+/, '')
+      let guestUser = await prisma.user.findFirst({ where: { phone: { endsWith: normalizedPhone.slice(-10) } } })
+      if (!guestUser) {
+        guestUser = await prisma.user.create({ data: { id: randomUUID(), phone: normalizedPhone, name: guestName ?? null } })
+      }
+      resolvedUserId = guestUser.id
+    }
 
     const row = await prisma.booking.create({
       data: {
         id,
         tripCode,
-        userId: userId || 'admin',
+        userId: resolvedUserId,
         tripType,
         vehicleType,
         price: pricing.totalPrice ?? 0,
         passengerCount: passengers,
         bags: luggage,
+        cabinBags,
         pickupJson: JSON.stringify(pickup),
         dropJson: JSON.stringify(drop),
         stopsJson: stops?.length ? JSON.stringify(stops) : null,
@@ -268,23 +284,29 @@ router.post('/bookings', async (req, res) => {
         pricingJson: JSON.stringify(pricing),
         guestName: guestName ?? null,
         guestPhone: guestPhone ?? null,
-        status: 'confirmed',
+        assignedDriverJson: assignedDriver ? JSON.stringify(assignedDriver) : null,
+        assignedVehicleJson: assignedVehicle ? JSON.stringify(assignedVehicle) : null,
+        status: bookingStatus,
         paymentStatus: 'pending',
       },
     })
+
+    // Driver status unchanged on creation — they're only marked on-trip when the trip goes in_progress
+
     // Fire confirmation SMS (non-blocking)
     ;(async () => {
       try {
-        const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { phone: true } }) : null
+        const user = resolvedUserId ? await prisma.user.findUnique({ where: { id: resolvedUserId }, select: { phone: true } }) : null
         const phones = collectPhones(user?.phone, guestPhone ?? null)
         const pickupDateTime = pickup?.dateTime
         for (const phone of phones) {
-          sendStatusSms(phone, row.tripCode, 'confirmed', { tripType, pickupDateTime }).catch(() => {})
+          sendStatusSms(phone, row.tripCode, bookingStatus, { tripType, pickupDateTime }).catch(() => {})
         }
       } catch {}
     })()
 
-    res.json({ booking: buildBooking(row) })
+    const userForBooking = resolvedUserId ? await prisma.user.findUnique({ where: { id: resolvedUserId }, select: { id: true, name: true, phone: true } }) : null
+    res.json({ booking: buildBooking({ ...row, user: userForBooking }) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -295,26 +317,51 @@ router.patch('/bookings/:id', async (req, res) => {
     const row = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
     if (!row) return res.status(404).json({ error: 'Booking not found' })
 
-    const { status, assignedDriver, assignedVehicle } = req.body
+    const { status, assignedDriver, assignedVehicle, paymentStatus, paymentMethod,
+            pickupDateTime, guestName, guestPhone, price } = req.body
     const data: any = {}
 
     if (status !== undefined) data.status = status
     if (assignedDriver !== undefined) data.assignedDriverJson = assignedDriver ? JSON.stringify(assignedDriver) : null
     if (assignedVehicle !== undefined) data.assignedVehicleJson = assignedVehicle ? JSON.stringify(assignedVehicle) : null
+    if (paymentStatus !== undefined) data.paymentStatus = paymentStatus
+    if (paymentMethod !== undefined) data.paymentMethod = paymentMethod
+    if (guestName !== undefined) data.guestName = guestName || null
+    if (guestPhone !== undefined) data.guestPhone = guestPhone || null
+    if (price !== undefined) data.price = Number(price)
+    if (pickupDateTime !== undefined && row.pickupJson) {
+      const pickup = JSON.parse(row.pickupJson)
+      pickup.dateTime = pickupDateTime
+      data.pickupJson = JSON.stringify(pickup)
+    }
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Nothing to update' })
 
     const updated = await prisma.booking.update({ where: { id: String(req.params.id) }, data })
 
     if (assignedDriver?.id) {
-      await prisma.driver.update({ where: { id: assignedDriver.id }, data: { status: 'on-trip' } }).catch(() => {})
+      const activeStatuses = ['in_progress', 'arrived', 'enroute']
+      const driverStatus = (status === 'completed' || status === 'cancelled') ? 'available'
+        : activeStatuses.includes(status) ? 'on-trip'
+        : undefined
+      if (driverStatus) {
+        await prisma.driver.update({ where: { id: assignedDriver.id }, data: { status: driverStatus } }).catch(() => {})
+      }
+    } else if (status === 'completed' || status === 'cancelled') {
+      const existingDriverJson = updated.assignedDriverJson ?? row.assignedDriverJson
+      if (existingDriverJson) {
+        const existingDriver = JSON.parse(existingDriverJson)
+        if (existingDriver?.id) {
+          await prisma.driver.update({ where: { id: existingDriver.id }, data: { status: 'available' } }).catch(() => {})
+        }
+      }
     }
 
     // Fire SMS notifications (non-blocking)
     if (status && ['confirmed', 'assigned', 'in_progress', 'arrived', 'completed', 'cancelled'].includes(status)) {
       ;(async () => {
         try {
-          const user = await prisma.user.findUnique({ where: { id: updated.userId }, select: { phone: true } })
+          const user = updated.userId ? await prisma.user.findUnique({ where: { id: updated.userId }, select: { phone: true } }) : null
           const phones = collectPhones(user?.phone, updated.guestPhone)
           const driver = assignedDriver ?? (updated.assignedDriverJson ? JSON.parse(updated.assignedDriverJson) : null)
           const vehicle = updated.assignedVehicleJson ? JSON.parse(updated.assignedVehicleJson) : null
@@ -332,7 +379,61 @@ router.patch('/bookings/:id', async (req, res) => {
       })()
     }
 
+    // Increment driver and vehicle trip count on completion
+    if (status === 'completed') {
+      const driverJson = updated.assignedDriverJson ?? row.assignedDriverJson
+      if (driverJson) {
+        const d = JSON.parse(driverJson)
+        if (d?.id) {
+          await prisma.driver.update({ where: { id: d.id }, data: { trips: { increment: 1 } } }).catch(() => {})
+        }
+      }
+      const vehicleJson = updated.assignedVehicleJson ?? row.assignedVehicleJson
+      if (vehicleJson) {
+        const v = JSON.parse(vehicleJson)
+        if (v?.licensePlate) {
+          await prisma.vehicle.updateMany({ where: { plate: v.licensePlate }, data: { trips: { increment: 1 } } }).catch(() => {})
+        }
+      }
+    }
+
+    // Award referrer ₹100 after referee's first completed ride
+    if (status === 'completed' && updated.userId) {
+      ;(async () => {
+        try {
+          const rider = await prisma.user.findUnique({
+            where: { id: updated.userId! },
+            select: { referredById: true },
+          })
+          if (rider?.referredById) {
+            const completedCount = await prisma.booking.count({
+              where: { userId: updated.userId!, status: 'completed' },
+            })
+            if (completedCount === 1) {
+              await prisma.user.update({
+                where: { id: rider.referredById },
+                data: { referralCredits: { increment: 100 } },
+              })
+            }
+          }
+        } catch (err) {
+          console.error('[REFERRAL] Failed to award referrer credits:', err)
+        }
+      })()
+    }
+
     res.json({ booking: buildBooking(updated) })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Delete booking ───────────────────────────────────────────────────────────
+
+router.delete('/bookings/:id', async (req, res) => {
+  try {
+    await prisma.booking.delete({ where: { id: String(req.params.id) } })
+    res.json({ ok: true })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -387,12 +488,66 @@ router.post('/bookings/:id/payment-link', async (req, res) => {
   }
 })
 
+// ─── Sync payment status from Razorpay ────────────────────────────────────────
+
+router.post('/bookings/:id/sync-payment', async (req, res) => {
+  try {
+    const row = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
+    if (!row) return res.status(404).json({ error: 'Booking not found' })
+    if (!row.razorpayLinkId) return res.status(400).json({ error: 'No payment link on this booking' })
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) return res.status(500).json({ error: 'Razorpay not configured' })
+
+    const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')
+    const r = await fetch(`https://api.razorpay.com/v1/payment_links/${row.razorpayLinkId}`, {
+      headers: { 'Authorization': `Basic ${auth}` },
+    })
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      return res.status(502).json({ error: `Razorpay error: ${body}` })
+    }
+    const data = await r.json() as any
+
+    if (data.status === 'paid') {
+      const paymentId = (data.payments?.[0]?.razorpay_payment_id) ?? null
+      const updated = await prisma.booking.update({
+        where: { id: row.id },
+        data: { paymentStatus: 'paid', paymentMethod: 'upi', razorpayPaymentId: paymentId },
+      })
+      return res.json({ booking: buildBooking(updated), synced: true })
+    }
+
+    // Not yet paid — return current booking unchanged
+    res.json({ booking: buildBooking(row), synced: false })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Drivers ──────────────────────────────────────────────────────────────────
 
 router.get('/drivers', async (_req, res) => {
   try {
     const rows = await prisma.driver.findMany({ orderBy: { name: 'asc' } })
     res.json({ drivers: rows })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.get('/drivers/:id/bookings', async (req, res) => {
+  try {
+    const driverId = String(req.params.id)
+    const rows = await prisma.booking.findMany({
+      where: { assignedDriverJson: { contains: driverId } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+    const bookings = rows.map(buildBooking)
+    const completed = bookings.filter(b => b.status === 'completed')
+    const totalEarnings = completed.reduce((sum, b) => sum + (b.pricing?.totalPrice ?? 0), 0)
+    // Sync trips count so the list stays accurate
+    await prisma.driver.update({ where: { id: driverId }, data: { trips: completed.length } }).catch(() => {})
+    res.json({ bookings, completedCount: completed.length, totalEarnings })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -532,6 +687,18 @@ router.patch('/vehicles/:id', async (req, res) => {
       data,
       include: { driver: { select: { name: true, status: true, phone: true } } },
     })
+
+    // Sync driver records when driver assignment changes
+    if (req.body.driver_id !== undefined) {
+      const newDriverId = req.body.driver_id
+      if (row.driverId && row.driverId !== newDriverId) {
+        await prisma.driver.update({ where: { id: row.driverId }, data: { plate: null, vehicle: null } }).catch(() => {})
+      }
+      if (newDriverId) {
+        await prisma.driver.update({ where: { id: newDriverId }, data: { plate: updated.plate, vehicle: `${updated.make} ${updated.model}` } }).catch(() => {})
+      }
+    }
+
     res.json({
       vehicle: {
         ...updated,
@@ -546,16 +713,49 @@ router.patch('/vehicles/:id', async (req, res) => {
   }
 })
 
+router.post('/vehicles/sync-trips', async (req, res) => {
+  try {
+    const vehicles = await prisma.vehicle.findMany({ select: { id: true, plate: true } })
+    for (const v of vehicles) {
+      const count = await prisma.booking.count({
+        where: { assignedVehicleJson: { contains: v.plate }, status: 'completed' },
+      })
+      await prisma.vehicle.update({ where: { id: v.id }, data: { trips: count } })
+    }
+    res.json({ synced: vehicles.length })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Customers ────────────────────────────────────────────────────────────────
 
 router.get('/customers', async (_req, res) => {
   try {
     const rows = await prisma.user.findMany({ orderBy: { createdAt: 'desc' } })
-    const tripCounts = await prisma.booking.groupBy({
-      by: ['userId'],
-      _count: { id: true },
-    })
+    const tripCounts = await prisma.booking.groupBy({ by: ['userId'], _count: { id: true } })
     const countMap = new Map(tripCounts.map(t => [t.userId, t._count.id]))
+
+    // Referral data — fetched separately to stay resilient if columns are missing
+    let referrerMap = new Map<string, { id: string; name: string | null; phone: string }>()
+    let referralCountMap = new Map<string, number>()
+    try {
+      const referred = await prisma.user.findMany({
+        where: { referredById: { not: null } },
+        select: { id: true, referredById: true },
+      })
+      referred.forEach(u => {
+        referralCountMap.set(u.referredById!, (referralCountMap.get(u.referredById!) ?? 0) + 1)
+      })
+      const referrerIds = [...new Set(referred.map(u => u.referredById!))]
+      if (referrerIds.length) {
+        const referrers = await prisma.user.findMany({
+          where: { id: { in: referrerIds } },
+          select: { id: true, name: true, phone: true },
+        })
+        referrers.forEach(r => referrerMap.set(r.id, r))
+      }
+    } catch {}
 
     const customers = rows.map(u => ({
       id: u.id,
@@ -564,6 +764,12 @@ router.get('/customers', async (_req, res) => {
       email: u.email,
       created_at: u.createdAt,
       trip_count: countMap.get(u.id) ?? 0,
+      referral_code: (u as any).referralCode ?? null,
+      referred_by: (u as any).referredById
+        ? (referrerMap.get((u as any).referredById) ?? null)
+        : null,
+      referral_count: referralCountMap.get(u.id) ?? 0,
+      referral_credits: (u as any).referralCredits ?? 0,
     }))
     res.json({ customers })
   } catch (e: any) {
@@ -585,6 +791,24 @@ router.patch('/customers/:id', async (req, res) => {
 
     const updated = await prisma.user.update({ where: { id: String(req.params.id) }, data })
     res.json({ customer: { id: updated.id, phone: updated.phone, name: updated.name, email: updated.email, created_at: updated.createdAt } })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.post('/customers/generate-referral-codes', async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({ where: { referralCode: null } })
+    let generated = 0
+    for (const user of users) {
+      const suffix = user.id.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase()
+      const code = 'YLW' + suffix
+      try {
+        await prisma.user.update({ where: { id: user.id }, data: { referralCode: code } })
+        generated++
+      } catch {}
+    }
+    res.json({ generated, total: users.length })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -935,9 +1159,11 @@ router.get('/flights/lookup', requireAdmin, async (req: Request, res: Response) 
     return res.json({
       flightNumber: f?.number ?? flight_number,
       airline: f?.airline?.name ?? '',
-      departure: f?.departure?.scheduledTimeLocal ?? f?.departure?.scheduledTimeUtc ?? '',
-      arrival: f?.arrival?.scheduledTimeLocal ?? f?.arrival?.scheduledTimeUtc ?? '',
+      departure: f?.departure?.scheduledTime?.local ?? f?.departure?.scheduledTime?.utc ?? '',
+      arrival: f?.arrival?.revisedTime?.local ?? f?.arrival?.scheduledTime?.local ?? f?.arrival?.scheduledTime?.utc ?? '',
       status: f?.status ?? 'scheduled',
+      terminal: f?.arrival?.terminal ?? '',
+      gate: f?.arrival?.gate ?? '',
     })
   } catch (e: any) {
     return res.status(500).json({ error: `Flight lookup error: ${e?.message ?? 'unknown'}` })

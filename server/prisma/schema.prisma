@@ -13,7 +13,13 @@ model User {
   name      String?
   email     String?
   role      String   @default("rider")
-  createdAt String   @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  createdAt       String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
+  referralCode    String? @unique @map("referral_code")
+  referredById    String? @map("referred_by_id")
+  referralCredits Int     @default(0) @map("referral_credits")
+
+  referredBy User?  @relation("Referrals", fields: [referredById], references: [id])
+  referrals  User[] @relation("Referrals")
 
   refreshTokens RefreshToken[]
   bookings      Booking[]
@@ -48,13 +54,14 @@ model RefreshToken {
 model Booking {
   id                  String  @id
   tripCode            String  @unique @map("trip_code")
-  userId              String  @map("user_id")
+  userId              String? @map("user_id")
   status              String  @default("confirmed")
   tripType            String? @map("trip_type")
   vehicleType         String? @default("yellowSky") @map("vehicle_type")
   price               Int?    @default(0)
   passengerCount      Int?    @default(1) @map("passenger_count")
   bags                Int?    @default(0)
+  cabinBags           Int?    @default(0) @map("cabin_bags")
   meetAndGreet        Int?    @default(0) @map("meet_and_greet")
   petFriendly         Int?    @default(0) @map("pet_friendly")
   pickupJson          String? @map("pickup_json")
@@ -70,10 +77,11 @@ model Booking {
   razorpayLinkId      String? @map("razorpay_link_id")
   razorpayLinkUrl     String? @map("razorpay_link_url")
   paymentStatus       String  @default("paid") @map("payment_status")
+  paymentMethod       String? @map("payment_method")
   stopsJson           String? @map("stops_json")
   createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
 
   @@map("bookings")
 }

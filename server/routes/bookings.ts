@@ -114,7 +114,7 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
 
     // Create booking — trip code generated only here, after payment verified
     const {
-      tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0,
+      tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0, cabinBags = 0,
       pickup, drop, stops, flight, pricing, guestName, guestPhone,
     } = bookingData
 
@@ -135,6 +135,7 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
         price: pricing.totalPrice ?? pricing.basePrice ?? 0,
         passengerCount: passengers,
         bags: luggage,
+        cabinBags,
         pickupJson: JSON.stringify(pickup),
         dropJson: JSON.stringify(drop),
         stopsJson: stops?.length ? JSON.stringify(stops) : null,
@@ -172,6 +173,9 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
     return res.json({ booking: buildBookingResponse(booking) })
   } catch (e: any) {
     console.error('[PAYMENT] verify error:', e)
+    if (e?.code === 'P2003' && e?.meta?.field_name?.includes('user_id')) {
+      return res.status(401).json({ error: 'User account not found — please sign in again' })
+    }
     return res.status(500).json({ error: e.message || 'Payment verification failed' })
   }
 })
@@ -181,8 +185,38 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
 router.post('/lead', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { tripType, pickup, drop, stops, price, pickupTime, flight, pricing } = req.body
-    const id = randomUUID()
 
+    // Deduplicate: if the same user already has an open lead for the same pickup
+    // location + time (within a 30-min window), update it instead of inserting
+    const pickupPlaceId = pickup?.placeId ?? null
+    const windowStart = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+
+    const existing = pickupPlaceId && pickupTime
+      ? await prisma.lead.findFirst({
+          where: {
+            userId: req.userId!,
+            status: { in: ['new', 'called'] },
+            pickupTime,
+            quotedAt: { gte: windowStart },
+          },
+          orderBy: { quotedAt: 'desc' },
+        })
+      : null
+
+    if (existing) {
+      await prisma.lead.update({
+        where: { id: existing.id },
+        data: {
+          price: price ?? existing.price,
+          pricingJson: pricing ? JSON.stringify(pricing) : existing.pricingJson,
+          flight: flight ?? existing.flight,
+          quotedAt: new Date().toISOString(),
+        },
+      })
+      return res.json({ ok: true, id: existing.id })
+    }
+
+    const id = randomUUID()
     await prisma.lead.create({
       data: {
         id,
@@ -209,7 +243,7 @@ router.post('/lead', requireAuth, async (req: AuthRequest, res: Response) => {
 router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const {
-      tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0,
+      tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0, cabinBags = 0,
       pickup, drop, stops, flight, pricing,
       guestName, guestPhone,
     } = req.body
@@ -229,6 +263,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         price: pricing.totalPrice ?? pricing.basePrice ?? 0,
         passengerCount: passengers,
         bags: luggage,
+        cabinBags,
         pickupJson: JSON.stringify(pickup),
         dropJson: JSON.stringify(drop),
         stopsJson: stops?.length ? JSON.stringify(stops) : null,
@@ -242,6 +277,9 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
     return res.json({ booking: buildBookingResponse(booking) })
   } catch (e: any) {
+    if (e?.code === 'P2003' && e?.meta?.field_name?.includes('user_id')) {
+      return res.status(401).json({ error: 'User account not found — please sign in again' })
+    }
     return res.status(500).json({ error: e.message || 'Failed to create booking' })
   }
 })
@@ -302,6 +340,7 @@ function buildBookingResponse(row: any) {
     price: row.price,
     passengers: row.passengerCount,
     luggage: row.bags,
+    cabinBags: row.cabinBags ?? 0,
     pickup: row.pickupJson ? JSON.parse(row.pickupJson) : null,
     drop: row.dropJson ? JSON.parse(row.dropJson) : null,
     flight: row.flightJson ? JSON.parse(row.flightJson) : null,

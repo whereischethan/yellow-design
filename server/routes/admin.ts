@@ -224,10 +224,10 @@ function buildBooking(row: any) {
 router.get('/bookings', async (_req, res) => {
   try {
     const rows = await prisma.booking.findMany({ orderBy: { createdAt: 'desc' } })
-    const userIds = [...new Set(rows.map(r => r.userId))]
+    const userIds = [...new Set(rows.map(r => r.userId).filter((id): id is string => id != null))]
     const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
     const userMap = new Map(users.map(u => [u.id, u]))
-    res.json({ bookings: rows.map(r => buildBooking({ ...r, user: userMap.get(r.userId) ?? null })) })
+    res.json({ bookings: rows.map(r => buildBooking({ ...r, user: (r.userId ? userMap.get(r.userId) : null) ?? null })) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }

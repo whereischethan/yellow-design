@@ -26,11 +26,12 @@ interface Props {
   placeholder?: string
   value?: string
   onLocationSelect: (location: LocationData) => void
+  onChangeText?: (text: string) => void
   label?: string
   restrictToBangalore?: boolean
 }
 
-export default function LocationAutocomplete({ placeholder = 'Enter location', value, onLocationSelect, label, restrictToBangalore }: Props) {
+export default function LocationAutocomplete({ placeholder = 'Enter location', value, onLocationSelect, onChangeText, label, restrictToBangalore }: Props) {
   const [query, setQuery] = useState(value || '')
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [loading, setLoading] = useState(false)
@@ -109,6 +110,7 @@ export default function LocationAutocomplete({ placeholder = 'Enter location', v
 
   const handleChange = (text: string) => {
     setQuery(text)
+    onChangeText?.(text)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => fetchSuggestions(text), 300)
   }

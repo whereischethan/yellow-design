@@ -1,5 +1,5 @@
 import React from 'react'
-import { YL, Icons, Mono, Button, PageHeader, Avatar, fmtDate, Stack, ModalShell, ModalHeader } from '../components/ui'
+import { YL, Icons, Mono, Button, PageHeader, Avatar, fmtDate, Stack, ModalShell, ModalHeader, useIsMobile, formatPhone } from '../components/ui'
 import { getTeam, addTeamMember, removeTeamMember } from '../api'
 
 interface AdminUser {
@@ -104,6 +104,7 @@ function AddMemberModal({ open, onClose, onAdded }: { open: boolean; onClose: ()
 }
 
 export default function TeamPage({ selfPhone }: { selfPhone: string }) {
+  const isMobile = useIsMobile()
   const [users, setUsers] = React.useState<AdminUser[]>([])
   const [loading, setLoading] = React.useState(true)
   const [showAdd, setShowAdd] = React.useState(false)
@@ -137,15 +138,17 @@ export default function TeamPage({ selfPhone }: { selfPhone: string }) {
         actions={<Button variant="primary" icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.plus}</span>} onClick={() => setShowAdd(true)}>Add user</Button>}
       />
 
-      {/* Column headers */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 150px 120px 130px 44px',
-        gap: 12, padding: '10px 28px',
-        borderBottom: `1px solid ${YL.line}`, fontSize: 11, color: YL.ink2,
-        fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0, background: YL.bg,
-      }}>
-        <div>User</div><div>Phone</div><div>Role</div><div>Added</div><div/>
-      </div>
+      {/* Column headers — desktop only */}
+      {!isMobile && (
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 150px 120px 130px 44px',
+          gap: 12, padding: '10px 28px',
+          borderBottom: `1px solid ${YL.line}`, fontSize: 11, color: YL.ink2,
+          fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0, background: YL.bg,
+        }}>
+          <div>User</div><div>Phone</div><div>Role</div><div>Added</div><div/>
+        </div>
+      )}
 
       <div style={{ flex: 1, overflow: 'auto' }}>
         {loading ? (
@@ -154,6 +157,38 @@ export default function TeamPage({ selfPhone }: { selfPhone: string }) {
           const normalize = (p: string) => p.replace(/\D/g, '').slice(-10)
           const isSelf = normalize(u.phone) === normalize(selfPhone)
           const rs = ROLE_STYLES[u.role] || ROLE_STYLES.ops
+          if (isMobile) {
+            return (
+              <div key={u.id} style={{ padding: '13px 16px', borderBottom: `1px solid ${YL.line}`, background: YL.card, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Avatar name={u.name || u.phone} size={36} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: YL.ink }}>
+                      {u.name || <span style={{ color: YL.ink3, fontStyle: 'italic' }}>No name</span>}
+                    </span>
+                    {isSelf && <span style={{ fontSize: 10.5, color: YL.ink3 }}>(you)</span>}
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rs.bg, color: rs.fg, marginLeft: 'auto' }}>
+                      {u.role === 'superadmin' ? 'Super Admin' : 'Ops'}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 3, display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <Mono size={12} color={YL.ink2}>{formatPhone(u.phone)}</Mono>
+                    <span style={{ fontSize: 11, color: YL.ink3 }}>· {fmtDate(u.created_at)}</span>
+                  </div>
+                </div>
+                {!isSelf && u.role !== 'superadmin' && (
+                  <button
+                    onClick={() => handleRemove(u)}
+                    disabled={removing === u.id}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: YL.redInk, display: 'flex', padding: 6, borderRadius: 8, opacity: removing === u.id ? 0.4 : 1, flexShrink: 0 }}
+                    title="Remove access"
+                  >
+                    <span style={{ width: 16, height: 16, display: 'flex' }}>{Icons.close}</span>
+                  </button>
+                )}
+              </div>
+            )
+          }
           return (
             <div key={u.id} style={{
               display: 'grid', gridTemplateColumns: '1fr 150px 120px 130px 44px',
@@ -169,7 +204,7 @@ export default function TeamPage({ selfPhone }: { selfPhone: string }) {
                   </div>
                 </div>
               </div>
-              <Mono size={12}>{u.phone.replace(/\D/g, '').slice(-10)}</Mono>
+              <Mono size={12}>{formatPhone(u.phone)}</Mono>
               <div>
                 <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: rs.bg, color: rs.fg }}>
                   {u.role === 'superadmin' ? 'Super Admin' : 'Ops'}

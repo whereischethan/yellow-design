@@ -2,14 +2,14 @@ import React from 'react'
 import ReactDOM from 'react-dom'
 import type { Driver, Vehicle, Customer, Booking } from '../types'
 import { createBooking, createDriver, createVehicle, calcPricing, patchBooking } from '../api'
-import { YL, Icons, Stack, Button, Input, Avatar, Mono, ModalShell, ModalHeader, Stepper, FieldLabel, TilePicker, FormInput, DateTimePicker, DatePicker, toISTISO, fromISTISO } from '../components/ui'
+import { YL, Icons, Stack, Button, Input, Avatar, Mono, ModalShell, ModalHeader, Stepper, FieldLabel, TilePicker, FormInput, DateTimePicker, DatePicker, toISTISO, fromISTISO, formatPhone } from '../components/ui'
 
 const PLACES_KEY = (import.meta as any).env?.VITE_GOOGLE_API_KEY || ''
 const BLR_CENTER = { latitude: 12.9716, longitude: 77.5946 }
 
 interface PlaceSuggestion { placeId: string; description: string }
 
-function PlacesInput({ label, value, onChange, onSelect, required }: {
+export function PlacesInput({ label, value, onChange, onSelect, required }: {
   label: string
   value: string
   onChange: (v: string) => void
@@ -361,8 +361,6 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
   const [dateTime, setDateTime] = React.useState('')
   const [flightNumber, setFlightNumber] = React.useState('')
   const [passengers, setPassengers] = React.useState('1')
-  const [checkInBags, setCheckInBags] = React.useState('1')
-  const [cabinBags, setCabinBags] = React.useState('0')
 
   // Step 1 - Outstation
   const [outstationOrigin, setOutstationOrigin] = React.useState('')
@@ -377,11 +375,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
   const [hourlyPickupPlaceId, setHourlyPickupPlaceId] = React.useState('')
   const [hourlyDuration, setHourlyDuration] = React.useState(8)
 
-  const MAX_TOTAL_BAGS = 5
-  const checkInBagsNum = parseInt(checkInBags) || 0
-  const cabinBagsNum = parseInt(cabinBags) || 0
-  const adminCabinMax = Math.max(0, MAX_TOTAL_BAGS - checkInBagsNum)
-  const adminCheckInMax = Math.min(3, Math.max(0, MAX_TOTAL_BAGS - cabinBagsNum))
+
 
   // Step 2 - Vehicle
   const [vehicleType, setVehicleType] = React.useState('yellowSky')
@@ -438,8 +432,6 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
       setDateTime(b.pickup?.dateTime ? toISTISO(new Date(b.pickup.dateTime)) : '')
       setFlightNumber(b.flight?.flightNumber ?? '')
       setPassengers(String(b.passengers ?? 1))
-      setCheckInBags(String(b.luggage ?? 0))
-      setCabinBags(String(b.cabinBags ?? 0))
       setVehicleType(b.vehicleType ?? 'yellowSky')
       if (b.guestPhone) {
         setIsGuest(true)
@@ -471,7 +463,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
       setGuestName(''); setGuestPhone(''); setGuestCountryCode('+91')
       setBookingCategory('airport')
       setAddress(''); setAddressPlaceId(''); setStops([]); setDateTime('')
-      setFlightNumber(''); setPassengers('1'); setCheckInBags('1'); setCabinBags('0')
+      setFlightNumber(''); setPassengers('1')
       setOutstationOrigin(''); setOutstationOriginPlaceId(''); setOutstationDest(''); setOutstationDestPlaceId('')
       setOutstationTripKind('round'); setOutstationReturnDate('')
       setHourlyPickup(''); setHourlyPickupPlaceId(''); setHourlyDuration(8)
@@ -552,8 +544,6 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
         tripType: tripTypeStr,
         vehicleType,
         passengerCount: Number(passengers),
-        bags: Number(checkInBags),
-        cabinBags: Number(cabinBags),
         pickup: pickupObj,
         drop: dropObj,
         flight: bookingCategory === 'airport' && flightNumber ? { flightNumber, ...(editBooking.flight ?? {}) } : null,
@@ -626,7 +616,6 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
         tripType: tripTypeStr,
         vehicleType,
         passengers: parseInt(passengers),
-        luggage: checkInBagsNum,
         pickup: pickupObj,
         drop: dropObj,
         stops: stopLocs.length ? stopLocs : undefined,
@@ -701,7 +690,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                       <Avatar name={c.name || c.phone} size={28}/>
                       <Stack gap={2} style={{ flex: 1 }}>
                         <div style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{c.name || '—'}</div>
-                        <Mono size={11} color={YL.ink2}>{c.phone} · {c.trip_count} trips</Mono>
+                        <Mono size={11} color={YL.ink2}>{formatPhone(c.phone)} · {c.trip_count} trips</Mono>
                       </Stack>
                       {pickedCustomer?.id === c.id && <span style={{ color: YL.ink, fontSize: 14 }}>✓</span>}
                     </button>
@@ -835,10 +824,6 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <FormInput label="Passengers" type="number" placeholder="1" value={passengers} onChange={(e: any) => setPassengers(e.target.value)}/>
-                  <FormInput label="Check-in bags" hint={`max ${adminCheckInMax}`} type="number" placeholder="0" value={checkInBags}
-                    onChange={(e: any) => { const n = Math.min(parseInt(e.target.value) || 0, adminCheckInMax); setCheckInBags(String(n)); setCabinBags(c => String(Math.min(parseInt(c) || 0, MAX_TOTAL_BAGS - n))) }}/>
-                  <FormInput label="Cabin bags" hint={`max ${adminCabinMax}`} type="number" placeholder="0" value={cabinBags}
-                    onChange={(e: any) => { const n = Math.min(parseInt(e.target.value) || 0, adminCabinMax); setCabinBags(String(n)); setCheckInBags(c => String(Math.min(parseInt(c) || 0, 3, MAX_TOTAL_BAGS - n))) }}/>
                 </div>
               </>
             )}
@@ -869,7 +854,6 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <FormInput label="Passengers" type="number" placeholder="1" value={passengers} onChange={(e: any) => setPassengers(e.target.value)}/>
-                  <FormInput label="Bags" type="number" placeholder="0" value={checkInBags} onChange={(e: any) => setCheckInBags(e.target.value)}/>
                 </div>
               </>
             )}
@@ -965,7 +949,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                 const vehicleLabel: Record<string,string> = { yellowSky: 'Yellow Sky', yellowEarth: 'Yellow Earth', sedan: 'Sedan', suv: 'SUV' }
                 const baseRows: [string, string][] = [
                   ['Customer', pickedCustomer ? pickedCustomer.name || pickedCustomer.phone : (isGuest ? guestName || 'Guest' : '—')],
-                  ['Phone', pickedCustomer ? pickedCustomer.phone : (isGuest ? `${guestCountryCode} ${guestPhone}` : '—')],
+                  ['Phone', pickedCustomer ? formatPhone(pickedCustomer.phone) : (isGuest ? `${guestCountryCode} ${guestPhone}` : '—')],
                 ]
                 if (bookingCategory === 'airport') baseRows.push(
                   ['Type', 'Airport transfer'],
@@ -974,7 +958,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                   ...stops.filter(s => s.address).map((s, i) => [`Stop ${i + 1}`, s.address] as [string,string]),
                   ['Date & time', fmtDt(dateTime)],
                   ...( flightNumber ? [['Flight', flightNumber] as [string,string]] : []),
-                  ['Passengers', `${passengers} pax · ${checkInBags} check-in${cabinBagsNum > 0 ? ` · ${cabinBags} cabin` : ''}`],
+                  ['Passengers', `${passengers} pax`],
                 )
                 if (bookingCategory === 'outstation') baseRows.push(
                   ['Type', `Outstation · ${outstationTripKind === 'round' ? 'Round trip' : 'One-way'}`],
@@ -982,7 +966,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                   ['Destination', outstationDest || '—'],
                   ['Departure', fmtDt(dateTime)],
                   ...( outstationTripKind === 'round' ? [['Return', fmtDt(outstationReturnDate)] as [string,string]] : []),
-                  ['Passengers', `${passengers} pax · ${checkInBags} bags`],
+                  ['Passengers', `${passengers} pax`],
                 )
                 if (bookingCategory === 'hourly') baseRows.push(
                   ['Type', 'Hourly rental'],
@@ -1032,10 +1016,10 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                 {fareEditMode && (
                   <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
                     {[
-                      { label: 'Fare (ex-tax)', value: overrideFare, set: setOverrideFare, minus: false },
+                      { label: 'Fare (ex-tax)', value: overrideFare, set: (v: string) => { setOverrideFare(v); const t = Math.max(0, (parseFloat(v)||0)+(parseFloat(overrideToll)||0)-(parseFloat(overrideDiscount)||0)); setOverrideGst(String(Math.round(t*0.05))) }, minus: false },
                       { label: 'GST', value: overrideGst, set: setOverrideGst, minus: false },
-                      { label: 'Toll', value: overrideToll, set: setOverrideToll, minus: false },
-                      { label: 'Discount', value: overrideDiscount, set: setOverrideDiscount, minus: true },
+                      { label: 'Toll', value: overrideToll, set: (v: string) => { setOverrideToll(v); const t = Math.max(0, (parseFloat(overrideFare)||0)+(parseFloat(v)||0)-(parseFloat(overrideDiscount)||0)); setOverrideGst(String(Math.round(t*0.05))) }, minus: false },
+                      { label: 'Discount', value: overrideDiscount, set: (v: string) => { setOverrideDiscount(v); const t = Math.max(0, (parseFloat(overrideFare)||0)+(parseFloat(overrideToll)||0)-(parseFloat(v)||0)); setOverrideGst(String(Math.round(t*0.05))) }, minus: true },
                     ].map(({ label, value, set, minus }) => (
                       <div key={label}>
                         <div style={{ fontSize: 10, fontWeight: 600, color: minus ? YL.redInk : YL.ink2, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
@@ -1395,7 +1379,7 @@ export function AddVehicleModal({ open, onClose, drivers, onCreated }: AddVehicl
                   <Avatar name={d.name} size={24}/>
                   <Stack gap={1} style={{ flex: 1 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 500, color: YL.ink }}>{d.name}</div>
-                    <Mono size={10.5} color={YL.ink2}>{d.phone}</Mono>
+                    <Mono size={10.5} color={YL.ink2}>{formatPhone(d.phone)}</Mono>
                   </Stack>
                   <span style={{ fontSize: 11, color: d.status === 'available' ? YL.greenInk : YL.ink3 }}>● {d.status}</span>
                 </button>

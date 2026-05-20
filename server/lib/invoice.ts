@@ -20,9 +20,10 @@ function getQuarter(date: Date): number {
   return 4
 }
 
-export async function getInvoiceCounter(prisma: PrismaClient): Promise<string> {
+export async function getInvoiceCounter(prisma: PrismaClient, seriesPrefix = ''): Promise<string> {
   const now = new Date()
-  const fy = getFY(now)
+  // Use a distinct fy key for custom invoices so they have their own sequence
+  const fy = (seriesPrefix ? seriesPrefix + '-' : '') + getFY(now)
   const quarter = getQuarter(now)
 
   const counter = await prisma.$transaction(async (tx) => {
@@ -33,13 +34,16 @@ export async function getInvoiceCounter(prisma: PrismaClient): Promise<string> {
         data: { lastSeq: { increment: 1 } },
       })
     }
-    // Seed from invoice_start_seq setting so admin can choose starting number
-    const seedRow = await tx.pricingConfig.findUnique({ where: { key: 'invoice_start_seq' } })
+    const seedRow = !seriesPrefix
+      ? await tx.pricingConfig.findUnique({ where: { key: 'invoice_start_seq' } })
+      : null
     const seed = seedRow ? Math.max(0, parseInt(seedRow.value) || 0) : 0
     return tx.invoiceCounter.create({ data: { fy, quarter, lastSeq: seed + 1 } })
   })
 
-  return `YL/${fy}/Q${quarter}/${String(counter.lastSeq).padStart(5, '0')}`
+  const baseFy = getFY(now)
+  const label = seriesPrefix ? `YL-${seriesPrefix}` : 'YL'
+  return `${label}/${baseFy}/Q${quarter}/${String(counter.lastSeq).padStart(5, '0')}`
 }
 
 // ─── Company config ───────────────────────────────────────────────────────────
@@ -91,21 +95,23 @@ function fmtTime(dt: string | null | undefined): string {
 
 function fmtPhone(phone: string | null | undefined): string {
   if (!phone) return ''
-  // Already well-formed international number — keep as-is
-  if (phone.startsWith('+')) return phone
   const digits = phone.replace(/\D/g, '')
   if (!digits) return phone
-  // Indian numbers stored without + prefix
-  if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
+  // India: 10-digit bare, 12-digit with 91 prefix, or 11-digit with leading 0
+  if (digits.length === 10 && /^[6-9]/.test(digits)) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
   if (digits.length === 11 && digits.startsWith('0')) {
-    const d = digits.slice(1)
-    return `+91 ${d.slice(0, 5)} ${d.slice(5)}`
+    const d = digits.slice(1); return `+91 ${d.slice(0, 5)} ${d.slice(5)}`
   }
   if (digits.length === 12 && digits.startsWith('91')) {
-    const d = digits.slice(2)
-    return `+91 ${d.slice(0, 5)} ${d.slice(5)}`
+    const d = digits.slice(2); return `+91 ${d.slice(0, 5)} ${d.slice(5)}`
   }
-  // Any other international number — just ensure + prefix
+  // US/Canada: 11 digits starting with 1
+  if (digits.length === 11 && digits.startsWith('1')) return `+1 ${digits.slice(1,4)} ${digits.slice(4,7)} ${digits.slice(7)}`
+  // UAE: 12 digits starting with 971
+  if (digits.length === 12 && digits.startsWith('971')) return `+971 ${digits.slice(3,5)} ${digits.slice(5,8)} ${digits.slice(8)}`
+  // UK: 12 digits starting with 44
+  if (digits.length === 12 && digits.startsWith('44')) return `+44 ${digits.slice(2,6)} ${digits.slice(6)}`
+  // Any other — ensure + prefix
   return `+${digits}`
 }
 
@@ -118,12 +124,27 @@ function tripTypeLabel(type: string | null | undefined): string {
   return 'Cab Service'
 }
 
+export interface InvoiceOverrides {
+  amount?: number
+  driverName?: string | null
+  vehiclePlate?: string | null
+  customerName?: string | null
+  pickupLocation?: string | null
+  dropLocation?: string | null
+  pickupDateTime?: string | null
+  distanceKm?: number | null
+  toll?: number | null
+  discount?: number | null
+  stops?: string[] | null
+}
+
 export function generateInvoiceHtml(
   booking: any,
   invoiceNo: string,
   invoiceDate: Date,
   company: Record<string, string>,
   user?: { name?: string | null; phone?: string | null } | null,
+  overrides?: InvoiceOverrides,
 ): string {
   const pickup   = booking.pickup   ? (typeof booking.pickup === 'string'   ? JSON.parse(booking.pickup)   : booking.pickup)   : null
   const drop     = booking.drop     ? (typeof booking.drop === 'string'     ? JSON.parse(booking.drop)     : booking.drop)     : null
@@ -139,26 +160,35 @@ export function generateInvoiceHtml(
   const driverParsed  = booking.assignedDriverJson  ? JSON.parse(booking.assignedDriverJson)  : driver
   const vehicleParsed = booking.assignedVehicleJson ? JSON.parse(booking.assignedVehicleJson) : vehicle
   const flightParsed  = booking.flightJson  ? JSON.parse(booking.flightJson)  : flight
-  const stopsParsed: any[] = (() => {
-    try { return JSON.parse(booking.stopsJson || '[]') } catch { return [] }
-  })()
+  const stopsParsed: any[] = overrides?.stops != null
+    ? overrides.stops.map(s => ({ placeName: s }))
+    : (() => { try { return JSON.parse(booking.stopsJson || '[]') } catch { return [] } })()
 
-  const customerName  = user?.name ?? booking.guestName ?? booking.userName ?? 'Customer'
+  const customerName  = overrides?.customerName ?? user?.name ?? booking.guestName ?? booking.userName ?? 'Customer'
   const customerPhone = user?.phone ?? booking.guestPhone ?? booking.userPhone ?? ''
   const customerGstin = booking.customerGstin ?? ''
   const customerGstName = booking.customerGstName ?? ''
 
-  const toll       = pricingParsed?.toll ?? 0
-  const discount   = pricingParsed?.discount ?? 0
-  const total      = booking.price ?? 0   // authoritative — what was actually charged
+  const toll       = overrides?.toll ?? pricingParsed?.toll ?? 0
+  const discount   = overrides?.discount ?? pricingParsed?.discount ?? 0
+  const total      = overrides?.amount ?? booking.price ?? 0
+  const distanceKm = overrides?.distanceKm ?? pricingParsed?.distanceKm ?? null
 
-  // Back-calculate taxable from the ground-truth total so the invoice always adds up:
-  //   total = taxable + CGST(2.5%) + SGST(2.5%) + toll
-  //   total - toll = taxable × 1.05
-  const serviceTotal = total - toll       // GST-inclusive cab service amount
-  const taxable = Math.round(serviceTotal / 1.05)
-  const cgst    = Math.round(taxable * 0.025)
-  const sgst    = Math.round(taxable * 0.025)
+  // Use stored gst when present — this preserves old invoices exactly (they used gst on fare only)
+  // and correctly reflects new invoices (gst on fare+toll). Never back-calculate for old bookings.
+  const storedGst = (pricingParsed?.gst ?? null) as number | null
+  let taxable: number, cgst: number, sgst: number
+  if (storedGst != null) {
+    cgst    = Math.round(storedGst / 2)
+    sgst    = storedGst - cgst
+    taxable = pricingParsed?.fareBeforeTax ?? Math.round((total - toll) / 1.05)
+  } else {
+    // Fallback for very old records without explicit gst stored
+    const serviceTotal = total - toll
+    taxable = Math.round(serviceTotal / 1.05)
+    cgst    = Math.round(taxable * 0.025)
+    sgst    = Math.round(taxable * 0.025)
+  }
 
   const sac = company.company_sac_code || '996412'
   const serviceDesc = tripTypeLabel(booking.tripType)
@@ -254,7 +284,7 @@ export function generateInvoiceHtml(
       ${company.company_email ? `<div class="company-sub">${escHtml(company.company_email)}</div>` : ''}
     </div>
     <div class="header-right">
-      <div class="invoice-label">Tax Invoice</div>
+      <div class="invoice-label">Tax Invoice${overrides ? ' · <span style="color:#C0392B;font-weight:700">Customer Copy</span>' : ''}</div>
       <div class="invoice-no">${escHtml(invoiceNo)}</div>
       <div class="invoice-date">${fmtDate(invoiceDate)}</div>
       <div class="invoice-date mono" style="margin-top:6px">${escHtml(booking.tripCode ?? '')}</div>
@@ -274,8 +304,8 @@ export function generateInvoiceHtml(
       <div>
         <div class="section-label">Trip Details</div>
         <div class="info-name">${escHtml(serviceDesc)}</div>
-        <div class="info-line">${pickupParsed?.dateTime ? fmtDate(pickupParsed.dateTime) : fmtDate(booking.createdAt)}</div>
-        ${booking.passengers ? `<div class="info-line">${booking.passengers} passenger${booking.passengers > 1 ? 's' : ''}${booking.luggage ? ` · ${booking.luggage} bag${booking.luggage > 1 ? 's' : ''}` : ''}</div>` : ''}
+        <div class="info-line">${overrides?.pickupDateTime ? fmtDate(overrides.pickupDateTime) : pickupParsed?.dateTime ? fmtDate(pickupParsed.dateTime) : fmtDate(booking.createdAt)}</div>
+        ${booking.passengers ? `<div class="info-line">${booking.passengers} passenger${booking.passengers > 1 ? 's' : ''}</div>` : ''}
       </div>
     </div>
 
@@ -285,17 +315,21 @@ export function generateInvoiceHtml(
     <div>
       <div class="section-label">Route</div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        ${pickupParsed ? `
+        ${(pickupParsed || overrides?.pickupLocation) ? (() => {
+    const pName = overrides?.pickupLocation ?? pickupParsed?.placeName ?? pickupParsed?.location ?? '—'
+    const pTime = overrides?.pickupDateTime ?? pickupParsed?.dateTime
+    return `
         <div class="route-row">
           <div style="display:flex;flex-direction:column;align-items:center;padding-top:4px">
             <div class="route-dot"></div>
           </div>
           <div>
-            <div class="route-label">Pickup${pickupParsed.terminal ? ` · ${pickupParsed.terminal}` : ''}</div>
-            <div class="route-place">${escHtml(pickupParsed.placeName ?? pickupParsed.location ?? '—')}</div>
-            ${pickupParsed.dateTime ? `<div class="route-time">${fmtTime(pickupParsed.dateTime)}</div>` : ''}
+            <div class="route-label">Pickup${pickupParsed?.terminal ? ` · ${pickupParsed.terminal}` : ''}</div>
+            <div class="route-place">${escHtml(pName)}</div>
+            ${pTime ? `<div class="route-time">${fmtTime(pTime)}</div>` : ''}
           </div>
-        </div>` : ''}
+        </div>`
+  })() : ''}
         ${stopsParsed.map((s: any, i: number) => `
         <div class="route-row">
           <div style="display:flex;flex-direction:column;align-items:center;padding-top:4px">
@@ -306,30 +340,38 @@ export function generateInvoiceHtml(
             <div class="route-place" style="font-size:13px;color:#736E65">${escHtml(s.placeName ?? s.location ?? '—')}</div>
           </div>
         </div>`).join('')}
-        ${dropParsed ? `
+        ${(dropParsed || overrides?.dropLocation) ? (() => {
+    const dName = overrides?.dropLocation ?? dropParsed?.placeName ?? dropParsed?.location ?? '—'
+    return `
         <div class="route-row">
           <div style="display:flex;flex-direction:column;align-items:center;padding-top:4px">
             <div class="route-dot drop"></div>
           </div>
           <div>
-            <div class="route-label">Drop${dropParsed.terminal ? ` · ${dropParsed.terminal}` : ''}</div>
-            <div class="route-place">${escHtml(dropParsed.placeName ?? dropParsed.location ?? '—')}</div>
+            <div class="route-label">Drop${dropParsed?.terminal ? ` · ${dropParsed.terminal}` : ''}</div>
+            <div class="route-place">${escHtml(dName)}</div>
           </div>
-        </div>` : ''}
-        ${pricingParsed?.distanceKm ? `<div class="info-line" style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11.5px">${Number(pricingParsed.distanceKm).toFixed(1)} km</div>` : ''}
+        </div>`
+  })() : ''}
+        ${distanceKm ? `<div class="info-line" style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11.5px">${Number(distanceKm).toFixed(1)} km</div>` : ''}
         ${flightParsed?.flightNumber ? `<div class="info-line" style="margin-top:4px">Flight: <span style="font-family:'JetBrains Mono',monospace">${escHtml(flightParsed.flightNumber)}</span>${flightParsed.airline ? ` · ${escHtml(flightParsed.airline)}` : ''}</div>` : ''}
       </div>
     </div>
 
-    ${driverParsed ? `
+    ${(driverParsed || overrides?.driverName) ? (() => {
+    const dName = overrides?.driverName ?? driverParsed?.name ?? '—'
+    const vPlate = overrides?.vehiclePlate ?? vehicleParsed?.licensePlate ?? driverParsed?.plate ?? ''
+    const vDesc = (!overrides?.vehiclePlate && vehicleParsed) ? ` · ${escHtml(vehicleParsed.make ?? '')} ${escHtml(vehicleParsed.model ?? '')}` : ''
+    return `
     <div class="driver-row">
-      <div class="driver-avatar">${(driverParsed.name ?? 'D').charAt(0).toUpperCase()}</div>
+      <div class="driver-avatar">${dName.charAt(0).toUpperCase()}</div>
       <div style="flex:1">
-        <div class="driver-name">${escHtml(driverParsed.name ?? '—')}</div>
-        <div class="driver-sub">${escHtml(vehicleParsed?.licensePlate ?? driverParsed.plate ?? '')}${vehicleParsed ? ` · ${escHtml(vehicleParsed.make ?? '')} ${escHtml(vehicleParsed.model ?? '')}` : ''}</div>
+        <div class="driver-name">${escHtml(dName)}</div>
+        <div class="driver-sub">${escHtml(vPlate)}${vDesc}</div>
       </div>
       <img src="https://yellow-design-admin.web.app/logo.png" alt="Yellow" style="height:28px;width:auto;object-fit:contain;opacity:0.85;flex-shrink:0" onerror="this.style.display='none'"/>
-    </div>` : ''}
+    </div>`
+  })() : ''}
 
     <div class="divider"></div>
 

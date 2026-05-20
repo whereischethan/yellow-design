@@ -4,6 +4,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth'
 import prisma from '../lib/prisma'
 import { sendStatusSms, collectPhones } from '../lib/sms'
 import { genTripCode } from '../lib/tripcode'
+import { sendMetaEvent } from '../lib/metaPixel'
 
 const router = Router()
 
@@ -114,12 +115,22 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
 
     // Create booking — trip code generated only here, after payment verified
     const {
-      tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0, cabinBags = 0,
+      tripType, vehicleType = 'yellowSky', passengers = 1,
       pickup, drop, stops, flight, pricing, guestName, guestPhone,
     } = bookingData
 
     if (!pickup || !drop || !pricing) {
       return res.status(400).json({ error: 'pickup, drop, and pricing are required' })
+    }
+
+    // Deduct referral credits if applied
+    const creditsApplied = Number(pricing.creditsApplied ?? 0)
+    if (creditsApplied > 0) {
+      const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referralCredits: true } })
+      const safeDeduct = Math.min(creditsApplied, user?.referralCredits ?? 0)
+      if (safeDeduct > 0) {
+        await prisma.user.update({ where: { id: req.userId! }, data: { referralCredits: { decrement: safeDeduct } } })
+      }
     }
 
     const id = randomUUID()
@@ -134,8 +145,6 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
         vehicleType,
         price: pricing.totalPrice ?? pricing.basePrice ?? 0,
         passengerCount: passengers,
-        bags: luggage,
-        cabinBags,
         pickupJson: JSON.stringify(pickup),
         dropJson: JSON.stringify(drop),
         stopsJson: stops?.length ? JSON.stringify(stops) : null,
@@ -149,6 +158,36 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
         status: 'confirmed',
       },
     })
+
+    // Meta Conversions API — Purchase (fire-and-forget)
+    ;(async () => {
+      try {
+        const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { phone: true, email: true } })
+        sendMetaEvent('Purchase', {
+          phone:          user?.phone,
+          email:          user?.email,
+          value:          booking.price ?? 0,
+          userAgent:      req.headers['user-agent'],
+          fbp:            req.cookies?.['_fbp'],
+          eventId:        `purchase_${booking.id}`,
+          eventSourceUrl: `https://book.ridewithyellow.com`,
+        })
+      } catch {}
+    })()
+
+    // Referrer reward: 10% of first booking price if referee
+    ;(async () => {
+      try {
+        const referredUser = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referredById: true } })
+        if (referredUser?.referredById) {
+          const prevCount = await prisma.booking.count({ where: { userId: req.userId!, id: { not: booking.id } } })
+          if (prevCount === 0) {
+            const reward = Math.round((booking.price ?? 0) * 0.1)
+            if (reward > 0) await prisma.user.update({ where: { id: referredUser.referredById }, data: { referralCredits: { increment: reward } } })
+          }
+        }
+      } catch {}
+    })()
 
     // Auto-close any open leads for this user
     await prisma.lead.updateMany({
@@ -234,6 +273,23 @@ router.post('/lead', requireAuth, async (req: AuthRequest, res: Response) => {
       },
     })
 
+    // Meta Conversions API — Lead + InitiateCheckout (fire-and-forget)
+    ;(async () => {
+      try {
+        const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { phone: true, email: true } })
+        const eventOpts = {
+          phone:          user?.phone,
+          email:          user?.email,
+          value:          price ?? 0,
+          userAgent:      req.headers['user-agent'],
+          fbp:            req.cookies?.['_fbp'],
+          eventSourceUrl: `https://book.ridewithyellow.com`,
+        }
+        sendMetaEvent('Lead',             { ...eventOpts, eventId: `lead_${id}` })
+        sendMetaEvent('InitiateCheckout', { ...eventOpts, eventId: `checkout_${id}` })
+      } catch {}
+    })()
+
     return res.json({ ok: true, id })
   } catch (e: any) {
     return res.status(500).json({ error: e.message })
@@ -243,12 +299,22 @@ router.post('/lead', requireAuth, async (req: AuthRequest, res: Response) => {
 router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const {
-      tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0, cabinBags = 0,
+      tripType, vehicleType = 'yellowSky', passengers = 1,
       pickup, drop, stops, flight, pricing,
       guestName, guestPhone,
     } = req.body
 
     if (!pickup || !drop || !pricing) return res.status(400).json({ error: 'pickup, drop, and pricing are required' })
+
+    // Deduct referral credits if applied
+    const creditsApplied = Number(pricing.creditsApplied ?? 0)
+    if (creditsApplied > 0) {
+      const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referralCredits: true } })
+      const safeDeduct = Math.min(creditsApplied, user?.referralCredits ?? 0)
+      if (safeDeduct > 0) {
+        await prisma.user.update({ where: { id: req.userId! }, data: { referralCredits: { decrement: safeDeduct } } })
+      }
+    }
 
     const id = randomUUID()
     const tripCode = await genTripCode()
@@ -262,8 +328,6 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         vehicleType,
         price: pricing.totalPrice ?? pricing.basePrice ?? 0,
         passengerCount: passengers,
-        bags: luggage,
-        cabinBags,
         pickupJson: JSON.stringify(pickup),
         dropJson: JSON.stringify(drop),
         stopsJson: stops?.length ? JSON.stringify(stops) : null,
@@ -274,6 +338,36 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
         paymentStatus: 'paid',
       },
     })
+
+    // Meta Conversions API — Purchase (fire-and-forget)
+    ;(async () => {
+      try {
+        const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { phone: true, email: true } })
+        sendMetaEvent('Purchase', {
+          phone:          user?.phone,
+          email:          user?.email,
+          value:          booking.price ?? 0,
+          userAgent:      req.headers['user-agent'],
+          fbp:            req.cookies?.['_fbp'],
+          eventId:        `purchase_${booking.id}`,
+          eventSourceUrl: `https://book.ridewithyellow.com`,
+        })
+      } catch {}
+    })()
+
+    // Referrer reward: 10% of first booking price if referee
+    ;(async () => {
+      try {
+        const referredUser = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referredById: true } })
+        if (referredUser?.referredById) {
+          const prevCount = await prisma.booking.count({ where: { userId: req.userId!, id: { not: booking.id } } })
+          if (prevCount === 0) {
+            const reward = Math.round((booking.price ?? 0) * 0.1)
+            if (reward > 0) await prisma.user.update({ where: { id: referredUser.referredById }, data: { referralCredits: { increment: reward } } })
+          }
+        }
+      } catch {}
+    })()
 
     return res.json({ booking: buildBookingResponse(booking) })
   } catch (e: any) {
@@ -339,8 +433,6 @@ function buildBookingResponse(row: any) {
     vehicleType: row.vehicleType,
     price: row.price,
     passengers: row.passengerCount,
-    luggage: row.bags,
-    cabinBags: row.cabinBags ?? 0,
     pickup: row.pickupJson ? JSON.parse(row.pickupJson) : null,
     drop: row.dropJson ? JSON.parse(row.dropJson) : null,
     flight: row.flightJson ? JSON.parse(row.flightJson) : null,

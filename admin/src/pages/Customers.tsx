@@ -134,7 +134,7 @@ function CustomerDrawer({
                 <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 4, letterSpacing: 0.5 }}>REFERRED BY</div>
                 <div style={{ padding: '10px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}`, fontSize: 13, color: YL.ink }}>
                   {customer.referred_by
-                    ? `${customer.referred_by.name || 'Unknown'} · ${customer.referred_by.phone}`
+                    ? `${customer.referred_by.name || 'Unknown'} · ${formatPhone(customer.referred_by.phone)}`
                     : <span style={{ color: YL.ink3, fontStyle: 'italic' }}>Organic signup</span>}
                 </div>
               </div>
@@ -206,7 +206,7 @@ function CustomerDrawer({
   )
 }
 
-export default function Customers({ customers, onUpdate }: Props) {
+export default function Customers({ customers, onUpdate, onRefresh }: Props & { onRefresh?: () => void }) {
   const isMobile = useIsMobile()
   const [search, setSearch] = React.useState('')
   const [selected, setSelected] = React.useState<Customer | null>(null)
@@ -217,6 +217,7 @@ export default function Customers({ customers, onUpdate }: Props) {
     try {
       const r: any = await generateReferralCodes()
       alert(`Generated ${r.generated} referral code${r.generated !== 1 ? 's' : ''}.`)
+      onRefresh?.()
     } catch (e: any) {
       alert(`Failed: ${e.message}`)
     } finally {
@@ -292,7 +293,7 @@ export default function Customers({ customers, onUpdate }: Props) {
                     <div style={{ fontSize: 14, color: YL.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {c.name || <span style={{ color: YL.ink3, fontStyle: 'italic' }}>No name</span>}
                     </div>
-                    <Mono size={11.5} color={YL.ink2}>{c.phone}</Mono>
+                    <Mono size={11.5} color={YL.ink2}>{formatPhone(c.phone)}</Mono>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <Mono size={14} weight={700}>{c.trip_count}</Mono>
@@ -328,7 +329,7 @@ export default function Customers({ customers, onUpdate }: Props) {
                   <Avatar name={c.name || c.phone} size={30} />
                   <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{c.name || <span style={{ color: YL.ink3, fontStyle: 'italic' }}>No name</span>}</div>
                 </div>
-                <Mono size={12}>{c.phone}</Mono>
+                <Mono size={12}>{formatPhone(c.phone)}</Mono>
                 <Mono size={13} weight={600}>{c.trip_count}</Mono>
                 <Mono size={11.5} color={YL.ink2}>{fmtDate(c.created_at)}</Mono>
                 <span style={{ fontSize: 12, color: YL.ink2 }}>{c.email || '—'}</span>

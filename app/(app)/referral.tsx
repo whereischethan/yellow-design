@@ -41,6 +41,12 @@ export default function ScreenReferral() {
   const [invited, setInvited] = useState<{ name: string; date: string }[]>([])
   const joinedCount = invited.length
 
+  // Sync from context immediately (covers cached user from localStorage)
+  useEffect(() => {
+    if (user?.referralCode) setReferralCode(user.referralCode)
+    if (user?.referralCredits !== undefined) setEarnedCredits(user.referralCredits ?? 0)
+  }, [user?.referralCode, user?.referralCredits])
+
   useEffect(() => {
     fetchReferrals()
       .then(data => {
@@ -48,35 +54,36 @@ export default function ScreenReferral() {
         setInvited(data.invited)
       })
       .catch(() => {})
-    // Fetch profile to get referralCode for users who logged in before it was included
-    if (!user?.referralCode) {
-      getUserProfile()
-        .then((profile: any) => {
-          if (profile.referralCode) {
-            setReferralCode(profile.referralCode)
-            updateUser({ referralCode: profile.referralCode, referralCredits: profile.referralCredits })
-          }
-        })
-        .catch(() => {})
-    }
+    // Background-refresh profile so admin-generated codes always reflect
+    getUserProfile()
+      .then((profile: any) => {
+        if (profile.referralCode) setReferralCode(profile.referralCode)
+        if (profile.referralCredits !== undefined) setEarnedCredits(profile.referralCredits)
+        updateUser({ referralCode: profile.referralCode, referralCredits: profile.referralCredits })
+      })
+      .catch(() => {})
   }, [])
 
+  const referralLink = Platform.OS === 'web' && typeof window !== 'undefined'
+    ? `${window.location.origin}/join?ref=${referralCode}`
+    : `https://book.ridewithyellow.com/join?ref=${referralCode}`
+
+  const shareMessage = `Hi 👋 Sharing a referral for Yellow — a premium chauffeur service I use for airport transfers and outstation trips.\n\n🎁 You get 10% off your first ride. Use my link:\n${referralLink}`
+
   const handleWhatsApp = async () => {
-    const msg = `Use my Yellow referral code ${referralCode} to get ₹100 off your first ride! 🚖`
     if (Platform.OS === 'web') {
-      (window as any).open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
+      (window as any).open(`https://wa.me/?text=${encodeURIComponent(shareMessage)}`, '_blank')
       return
     }
-    await Share.share({ message: msg })
+    await Share.share({ message: shareMessage })
   }
 
   const handleSMS = async () => {
-    const msg = `Yellow ride app — use code ${referralCode} for ₹100 off.`
     if (Platform.OS === 'web') {
-      (window as any).open(`sms:?body=${encodeURIComponent(msg)}`)
+      (window as any).open(`sms:?body=${encodeURIComponent(shareMessage)}`)
       return
     }
-    await Share.share({ message: msg })
+    await Share.share({ message: shareMessage })
   }
 
   return (
@@ -99,15 +106,14 @@ export default function ScreenReferral() {
           <>
             {/* Headline */}
             <Text style={{ fontFamily: FONTS.display, fontSize: 34, fontWeight: '500', color: YL.ink, letterSpacing: -1 }}>
-              Give ₹100.{'\n'}Get{' '}
-              <Text style={{ fontStyle: 'italic' }}>₹100</Text>
-              {' back.'}
+              Give 10% off.{'\n'}Get{' '}
+              <Text style={{ fontStyle: 'italic' }}>rewarded.</Text>
             </Text>
             <Text style={{ fontFamily: FONTS.display, fontSize: 13, color: YL.ink2, marginTop: 6 }}>
               Share the ride. Both of you earn.
             </Text>
             <Text style={{ fontFamily: FONTS.display, fontSize: 14, color: YL.ink2, marginTop: 10, lineHeight: 22, maxWidth: 310 }}>
-              Each friend gets ₹100 off their first ride. You get ₹100 in Yellow credits after they ride.
+              Each friend gets 10% off their first ride. You earn credits after they complete their first trip.
             </Text>
 
             {/* Code card */}
@@ -125,7 +131,7 @@ export default function ScreenReferral() {
                   {referralCode}
                 </Text>
                 <Pressable
-                  onPress={() => copyToClipboard(referralCode)}
+                  onPress={() => copyToClipboard(referralLink)}
                   style={({ pressed }) => ({
                     width: 38, height: 38, borderRadius: 10,
                     backgroundColor: YL.ink, alignItems: 'center', justifyContent: 'center',
@@ -162,7 +168,7 @@ export default function ScreenReferral() {
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => copyToClipboard(referralCode)}
+                onPress={() => copyToClipboard(referralLink)}
                 style={({ pressed }) => ({
                   flex: 1, paddingVertical: 11, borderRadius: 14,
                   backgroundColor: YL.card, borderWidth: 1.5, borderColor: YL.ink,
@@ -170,7 +176,7 @@ export default function ScreenReferral() {
                 })}
               >
                 <Text style={{ fontFamily: FONTS.display, fontSize: 13, fontWeight: '600', color: YL.ink }}>
-                  Copy
+                  Copy link
                 </Text>
               </Pressable>
             </View>
@@ -258,7 +264,7 @@ export default function ScreenReferral() {
         )}
         ListFooterComponent={
           <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3, textAlign: 'center', marginTop: 24, lineHeight: 18 }}>
-            Credits auto-apply on your next booking. No limit on invites.
+            10% off applies on your friend's first booking. No limit on invites.
           </Text>
         }
       />

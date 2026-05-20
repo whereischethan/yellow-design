@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Vehicle, Driver } from '../types'
 import { patchVehicle, syncVehicleTrips, assignAllTripsToVehicle } from '../api'
-import { YL, Icons, Mono, Stack, Button, Chip, Card, PageHeader, Avatar, fmtDate, useIsMobile, DatePicker, Input } from '../components/ui'
+import { YL, Icons, Mono, Stack, Button, Chip, Card, PageHeader, Avatar, fmtDate, useIsMobile, DatePicker, Input, formatPhone } from '../components/ui'
 
 
 function VehicleStatusPill({ status, note }: { status: string; note?: string | null }) {
@@ -219,7 +219,7 @@ function VehicleDrawer({ vehicle, drivers, onClose, onUpdate, isMobile }: Drawer
                   <Avatar name={selectedDriver.name} size={36}/>
                   <Stack gap={2} style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{selectedDriver.name}</div>
-                    <Mono size={11} color={YL.ink2}>{selectedDriver.phone}</Mono>
+                    <Mono size={11} color={YL.ink2}>{formatPhone(selectedDriver.phone)}</Mono>
                     <span style={{ fontSize: 11, color: selectedDriver.status === 'available' ? YL.greenInk : YL.ink2 }}>{selectedDriver.status}</span>
                   </Stack>
                   <Button size="sm" variant="ghost" onClick={() => { setDriverId(null); setDriverPickerOpen(false) }}>Remove</Button>
@@ -488,7 +488,7 @@ export default function VehiclesPage({ vehicles, drivers, onUpdate, onAddVehicle
                     <Avatar name={v.driver_name} size={24}/>
                     <Stack gap={1}>
                       <span style={{ fontSize: 12.5, color: YL.ink, fontWeight: 500 }}>{v.driver_name}</span>
-                      {v.driver_phone && <Mono size={10.5} color={YL.ink2}>{v.driver_phone}</Mono>}
+                      {v.driver_phone && <Mono size={10.5} color={YL.ink2}>{formatPhone(v.driver_phone)}</Mono>}
                     </Stack>
                   </div>
                 ) : (

@@ -60,8 +60,6 @@ model Booking {
   vehicleType         String? @default("yellowSky") @map("vehicle_type")
   price               Int?    @default(0)
   passengerCount      Int?    @default(1) @map("passenger_count")
-  bags                Int?    @default(0)
-  cabinBags           Int?    @default(0) @map("cabin_bags")
   meetAndGreet        Int?    @default(0) @map("meet_and_greet")
   petFriendly         Int?    @default(0) @map("pet_friendly")
   pickupJson          String? @map("pickup_json")
@@ -83,8 +81,9 @@ model Booking {
   customerGstName     String? @map("customer_gst_name")
   createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
-  user    User?    @relation(fields: [userId], references: [id])
-  invoice Invoice?
+  user           User?           @relation(fields: [userId], references: [id])
+  invoice        Invoice?
+  customInvoices CustomInvoice[]
 
   @@map("bookings")
 }
@@ -98,6 +97,29 @@ model Invoice {
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@map("invoices")
+}
+
+model CustomInvoice {
+  id              String   @id @default(cuid())
+  invoiceNo       String   @unique @map("invoice_no")
+  bookingId       String   @map("booking_id")
+  customAmount    Int      @map("custom_amount")
+  driverName      String?  @map("driver_name")
+  vehiclePlate    String?  @map("vehicle_plate")
+  customerName    String?  @map("customer_name")
+  pickupLocation  String?  @map("pickup_location")
+  dropLocation    String?  @map("drop_location")
+  pickupDateTime  String?  @map("pickup_date_time")
+  distanceKm      Float?   @map("distance_km")
+  toll            Int?
+  discount        Int?
+  stopsJson       String?  @map("stops_json")
+  note            String?
+  generatedAt     DateTime @default(now()) @map("generated_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("custom_invoices")
 }
 
 model InvoiceCounter {

@@ -18,8 +18,8 @@ const SECTIONS: { title: string; color: string; fields: Field[] }[] = [
     fields: [
       { key: 'airport_per_km',      label: 'Per km',           prefix: '₹', suffix: '/km', hint: 'Applied to full trip distance' },
       { key: 'airport_trip_charge', label: 'Trip charge',      prefix: '₹',     hint: 'Flat fee per booking (included in fare, not shown separately)' },
-      { key: 'airport_toll',        label: 'Toll',             prefix: '₹',     hint: 'Pass-through, no GST applied' },
-      { key: 'airport_gst',         label: 'GST',              suffix: '%',     hint: 'On (km fare + trip charge) only' },
+      { key: 'airport_toll',        label: 'Toll',             prefix: '₹',     hint: 'Included in GST taxable base' },
+      { key: 'airport_gst',         label: 'GST',              suffix: '%',     hint: 'On (km fare + trip charge + toll)' },
     ],
   },
   {
@@ -72,8 +72,8 @@ function calcAirportFare(km: number, cfg: PricingConfig) {
   const gstRate    = parseFloat(cfg.airport_gst         ?? '5') / 100
   const kmFare     = Math.round(km * perKm)
   const fareBeforeTax = kmFare + tripCharge
-  const gst        = Math.round(fareBeforeTax * gstRate)
-  const total      = fareBeforeTax + gst + toll
+  const gst        = Math.round((fareBeforeTax + toll) * gstRate)
+  const total      = fareBeforeTax + toll + gst
   return { kmFare, fareBeforeTax, gst, toll, total }
 }
 

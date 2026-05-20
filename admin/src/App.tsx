@@ -34,6 +34,8 @@ import PricingPage from './pages/Pricing'
 import InvoicesPage from './pages/Invoices'
 import SettingsPage from './pages/Settings'
 import TeamPage from './pages/Team'
+import EmptyLegPage from './pages/EmptyLeg'
+import FinancePage from './pages/Finance'
 import { CreateBookingModal, AddDriverModal, AddVehicleModal } from './pages/Modals'
 import Login from './pages/Login'
 
@@ -236,10 +238,12 @@ export default function App() {
         {page === 'bookings'   && <BookingsList bookings={bookings} onOpen={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} />}
         {page === 'drivers'    && <DriversPage drivers={drivers} onUpdate={d => setDrivers(prev => prev.map(x => x.id === d.id ? d : x))} onAddDriver={() => setShowAddDriver(true)} onAddVehicle={() => setShowAddVehicle(true)} />}
         {page === 'vehicles'   && <VehiclesPage vehicles={vehicles} drivers={drivers} onUpdate={v => setVehicles(prev => prev.map(x => x.id === v.id ? v : x))} onAddVehicle={() => setShowAddVehicle(true)} onVehiclesRefresh={() => getVehicles().then(r => setVehicles(r.vehicles)).catch(() => {})} />}
-        {page === 'customers'  && <CustomersPage customers={customers} onUpdate={c => setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...c } : x))} />}
+        {page === 'customers'  && <CustomersPage customers={customers} onUpdate={c => setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...c } : x))} onRefresh={() => getCustomers().then(r => setCustomers(r.customers)).catch(() => {})} />}
         {page === 'leads'      && <LeadsPage leads={leads} bookings={bookings} onUpdate={l => setLeads(prev => prev.map(x => x.id === l.id ? { ...x, ...l } : x))} onBookingCreated={b => { setBookings(prev => [b, ...prev]); setPage('bookings') }} />}
         {page === 'pricing'    && <PricingPage />}
+        {page === 'empty-leg'  && <EmptyLegPage />}
         {page === 'invoices'   && <InvoicesPage />}
+        {page === 'finance'    && <FinancePage />}
         {page === 'settings'   && <SettingsPage />}
         {page === 'team'       && <TeamPage selfPhone={admin?.phone ?? ''} />}
 

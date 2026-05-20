@@ -263,6 +263,9 @@ export interface PricingRequest {
   originPlaceId: string;
   tripType: 'pickup' | 'drop' | 'outstation';
   stops?: string[];
+  pickupDateTime?: string;
+  originLat?: number;
+  originLng?: number;
 }
 
 export async function fetchPricing(request: PricingRequest): Promise<PricingResponse> {
@@ -273,6 +276,9 @@ export async function fetchPricing(request: PricingRequest): Promise<PricingResp
       originPlaceId: request.originPlaceId,
       tripType: request.tripType,
       stops: request.stops || [],
+      ...(request.pickupDateTime != null ? { pickupDateTime: request.pickupDateTime } : {}),
+      ...(request.originLat != null ? { originLat: request.originLat } : {}),
+      ...(request.originLng != null ? { originLng: request.originLng } : {}),
     }),
   })
   if (!res.ok) {
@@ -378,7 +384,7 @@ export async function verifyPaymentAndCreateBooking(payload: {
 
 // ─── User Profile ─────────────────────────────────────────────────────────────
 
-export async function getUserProfile(): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number }> {
+export async function getUserProfile(): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number; referredById?: string | null }> {
   const res = await authenticatedFetch(`${getApiBase()}/user/profile`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Failed to fetch profile' }))
@@ -388,7 +394,7 @@ export async function getUserProfile(): Promise<{ id: string; phone: string; nam
   return data.user
 }
 
-export async function updateProfile(updates: { name?: string; email?: string; appliedReferralCode?: string }): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number }> {
+export async function updateProfile(updates: { name?: string; email?: string; appliedReferralCode?: string }): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number; referredById?: string | null }> {
   const res = await authenticatedFetch(`${getApiBase()}/user/profile`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -438,20 +444,24 @@ export async function logLead(data: {
   pickupTime?: string
   flight?: string
   pricing?: object
-}): Promise<void> {
+}): Promise<string | null> {
   try {
     // Ensure token is available — it may not be in memory yet on fresh page load
     // (AuthProvider restores it asynchronously; child effects fire before parent effects)
     if (!authToken) await restoreAuthToken()
-    if (!authToken) return // not logged in — skip silently
+    if (!authToken) return null // not logged in — skip silently
 
-    await authenticatedFetch(`${getApiBase()}/bookings/lead`, {
+    const res = await authenticatedFetch(`${getApiBase()}/bookings/lead`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
+    if (!res.ok) return null
+    const json = await res.json()
+    return (json.id as string) ?? null
   } catch {
     // Non-critical — don't surface lead logging failures to the user
+    return null
   }
 }
 

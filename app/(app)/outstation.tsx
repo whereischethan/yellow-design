@@ -56,7 +56,6 @@ export default function ScreenOutstation() {
   const [departDate, setDepartDate] = useState<Date>(() => { const d = addDays(new Date(), 3); d.setHours(7, 0, 0, 0); return d })
   const [returnDate, setReturnDate] = useState<Date>(() => { const d = addDays(new Date(), 5); d.setHours(18, 0, 0, 0); return d })
   const [passengers, setPassengers] = useState(2)
-  const [bags, setBags] = useState(2)
   const [error, setError] = useState('')
 
   const canRequest = !!(origin && dest)
@@ -79,7 +78,6 @@ export default function ScreenOutstation() {
       `Depart: ${fmtDate(departDate)}`,
       ...(tripKind === 'round' ? [`Return: ${fmtDate(returnDate)}`] : []),
       `Passengers: ${passengers}`,
-      `Bags: ${bags}`,
     ]
 
     const msg = encodeURIComponent(lines.join('\n'))
@@ -171,7 +169,7 @@ export default function ScreenOutstation() {
           )}
         </View>
 
-        {/* Passengers & bags */}
+        {/* Passengers */}
         <View style={styles.stepperCard}>
           <View style={styles.stepperRow}>
             <Text style={styles.stepperLabel}>Passengers</Text>
@@ -179,15 +177,6 @@ export default function ScreenOutstation() {
               <StepBtn label="-" onPress={() => setPassengers(v => Math.max(1, v - 1))} disabled={passengers <= 1} />
               <Text style={styles.stepperValue}>{passengers}</Text>
               <StepBtn label="+" onPress={() => setPassengers(v => Math.min(6, v + 1))} disabled={passengers >= 6} />
-            </View>
-          </View>
-          <View style={styles.stepperDivider} />
-          <View style={styles.stepperRow}>
-            <Text style={styles.stepperLabel}>Bags</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <StepBtn label="-" onPress={() => setBags(v => Math.max(0, v - 1))} disabled={bags <= 0} />
-              <Text style={styles.stepperValue}>{bags}</Text>
-              <StepBtn label="+" onPress={() => setBags(v => Math.min(6, v + 1))} disabled={bags >= 6} />
             </View>
           </View>
         </View>

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
+import { checkHomeBase, checkEmptyLeg, recordSpecialRateView, type SpecialRate } from '../lib/emptyLeg'
 
 const router = Router()
 
@@ -84,8 +85,8 @@ function calcAirportPrice(distanceKm: number, cfg: Record<string, number>) {
 
   const kmFare = Math.round(distanceKm * perKm)
   const fareBeforeTax = kmFare + tripCharge           // trip charge folded in, not shown separately
-  const gst = Math.round(fareBeforeTax * gstRate)     // GST on service only, not toll
-  const total = fareBeforeTax + gst + toll
+  const gst = Math.round((fareBeforeTax + toll) * gstRate)  // GST on fare + toll
+  const total = fareBeforeTax + toll + gst
 
   return {
     fareBeforeTax,
@@ -121,8 +122,8 @@ function calcOutstationPrice(distanceKm: number, cfg: Record<string, number>) {
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    // stops = array of intermediate place IDs between origin and airport
-    const { originPlaceId, tripType = 'airport', stops = [] } = req.body
+    const { originPlaceId, tripType = 'airport', stops = [],
+            pickupDateTime, originLat, originLng } = req.body
     if (!originPlaceId) return res.status(400).json({ error: 'originPlaceId required' })
 
     const BLR_AIRPORT_PLACE_ID = 'ChIJZWJEdf4crjsRjkEpoelwbCk'
@@ -141,11 +142,72 @@ router.post('/', async (req: Request, res: Response) => {
       })
     }
 
-    const pricing = calcAirportPrice(distanceKm, cfg)
+    const gstRate = (cfg.airport_gst ?? 5) / 100
+    let pricing = calcAirportPrice(distanceKm, cfg)
+
+    let specialRate: SpecialRate | null = null
+
+    if (originLat != null && originLng != null && (tripType === 'pickup' || tripType === 'drop')) {
+      // 1. Manual override
+      const manualOn =
+        (tripType === 'drop'   && (cfg.empty_leg_drops_active   ?? 0) === 1) ||
+        (tripType === 'pickup' && (cfg.empty_leg_pickups_active ?? 0) === 1)
+
+      if (manualOn) {
+        const discountPct = (cfg.empty_leg_discount_pct ?? 40) / 100
+        const newFare = Math.round(pricing.fareBeforeTax * (1 - discountPct))
+        const oldGst  = Math.round(pricing.fareBeforeTax * gstRate)
+        const newGst  = Math.round(newFare * gstRate)
+        specialRate = {
+          type: 'manualOverride',
+          savedAmount: (pricing.fareBeforeTax - newFare) + (oldGst - newGst),
+          newFareBeforeTax: newFare,
+          newTotal: newFare + newGst + pricing.toll,
+          message: 'Special rate · limited time',
+        }
+      }
+
+      // 2. Auto empty leg detection
+      if (!specialRate && pickupDateTime) {
+        specialRate = await checkEmptyLeg({
+          tripType: tripType as 'pickup' | 'drop',
+          originLat: Number(originLat),
+          originLng: Number(originLng),
+          pickupDateTime,
+          fareBeforeTax: pricing.fareBeforeTax,
+          gstRate,
+          toll: pricing.toll,
+          cfg,
+        })
+      }
+
+      // 3. Home base flat fare (always-on) — use if lower than current specialRate
+      const homeBase = checkHomeBase(
+        Number(originLat), Number(originLng), tripType,
+        pricing.fareBeforeTax, gstRate, pricing.toll, cfg
+      )
+      if (homeBase && (!specialRate || homeBase.newTotal < specialRate.newTotal)) {
+        specialRate = homeBase
+      }
+    }
+
+    // Apply discount
+    if (specialRate) {
+      recordSpecialRateView()
+      pricing = {
+        ...pricing,
+        fareBeforeTax: specialRate.newFareBeforeTax,
+        gst: Math.round(specialRate.newFareBeforeTax * gstRate),
+        totalPrice: specialRate.newTotal,
+        basePrice: specialRate.newFareBeforeTax,
+      }
+    }
+
     return res.json({
       distanceKm, durationMinutes, tripType: 'airport',
       ...pricing,
       vehicleOptions: { yellowSky: pricing },
+      ...(specialRate ? { emptyLeg: { type: specialRate.type, savedAmount: specialRate.savedAmount, message: specialRate.message } } : {}),
     })
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Pricing calculation failed' })

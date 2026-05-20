@@ -143,16 +143,22 @@ export const Card = ({ children, style, padding = 18 }: any) => (
   </div>
 )
 
-export const PageHeader = ({ title, subtitle, actions, children }: any) => (
-  <div style={{ padding: '22px 28px 18px', borderBottom: `1px solid ${YL.line}`, background: YL.bg, display: 'flex', alignItems: 'flex-end', gap: 24, flexShrink: 0 }}>
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <h1 style={{ margin: 0, fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 26, fontWeight: 600, letterSpacing: -0.6, color: YL.ink, lineHeight: 1.1 }}>{title}</h1>
-      {subtitle && <div style={{ marginTop: 6, fontSize: 13.5, color: YL.ink2 }}>{subtitle}</div>}
-      {children}
+export const PageHeader = ({ title, subtitle, actions, children }: any) => {
+  const isMob = useIsMobile()
+  return (
+    <div style={{ padding: isMob ? '14px 16px 12px' : '22px 28px 18px', borderBottom: `1px solid ${YL.line}`, background: YL.bg, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: isMob ? 'center' : 'flex-end', gap: 12, justifyContent: 'space-between' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 style={{ margin: 0, fontFamily: '"Bricolage Grotesque", system-ui', fontSize: isMob ? 20 : 26, fontWeight: 600, letterSpacing: -0.5, color: YL.ink, lineHeight: 1.1 }}>{title}</h1>
+          {subtitle && <div style={{ marginTop: 4, fontSize: isMob ? 12 : 13.5, color: YL.ink2 }}>{subtitle}</div>}
+          {children}
+        </div>
+        {actions && !isMob && <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>{actions}</div>}
+        {actions && isMob && <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>{actions}</div>}
+      </div>
     </div>
-    {actions && <div style={{ display: 'flex', gap: 8 }}>{actions}</div>}
-  </div>
-)
+  )
+}
 
 // ─── Status badge ─────────────────────────────────────────────────────────
 
@@ -200,7 +206,7 @@ export function useIsMobile(breakpoint = 768): boolean {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────
 
-export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'team' | 'invoices' | 'settings'
+export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'empty-leg' | 'team' | 'invoices' | 'finance' | 'settings'
 
 interface SidebarProps {
   active: Page
@@ -222,8 +228,10 @@ export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, onSi
     { id: 'vehicles',  label: 'Vehicles',  icon: Icons.vehicles },
     { id: 'customers', label: 'Customers', icon: Icons.customers },
     { id: 'leads',     label: 'Leads',     icon: Icons.funnel },
-    { id: 'pricing',   label: 'Pricing',   icon: Icons.pricing },
-    { id: 'invoices',  label: 'Invoices',  icon: Icons.invoice },
+    { id: 'pricing',    label: 'Pricing',    icon: Icons.pricing },
+    { id: 'empty-leg', label: 'Empty Leg',  icon: Icons.pricing },
+    { id: 'invoices',  label: 'Invoices',   icon: Icons.invoice },
+    { id: 'finance',   label: 'Finance',    icon: Icons.trending },
     { id: 'team',      label: 'Admin users', icon: Icons.drivers },
     { id: 'settings',  label: 'Settings',  icon: Icons.settings },
   ]
@@ -360,6 +368,7 @@ export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, on
     { id: 'customers', label: 'Customers',   icon: Icons.customers },
     { id: 'pricing',   label: 'Pricing',     icon: Icons.pricing },
     { id: 'invoices',  label: 'Invoices',    icon: Icons.invoice },
+    { id: 'finance',   label: 'Finance',     icon: Icons.trending },
     { id: 'team',      label: 'Admin users', icon: Icons.drivers },
     { id: 'settings',  label: 'Settings',    icon: Icons.settings },
   ]
@@ -434,19 +443,40 @@ export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, on
 // ─── Modal primitives ─────────────────────────────────────────────────────
 
 export const ModalShell = ({ open, onClose, width = 720, children }: any) => {
+  const isMob = useIsMobile()
   if (!open) return null
-  return (
+  if (isMob) {
+    return ReactDOM.createPortal(
+      <>
+        <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(43,39,32,0.5)', zIndex: 200 }}/>
+        <div style={{
+          position: 'fixed', bottom: 60, left: 0, right: 0,
+          maxHeight: 'calc(90vh - 60px)',
+          background: YL.card, borderRadius: '16px 16px 0 0', zIndex: 201,
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          boxShadow: '0 -8px 40px rgba(43,39,32,0.24)',
+          animation: 'yl-slide-up 240ms cubic-bezier(0.32,0.72,0,1)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}>
+          {children}
+        </div>
+      </>,
+      document.body
+    )
+  }
+  return ReactDOM.createPortal(
     <>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(43,39,32,0.5)', zIndex: 100 }}/>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(43,39,32,0.5)', zIndex: 200 }}/>
       <div style={{
-        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width, maxHeight: '90vh', background: YL.card, borderRadius: 14, zIndex: 101,
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+        width, maxHeight: '90vh', background: YL.card, borderRadius: 14, zIndex: 201,
         display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(43,39,32,0.3)',
         overflow: 'hidden',
       }}>
         {children}
       </div>
-    </>
+    </>,
+    document.body
   )
 }
 
@@ -967,5 +997,22 @@ export function formatPhone(raw: string | null | undefined): string {
       return fmt ? fmt[1](rest) : `+${cc} ${rest}`
     }
   }
+  // Bare 10-digit Indian mobile (starts with 6/7/8/9)
+  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+    return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
+  }
   return raw
+}
+
+// Returns E.164 with leading + for use in tel: and wa.me links
+export function telPhone(raw: string | null | undefined): string {
+  if (!raw) return ''
+  const digits = raw.replace(/\D/g, '')
+  // already has recognised country code → ensure + prefix
+  for (const [cc, len] of CC_DIGITS) {
+    if (digits.startsWith(cc) && digits.length === cc.length + len) return `+${digits}`
+  }
+  // if raw already starts with + just strip spaces
+  if (raw.startsWith('+')) return `+${digits}`
+  return digits
 }

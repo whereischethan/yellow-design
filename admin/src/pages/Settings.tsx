@@ -1,6 +1,6 @@
 import React from 'react'
 import { getSettings, saveSettings } from '../api'
-import { YL, Mono, Button, PageHeader, Stack } from '../components/ui'
+import { YL, Mono, Button, PageHeader, Stack, useIsMobile } from '../components/ui'
 
 interface SettingField {
   key: string
@@ -59,6 +59,7 @@ function Field({ field, value, onChange }: { field: SettingField; value: string;
 }
 
 export default function SettingsPage() {
+  const isMobile = useIsMobile()
   const [config, setConfig] = React.useState<Record<string, string>>({})
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving]   = React.useState(false)
@@ -115,7 +116,7 @@ export default function SettingsPage() {
         </>}
       />
 
-      <div style={{ padding: '24px 28px', maxWidth: 640 }}>
+      <div style={{ padding: isMobile ? '16px 14px' : '24px 28px', maxWidth: 640 }}>
         <Stack gap={20}>
           {/* Company section */}
           <div>

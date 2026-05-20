@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Invoice } from '../types'
 import { getInvoices, openInvoice } from '../api'
-import { YL, Mono, Button, PageHeader, Icons, Input } from '../components/ui'
+import { YL, Mono, Button, PageHeader, Icons, Input, useIsMobile, formatPhone } from '../components/ui'
 
 function fmtDate(dt: string): string {
   try {
@@ -31,6 +31,7 @@ function PayBadge({ status, method, razorpayPaymentId }: { status: string; metho
 }
 
 export default function InvoicesPage() {
+  const isMobile = useIsMobile()
   const [invoices, setInvoices] = React.useState<Invoice[]>([])
   const [total, setTotal]       = React.useState(0)
   const [offset, setOffset]     = React.useState(0)
@@ -68,9 +69,9 @@ export default function InvoicesPage() {
           <Input
             value={search}
             onChange={handleSearch}
-            placeholder="Search invoice no, trip, customer…"
+            placeholder={isMobile ? 'Search…' : 'Search invoice no, trip, customer…'}
             icon={Icons.search}
-            style={{ width: 260 }}
+            style={{ width: isMobile ? 140 : 260 }}
           />
         }
       />
@@ -83,6 +84,28 @@ export default function InvoicesPage() {
         ) : invoices.length === 0 ? (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200, color: YL.ink3, fontSize: 13 }}>
             {search ? 'No invoices match your search.' : 'No invoices generated yet.'}
+          </div>
+        ) : isMobile ? (
+          <div>
+            {invoices.map(inv => (
+              <div key={inv.id} style={{ padding: '13px 16px', borderBottom: `1px solid ${YL.line}`, background: YL.card, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Mono size={12.5} weight={600}>{inv.invoiceNo}</Mono>
+                  <PayBadge status={inv.paymentStatus} method={inv.paymentMethod} razorpayPaymentId={inv.razorpayPaymentId} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{inv.customerName || '—'}</div>
+                    <Mono size={11} color={YL.ink3}>{inv.tripCode}</Mono>
+                  </div>
+                  <Mono size={14} weight={700}>₹{inv.amount.toLocaleString('en-IN')}</Mono>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12, color: YL.ink3 }}>{fmtDate(inv.generatedAt)}</span>
+                  <Button size="sm" variant="secondary" icon={Icons.download} onClick={() => openInvoice(inv.tripCode)}>View</Button>
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -114,7 +137,7 @@ export default function InvoicesPage() {
                   </td>
                   <td style={{ padding: '12px 16px', color: YL.ink, fontSize: 13 }}>
                     <div style={{ fontWeight: 500 }}>{inv.customerName || '—'}</div>
-                    {inv.customerPhone && <div style={{ fontSize: 11.5, color: YL.ink3, fontFamily: '"JetBrains Mono", monospace', marginTop: 1 }}>{inv.customerPhone}</div>}
+                    {inv.customerPhone && <div style={{ fontSize: 11.5, color: YL.ink3, fontFamily: '"JetBrains Mono", monospace', marginTop: 1 }}>{formatPhone(inv.customerPhone)}</div>}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <Mono size={13} weight={600}>₹{inv.amount.toLocaleString('en-IN')}</Mono>

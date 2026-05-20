@@ -8,6 +8,8 @@ import YAppChrome from '../../components/YAppChrome'
 import YButton from '../../components/YButton'
 import RouteVisualizer from '../../components/RouteVisualizer'
 import { createPaymentOrder, verifyPaymentAndCreateBooking, logLead } from '../../lib/api'
+import { pixelInitiateCheckout, pixelPurchase } from '../../lib/pixel'
+import { useAuth } from '../../context/AuthContext'
 import type { PricingResponse, BookingLocation, FlightInfo, VehicleType, CreateBookingRequest } from '../../types/booking'
 
 function VehicleSvg() {
@@ -55,8 +57,6 @@ export default function ScreenReview() {
   const router = useRouter()
   const params = useLocalSearchParams<{
     passengers: string
-    checkInBags: string
-    cabinBags: string
 tripType: string
     terminal: string
     pickup: string
@@ -69,8 +69,6 @@ tripType: string
   }>()
 
   const passengers = parseInt(params.passengers ?? '1', 10)
-  const checkInBags = parseInt(params.checkInBags ?? '0', 10)
-  const cabinBags = parseInt(params.cabinBags ?? '0', 10)
 const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
 
   const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup) : null
@@ -79,7 +77,19 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
   const flight: FlightInfo | null = params.flight ? JSON.parse(params.flight) : null
   const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
-  const total = pricing?.totalPrice ?? 0
+  const baseTotal = pricing?.totalPrice ?? 0
+  const { user } = useAuth()
+  const availableCredits = user?.referralCredits ?? 0
+  // Referee promo: first-ride 10% off (no credit balance needed, just referredById set)
+  const hasReferralPromo = !!(user?.referredById && availableCredits === 0)
+  const showDiscount = availableCredits > 0 || hasReferralPromo
+
+  const [applyCredits, setApplyCredits] = useState(false)
+  const discountAmount = Math.round(baseTotal * 0.1)
+  const creditsToApply = applyCredits
+    ? hasReferralPromo ? discountAmount : Math.min(discountAmount, availableCredits)
+    : 0
+  const total = baseTotal - creditsToApply
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -96,6 +106,11 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
       pickupTime: pickup.dateTime,
       flight: params.flight || undefined,
       pricing,
+    }).then((leadId) => {
+      // InitiateCheckout at review stage — user is one tap away from payment
+      // No matching server event here (server only fires on new lead creation),
+      // so we omit eventID to avoid stale dedup collisions.
+      pixelInitiateCheckout({ value: total })
     })
   }, [])
   const [forGuest, setForGuest] = useState(false)
@@ -115,8 +130,6 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
     tripType: params.tripType as 'pickup' | 'drop',
     vehicleType,
     passengers,
-    luggage: checkInBags,
-    cabinBags,
     pickup: pickup!,
     drop: drop!,
     stops: stops.length ? stops : undefined,
@@ -129,6 +142,8 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
       totalPrice: total,
       basePrice: pricing!.fareBeforeTax ?? pricing!.basePrice ?? 0,
       extraKmCharge: 0,
+      ...(creditsToApply > 0 ? { creditsApplied: creditsToApply } : {}),
+      ...(pricing?.emptyLeg ? { emptyLegDiscount: pricing.emptyLeg.savedAmount } : {}),
     },
     ...(forGuest && guestName.trim() ? { guestName: guestName.trim(), guestPhone: guestPhone.trim() } : {}),
   })
@@ -145,6 +160,8 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
       razorpaySignature,
       bookingData,
     })
+    // Purchase pixel — eventID matches the Conversions API event sent by the server
+    pixelPurchase({ value: booking.pricing?.totalPrice ?? total, bookingId: booking.id })
     router.replace({
       pathname: '/(app)/confirmed',
       params: { booking: JSON.stringify(booking) },
@@ -287,9 +304,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
             <VehicleSvg />
             <View style={{ flex: 1 }}>
               <Text style={styles.vehicleName}>Kia Carens Clavis EV</Text>
-              <Text style={styles.vehicleDetail}>
-                {passengers} pax · {checkInBags} check-in{cabinBags > 0 ? ` · ${cabinBags} cabin` : ''}
-</Text>
+              <Text style={styles.vehicleDetail}>{passengers} passenger{passengers !== 1 ? 's' : ''}</Text>
             </View>
           </View>
         </View>
@@ -339,14 +354,65 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
         </View>
 
         {/* Fare card */}
-        <View style={[styles.card, { alignItems: 'center', paddingVertical: 22 }]}>
-          <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: YL.ink3, marginBottom: 6 }}>
+        <View style={[styles.card, { paddingVertical: 20 }]}>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: YL.ink3, marginBottom: 10, textAlign: 'center' }}>
             Fastest route{pricing?.distanceKm ? ` · ${pricing.distanceKm} km` : ''}
           </Text>
-          <Text style={styles.totalAmount}>₹{total.toLocaleString('en-IN')}</Text>
-          <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3, marginTop: 6 }}>
-            All inclusive
-          </Text>
+
+          {showDiscount && (
+            <Pressable
+              onPress={() => setApplyCredits(v => !v)}
+              style={{
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                paddingVertical: 10, paddingHorizontal: 4, marginBottom: 10,
+                backgroundColor: applyCredits ? YL.yellowSoft : YL.bg,
+                borderRadius: 12, borderWidth: 1, borderColor: applyCredits ? YL.yellow : YL.line,
+                paddingLeft: 14, paddingRight: 12,
+              }}
+            >
+              <View>
+                <Text style={{ fontFamily: FONTS.display, fontSize: 13.5, fontWeight: '500', color: YL.ink }}>
+                  Apply 10% referral discount
+                </Text>
+                <Text style={{ fontFamily: FONTS.display, fontSize: 11.5, color: YL.ink3, marginTop: 1 }}>
+                  Save ₹{Math.round(baseTotal * 0.1).toLocaleString('en-IN')} on this ride
+                </Text>
+              </View>
+              <View style={{
+                width: 22, height: 22, borderRadius: 11,
+                backgroundColor: applyCredits ? YL.ink : YL.card,
+                borderWidth: 1.5, borderColor: applyCredits ? YL.ink : YL.line,
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                {applyCredits && (
+                  <Svg width={12} height={12} viewBox="0 0 12 12" fill="none">
+                    <Path d="M2 6L4.5 8.5L10 3" stroke={YL.yellow} strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+                  </Svg>
+                )}
+              </View>
+            </Pressable>
+          )}
+
+          {pricing?.emptyLeg && (
+            <FareLine
+              label={pricing.emptyLeg.type === 'homeBase' ? 'Home base rate' : 'Special rate discount'}
+              value={`−₹${pricing.emptyLeg.savedAmount.toLocaleString('en-IN')}`}
+            />
+          )}
+
+          {creditsToApply > 0 && (
+            <FareLine label="Ride fare" value={`₹${baseTotal.toLocaleString('en-IN')}`} muted />
+          )}
+          {creditsToApply > 0 && (
+            <FareLine label="10% referral discount" value={`−₹${creditsToApply.toLocaleString('en-IN')}`} />
+          )}
+
+          <View style={{ alignItems: 'center', marginTop: (creditsToApply > 0 || pricing?.emptyLeg) ? 10 : 0 }}>
+            <Text style={styles.totalAmount}>₹{total.toLocaleString('en-IN')}</Text>
+            <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3, marginTop: 6 }}>
+              {creditsToApply > 0 ? '10% off applied · all inclusive' : 'All inclusive'}
+            </Text>
+          </View>
         </View>
 
         {/* Zero-cancel promise */}

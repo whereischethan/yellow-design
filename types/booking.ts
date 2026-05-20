@@ -20,6 +20,12 @@ export interface VehicleOptions {
   suv?: VehiclePricing;
 }
 
+export interface EmptyLegInfo {
+  type: 'emptyLeg' | 'homeBase' | 'manualOverride';
+  savedAmount: number;   // ₹ saved vs. normal fare
+  message: string;
+}
+
 export interface PricingResponse {
   distanceKm: number;
   durationMinutes: number;
@@ -29,6 +35,7 @@ export interface PricingResponse {
   totalPrice: number;      // fareBeforeTax + gst + toll
   breakdown: PricingBreakdown;
   vehicleOptions: VehicleOptions;
+  emptyLeg?: EmptyLegInfo;
   // legacy compat
   basePrice?: number;
   extraKmCharge?: number;
@@ -67,8 +74,6 @@ export interface CreateBookingRequest {
   tripType: TripType;
   vehicleType?: VehicleType;
   passengers?: number;
-  luggage?: number;
-  cabinBags?: number;
   pickup: BookingLocation;
   drop: BookingLocation;
   stops?: { location: string; placeName?: string; placeId?: string }[];
@@ -78,6 +83,11 @@ export interface CreateBookingRequest {
     basePrice: number;
     extraKmCharge: number;
     totalPrice: number;
+    fareBeforeTax?: number;
+    gst?: number;
+    toll?: number;
+    creditsApplied?: number;
+    emptyLegDiscount?: number;
   };
   guestName?: string;
   guestPhone?: string;

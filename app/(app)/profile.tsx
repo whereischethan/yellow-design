@@ -668,7 +668,7 @@ export default function ScreenProfile() {
           <MenuRow
             icon="gift"
             label="Refer & earn"
-            sub="₹200 per friend"
+            sub="Friends get 10% off their first ride"
             accent
             onPress={() => router.push('/(app)/referral')}
           />
@@ -746,6 +746,7 @@ export default function ScreenProfile() {
             <LocationAutocomplete
               placeholder="Search for a place"
               value={placeAddress}
+              onChangeText={(text) => { setPlaceAddress(text); if (!text) setPlaceData(null) }}
               onLocationSelect={(loc) => {
                 setPlaceAddress(loc.placeName || loc.description || '')
                 setPlaceData({ placeId: loc.placeId, lat: loc.lat, lng: loc.lng })

@@ -8,6 +8,7 @@ type User = {
   role?: string
   referralCode?: string
   referralCredits?: number
+  referredById?: string | null
 }
 
 type AuthContextType = {

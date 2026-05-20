@@ -6,6 +6,8 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
+  Image,
+  Dimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
@@ -13,9 +15,85 @@ import Svg, { Path, Circle } from 'react-native-svg'
 import { YL, FONTS } from '../../constants/theme'
 import YAppChrome from '../../components/YAppChrome'
 import YButton from '../../components/YButton'
-import { IconPerson, IconBag } from '../../components/icons'
+import { IconPerson } from '../../components/icons'
 import { checkAvailability, logLead } from '../../lib/api'
+import { pixelViewContent, pixelLead, pixelInitiateCheckout } from '../../lib/pixel'
 import type { PricingResponse, BookingLocation, FlightInfo } from '../../types/booking'
+
+const SCREEN_W = Dimensions.get('window').width
+const PHOTO_W = SCREEN_W * 0.62
+const PHOTO_H = PHOTO_W * 0.66
+
+const VEHICLE_PHOTOS = [
+  {
+    src: require('../../assets/vehicles/clavis-exterior.jpg'),
+    caption: 'Exterior',
+  },
+  {
+    src: require('../../assets/vehicles/clavis-sunroof.jpg'),
+    caption: 'Panoramic sunroof',
+  },
+  {
+    src: require('../../assets/vehicles/clavis-cabin.jpg'),
+    caption: 'Rear cabin',
+  },
+  {
+    src: require('../../assets/vehicles/clavis-purifier.jpg'),
+    caption: 'Smart air purifier',
+  },
+]
+
+function PhotoStrip() {
+  return (
+    <View style={{ marginTop: 24 }}>
+      <Text style={photoStyles.label}>Inside your ride</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingLeft: 20, paddingRight: 12, gap: 10 }}
+        decelerationRate="fast"
+        snapToInterval={PHOTO_W + 10}
+        snapToAlignment="start"
+      >
+        {VEHICLE_PHOTOS.map((photo) => (
+          <View key={photo.caption} style={{ width: PHOTO_W }}>
+            <Image
+              source={photo.src}
+              style={photoStyles.tile}
+              resizeMode="cover"
+            />
+            <Text style={photoStyles.caption}>{photo.caption}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  )
+}
+
+const photoStyles = StyleSheet.create({
+  label: {
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    color: YL.ink3,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+    paddingHorizontal: 20,
+  },
+  tile: {
+    width: PHOTO_W,
+    height: PHOTO_H,
+    borderRadius: 14,
+    backgroundColor: YL.line,
+  },
+  caption: {
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    color: YL.ink3,
+    marginTop: 6,
+    letterSpacing: 0.2,
+  },
+})
 
 function VehicleSvg() {
   return (
@@ -46,8 +124,6 @@ export default function ScreenVehicle() {
   const router = useRouter()
   const params = useLocalSearchParams<{
     passengers: string
-    checkInBags: string
-    cabinBags: string
 tripType: string
     terminal: string
     pickup: string
@@ -58,9 +134,6 @@ tripType: string
   }>()
 
   const passengers = parseInt(params.passengers ?? '1', 10)
-  const checkInBags = parseInt(params.checkInBags ?? '0', 10)
-  const cabinBags = parseInt(params.cabinBags ?? '0', 10)
-  const bags = checkInBags + cabinBags
 const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup) : null
   const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
@@ -90,7 +163,7 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
       })
   }, [pickup?.dateTime])
 
-  // Log this pricing view as a lead
+  // Log this pricing view as a lead and fire browser pixel events
   useEffect(() => {
     if (!pickup || !pricing) return
     const drop = params.drop ? JSON.parse(params.drop) : null
@@ -104,6 +177,14 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
       pickupTime: pickup.dateTime,
       flight: params.flight || undefined,
       pricing: pricing ?? undefined,
+    }).then((leadId) => {
+      // ViewContent — user sees the priced vehicle card
+      pixelViewContent({ value: yellowSkyPrice, eventID: `vc_${leadId ?? Date.now()}` })
+      if (leadId) {
+        // Lead + InitiateCheckout with IDs matching the server Conversions API events
+        pixelLead({ value: yellowSkyPrice, eventID: `lead_${leadId}` })
+        pixelInitiateCheckout({ value: yellowSkyPrice, eventID: `checkout_${leadId}` })
+      }
     })
   }, [])
 
@@ -112,8 +193,6 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
       pathname: '/(app)/review',
       params: {
         passengers: String(passengers),
-        checkInBags: String(checkInBags),
-        cabinBags: String(cabinBags),
 tripType: params.tripType,
         terminal: params.terminal,
         pickup: params.pickup,
@@ -135,24 +214,19 @@ tripType: params.tripType,
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 }}
+        contentContainerStyle={{ paddingTop: 8, paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.headline}>
+        <Text style={[styles.headline, { paddingHorizontal: 20 }]}>
           Your{'  '}
           <Text style={{ fontStyle: 'italic' }}>ride</Text>
         </Text>
 
         {/* Context chip */}
-        <View style={styles.contextChip}>
+        <View style={[styles.contextChip, { marginHorizontal: 20 }]}>
           <IconPerson size={14} color={YL.ink2} />
           <Text style={styles.contextText}>
             <Text style={{ fontWeight: '600', color: YL.ink }}>{passengers} passenger{passengers !== 1 ? 's' : ''}</Text>
-          </Text>
-          <View style={styles.chipDivider} />
-          <IconBag size={14} color={YL.ink2} large />
-          <Text style={styles.contextText}>
-            <Text style={{ fontWeight: '600', color: YL.ink }}>{bags} bag{bags !== 1 ? 's' : ''}</Text>
           </Text>
           <Pressable onPress={() => router.back()}>
             <Text style={styles.editText}>edit</Text>
@@ -161,14 +235,14 @@ tripType: params.tripType,
 
         {/* Availability notice */}
         {!availability.checked && (
-          <View style={styles.availabilityRow}>
+          <View style={[styles.availabilityRow, { paddingHorizontal: 20 }]}>
             <ActivityIndicator size="small" color={YL.ink3} />
             <Text style={styles.availabilityText}>Checking availability…</Text>
           </View>
         )}
 
         {availability.checked && !availability.available && (
-          <View style={styles.unavailableBanner}>
+          <View style={[styles.unavailableBanner, { marginHorizontal: 20 }]}>
             <Text style={styles.unavailableText}>
               No vehicles available at this time. Please go back and choose a different pickup time.
             </Text>
@@ -176,10 +250,17 @@ tripType: params.tripType,
         )}
 
         {/* Vehicle card */}
-        <View style={styles.vehicleCard}>
+        <View style={[styles.vehicleCard, { marginHorizontal: 20 }]}>
           <View style={styles.recommendedBadge}>
             <Text style={styles.recommendedText}>YELLOW SKY</Text>
           </View>
+          {pricing?.emptyLeg && (
+            <View style={styles.specialRateBadge}>
+              <Text style={styles.specialRateText}>
+                {pricing.emptyLeg.type === 'homeBase' ? 'HOME RATE' : '✦ SPECIAL RATE'}
+              </Text>
+            </View>
+          )}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <VehicleSvg />
             <View style={{ flex: 1 }}>
@@ -189,10 +270,6 @@ tripType: params.tripType,
                   <IconPerson size={14} color={YL.ink2} />
                   <Text style={styles.statText}>{passengers} pax</Text>
                 </View>
-                <View style={styles.statRow}>
-                  <IconBag size={14} color={YL.ink2} large />
-                  <Text style={styles.statText}>{bags} bag{bags !== 1 ? 's' : ''}</Text>
-                </View>
               </View>
               {!!distanceKm && (
                 <Text style={styles.distanceText}>{distanceKm} km</Text>
@@ -201,10 +278,15 @@ tripType: params.tripType,
 
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
               <Text style={styles.price}>₹{yellowSkyPrice.toLocaleString('en-IN')}</Text>
+              {pricing?.emptyLeg && (
+                <Text style={styles.savingsText}>save ₹{pricing.emptyLeg.savedAmount.toLocaleString('en-IN')}</Text>
+              )}
               <CheckMark />
             </View>
           </View>
         </View>
+
+        <PhotoStrip />
       </ScrollView>
 
       {/* Bottom */}
@@ -311,6 +393,31 @@ const styles = StyleSheet.create({
   statRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   statText: { fontFamily: FONTS.display, fontSize: 12, color: YL.ink2 },
   price: { fontFamily: FONTS.display, fontSize: 20, fontWeight: '600', color: YL.ink, letterSpacing: -0.4 },
+  specialRateBadge: {
+    position: 'absolute',
+    top: -10,
+    right: 14,
+    backgroundColor: YL.gulmohar,
+    borderRadius: 100,
+    borderWidth: 1.5,
+    borderColor: YL.ink,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    zIndex: 10,
+  },
+  specialRateText: {
+    fontFamily: FONTS.mono,
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: 0.4,
+  },
+  savingsText: {
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    color: YL.leaf,
+    letterSpacing: 0.2,
+  },
   checkCircle: {
     width: 22,
     height: 22,

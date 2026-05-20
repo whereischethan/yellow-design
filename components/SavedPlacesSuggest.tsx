@@ -27,7 +27,7 @@ export default function SavedPlacesSuggest({ onSelect }: Props) {
             onPress={() => {
               if (!p.address) return
               onSelect({
-                placeName: p.label,
+                placeName: p.address,
                 description: p.address,
                 placeId: p.placeId ?? '',
                 lat: p.lat ?? 0,

@@ -1,6 +1,8 @@
 import React from 'react'
 import type { Booking, Driver, Vehicle, Customer } from '../types'
-import { patchBooking, deleteBooking, generatePaymentLink, lookupFlight, getBooking, syncPaymentStatus, downloadCSV, lookupGstin, openInvoice, emailInvoice } from '../api'
+import { patchBooking, deleteBooking, generatePaymentLink, lookupFlight, getBooking, syncPaymentStatus, downloadCSV, lookupGstin, openInvoice, emailInvoice, createCustomInvoice, updateCustomInvoice, listCustomInvoices, openCustomInvoice, calcPricing } from '../api'
+import type { CustomInvoice } from '../types'
+import { PlacesInput } from './Modals'
 import {
   YL, STATUS_STYLE, Icons, Mono, Stack, Button, Input, Chip, Card,
   PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, formatPhone, useIsMobile,
@@ -193,7 +195,7 @@ export function BookingsList({ bookings, onOpen, onNewBooking }: BookingsListPro
           {!isMobile && <Button variant="secondary" icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.download}</span>} onClick={() => downloadCSV(filtered.map(b => ({
             trip_code: b.tripCode, status: b.status, trip_type: b.tripType, vehicle: b.vehicleType,
             pickup_time: b.pickup?.dateTime ?? '', pickup: b.pickup?.location ?? '',
-            drop: b.drop?.location ?? '', passengers: b.passengers, luggage: b.luggage,
+            drop: b.drop?.location ?? '', passengers: b.passengers,
             flight: b.flight?.flightNumber ?? '', driver: b.assignedDriver?.name ?? '',
             guest_name: b.guestName ?? '', guest_phone: b.guestPhone ?? '',
             price: b.pricing?.totalPrice ?? '', payment_status: b.paymentStatus ?? '',
@@ -399,8 +401,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const [eDrop, setEDrop] = React.useState('')
   const [eFlight, setEFlight] = React.useState('')
   const [ePax, setEPax] = React.useState('1')
-  const [eCheckIn, setECheckIn] = React.useState('0')
-  const [eCabin, setECabin] = React.useState('0')
+
   const [eHours, setEHours] = React.useState('')
   const [eFare, setEFare] = React.useState('')
   const [eDiscount, setEDiscount] = React.useState('')
@@ -415,6 +416,10 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const [saving, setSaving] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const [confirmHourlyComplete, setConfirmHourlyComplete] = React.useState(false)
+  const [hourlyCompletePreview, setHourlyCompletePreview] = React.useState<{ actualHours: number; newTotal: number; endTime: Date } | null>(null)
+  const [hourlyEndTimeStr, setHourlyEndTimeStr] = React.useState('') // HH:MM for editing
+  const [hourlyPreviewLoading, setHourlyPreviewLoading] = React.useState(false)
   const [linkUrl, setLinkUrl] = React.useState<string | null>(null)
   const [generatingLink, setGeneratingLink] = React.useState(false)
   const [linkType, setLinkType] = React.useState<'upi' | 'standard'>('upi')
@@ -430,6 +435,23 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const [flightError, setFlightError] = React.useState('')
   const [refreshingBooking, setRefreshingBooking] = React.useState(false)
   const [markingPaid, setMarkingPaid] = React.useState(false)
+  const [showCustomInvoice, setShowCustomInvoice] = React.useState(false)
+  const [customInvoices, setCustomInvoices] = React.useState<CustomInvoice[]>([])
+  const [ciAmount, setCiAmount] = React.useState('')
+  const [ciDriverName, setCiDriverName] = React.useState('')
+  const [ciVehiclePlate, setCiVehiclePlate] = React.useState('')
+  const [ciCustomerName, setCiCustomerName] = React.useState('')
+  const [ciPickup, setCiPickup] = React.useState('')
+  const [ciDrop, setCiDrop] = React.useState('')
+  const [ciDateTime, setCiDateTime] = React.useState('')
+  const [ciDistance, setCiDistance] = React.useState('')
+  const [ciToll, setCiToll] = React.useState('')
+  const [ciDiscount, setCiDiscount] = React.useState('')
+  const [ciStops, setCiStops] = React.useState<string[]>([])
+  const [ciNote, setCiNote] = React.useState('')
+  const [ciEditingId, setCiEditingId] = React.useState<string | null>(null)
+  const [ciSaving, setCiSaving] = React.useState(false)
+  const [ciError, setCiError] = React.useState('')
 
   React.useEffect(() => {
     setEditMode(false)
@@ -442,6 +464,25 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     setShowEmailPanel(false)
     setEmailTo('')
     setEmailResult(null)
+    setShowCustomInvoice(false)
+    setCiAmount(booking?.pricing?.totalPrice ? String(booking.pricing.totalPrice) : '')
+    setCiDriverName(booking?.assignedDriver?.name ?? '')
+    setCiVehiclePlate(booking?.assignedVehicle?.licensePlate ?? '')
+    setCiCustomerName(booking?.guestName ?? '')
+    setCiPickup(booking?.pickup?.placeName ?? booking?.pickup?.location ?? '')
+    setCiDrop(booking?.drop?.placeName ?? booking?.drop?.location ?? '')
+    setCiDateTime(booking?.pickup?.dateTime ? toISTISO(new Date(booking.pickup.dateTime)) : '')
+    setCiDistance(booking?.pricing?.distanceKm ? String(booking.pricing.distanceKm) : '')
+    setCiToll(booking?.pricing?.toll ? String(booking.pricing.toll) : '')
+    setCiDiscount(booking?.pricing?.discount ? String(booking.pricing.discount) : '')
+    setCiStops((booking?.stops ?? []).map((s: any) => s.placeName ?? s.location ?? '').filter(Boolean))
+    setCiNote('')
+    setCiEditingId(null)
+    setCiError('')
+    setCustomInvoices([])
+    if (booking?.tripCode) {
+      listCustomInvoices(booking.tripCode).then(setCustomInvoices).catch(() => {})
+    }
     if (booking?.flight?.flightNumber && !booking.flight.departure) {
       const date = booking.pickup?.dateTime ? booking.pickup.dateTime.split('T')[0] : undefined
       setFlightLoading(true)
@@ -472,8 +513,6 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     setEDrop(booking.drop?.placeName ?? booking.drop?.location ?? '')
     setEFlight(booking.flight?.flightNumber ?? '')
     setEPax(String(booking.passengers ?? 1))
-    setECheckIn(String(booking.luggage ?? 0))
-    setECabin(String(booking.cabinBags ?? 0))
     const p = booking.pricing
     const fareBeforeTax = p?.fareBeforeTax ?? p?.basePrice ?? 0
     const toll = p?.toll ?? 0
@@ -518,8 +557,6 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
         stops: stopsArr,
         flight: flightObj,
         passengerCount: Number(ePax),
-        bags: Number(eCheckIn),
-        cabinBags: Number(eCabin),
         fareBreakdown: eFare ? {
           fareBeforeTax: Number(eFare),
           discount: Number(eDiscount) || 0,
@@ -621,12 +658,66 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   }
 
   const handleStatusChange = async (newStatus: string) => {
+    // For hourly bookings, show a confirmation preview before completing
+    if (newStatus === 'completed' && booking.tripType === 'hourly') {
+      const startMs = booking.pickup?.dateTime ? new Date(booking.pickup.dateTime).getTime() : null
+      const now = new Date()
+      const elapsedHours = startMs ? Math.max(0, (now.getTime() - startMs) / 3_600_000) : 0
+      const actualHours = Math.max(0.5, Math.ceil(elapsedHours * 2) / 2)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      setHourlyEndTimeStr(`${pad(now.getHours())}:${pad(now.getMinutes())}`)
+      try {
+        const result: any = await calcPricing({ tripType: 'hourly', durationHours: actualHours })
+        setHourlyCompletePreview({ actualHours, newTotal: result.totalPrice, endTime: now })
+      } catch {
+        setHourlyCompletePreview({ actualHours, newTotal: 0, endTime: now })
+      }
+      setConfirmHourlyComplete(true)
+      return
+    }
     setSaving(true)
     try {
       const res = await patchBooking(booking.id, { status: newStatus })
       onUpdate(res.booking)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleConfirmHourlyComplete = async () => {
+    setConfirmHourlyComplete(false)
+    setHourlyCompletePreview(null)
+    setSaving(true)
+    try {
+      // Pass the edited end time so the server uses it for elapsed calculation
+      const endTimeISO = hourlyCompletePreview?.endTime?.toISOString()
+      const res = await patchBooking(booking.id, { status: 'completed', ...(endTimeISO ? { completedAt: endTimeISO } : {}) })
+      onUpdate(res.booking)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleHourlyEndTimeChange = async (timeStr: string) => {
+    setHourlyEndTimeStr(timeStr)
+    if (!timeStr || !booking.pickup?.dateTime) return
+    const [hh, mm] = timeStr.split(':').map(Number)
+    const endTime = new Date(booking.pickup.dateTime)
+    endTime.setHours(hh, mm, 0, 0)
+    // If end time is before start (e.g. next-day trip), add a day
+    if (endTime.getTime() < new Date(booking.pickup.dateTime).getTime()) {
+      endTime.setDate(endTime.getDate() + 1)
+    }
+    const elapsedHours = Math.max(0, (endTime.getTime() - new Date(booking.pickup.dateTime).getTime()) / 3_600_000)
+    const actualHours = Math.max(0.5, Math.ceil(elapsedHours * 2) / 2)
+    setHourlyPreviewLoading(true)
+    try {
+      const result: any = await calcPricing({ tripType: 'hourly', durationHours: actualHours })
+      setHourlyCompletePreview({ actualHours, newTotal: result.totalPrice, endTime })
+    } catch {
+      setHourlyCompletePreview(prev => prev ? { ...prev, actualHours, endTime } : null)
+    } finally {
+      setHourlyPreviewLoading(false)
     }
   }
 
@@ -679,7 +770,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
               </span>
             </div>
             <div style={{ fontSize: 13, color: YL.ink2 }}>
-              {booking.pickup?.dateTime ? fmtDate(booking.pickup.dateTime) : '—'} at {booking.pickup?.dateTime ? <Mono size={12}>{fmtTime(booking.pickup.dateTime)}</Mono> : '—'} · {booking.passengers} pax{booking.tripType === 'hourly' ? (() => { const mins = booking.pricing?.durationMinutes ?? 0; const hrs = mins ? (mins/60 % 1 === 0 ? mins/60 : (mins/60).toFixed(1)) : null; return hrs ? ` · ${hrs} hrs` : '' })() : ` · ${booking.luggage} check-in${booking.cabinBags > 0 ? ` · ${booking.cabinBags} cabin` : ''}`}
+              {booking.pickup?.dateTime ? fmtDate(booking.pickup.dateTime) : '—'} at {booking.pickup?.dateTime ? <Mono size={12}>{fmtTime(booking.pickup.dateTime)}</Mono> : '—'} · {booking.passengers} pax{booking.tripType === 'hourly' ? (() => { const mins = booking.pricing?.durationMinutes ?? 0; const hrs = mins ? (mins/60 % 1 === 0 ? mins/60 : (mins/60).toFixed(1)) : null; return hrs ? ` · ${hrs} hrs` : '' })() : ''}
             </div>
           </Stack>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -817,8 +908,8 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                     ))}
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                    {[['Passengers', ePax, setEPax], ['Check-in bags', eCheckIn, setECheckIn], ['Cabin bags', eCabin, setECabin]].map(([label, val, setter]: any) => (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+                    {[['Passengers', ePax, setEPax]].map(([label, val, setter]: any) => (
                       <div key={label}>
                         <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>{label}</div>
                         <input type="number" min={0} value={val} onChange={e => setter(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none', textAlign: 'center' }}/>
@@ -937,7 +1028,11 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                         const mins = booking.pricing.durationMinutes || (parsedHrs * 60) || 0
                         const hours = mins / 60
                         const startISO = booking.pickup?.dateTime
-                        const endISO = startISO && mins ? new Date(fromISTISO(toISTISO(new Date(startISO))).getTime() + mins * 60000).toISOString() : null
+                        // For completed bookings, use the actual end time stamped on completion; otherwise estimate
+                        const actualEndISO: string | undefined = (booking.pricing as any)?.actualEndTime
+                        const estimatedEndISO = startISO && mins ? new Date(fromISTISO(toISTISO(new Date(startISO))).getTime() + mins * 60000).toISOString() : null
+                        const endISO = actualEndISO ?? estimatedEndISO
+                        const isActual = !!actualEndISO
                         return <>
                           <Stack gap={4} style={{ flex: 1 }}>
                             <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Hours</div>
@@ -948,7 +1043,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                             <Mono size={13}>{startISO ? fmtTime(startISO) : '—'}</Mono>
                           </Stack>
                           <Stack gap={4} style={{ flex: 1 }}>
-                            <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>End</div>
+                            <div style={{ fontSize: 10.5, color: isActual ? YL.greenInk : YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>End{isActual ? ' ✓' : ''}</div>
                             <Mono size={13}>{endISO ? fmtTime(endISO) : '—'}</Mono>
                           </Stack>
                         </>
@@ -960,10 +1055,6 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                         <Stack gap={4} style={{ flex: 1 }}>
                           <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Pax</div>
                           <Mono size={13}>{booking.passengers}</Mono>
-                        </Stack>
-                        <Stack gap={4} style={{ flex: 1 }}>
-                          <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Bags</div>
-                          <Mono size={13}>{booking.luggage} check-in{booking.cabinBags > 0 ? ` · ${booking.cabinBags} cabin` : ''}</Mono>
                         </Stack>
                       </>}
                     </div>
@@ -1061,8 +1152,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                         const bkHrs = (p as any)?.breakdown?.hours ?? ''
                         const parsedHrs = bkHrs ? parseFloat(bkHrs) : 0
                         const durationMins = p.durationMinutes || (parsedHrs * 60) || 0
+                        const isActualHourly = booking.tripType === 'hourly' && !!(p as any)?.actualEndTime
                         const fareLabel = booking.tripType === 'hourly'
-                          ? `Fare (${durationMins ? (durationMins/60 % 1 === 0 ? durationMins/60 : (durationMins/60).toFixed(1)) : '—'} hrs)`
+                          ? `Fare (${durationMins ? (durationMins/60 % 1 === 0 ? durationMins/60 : (durationMins/60).toFixed(1)) : '—'} hrs${isActualHourly ? ' actual' : ''})`
                           : `Fare (${p.distanceKm} km)`
                         return <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>{fareLabel}</span><Mono size={12.5}>{fmtINR(fareBeforeTax)}</Mono></div>
                       })()}
@@ -1132,9 +1224,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
               </Stack>
             </div>
           )}
-        </div>
-        {saving && <div style={{ padding: '10px 24px', background: YL.yellowSoft, fontSize: 12, color: YL.ink, textAlign: 'center' }}>Saving…</div>}
-        <div style={{ padding: '10px 24px', borderTop: `1px solid ${YL.line}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ padding: '10px 24px', borderTop: `1px solid ${YL.line}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {booking.status === 'completed' && (() => {
             const custEmail = customers.find(c => c.id === booking.userId)?.email ?? ''
             const handleSendEmail = async () => {
@@ -1198,13 +1288,233 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
               </div>
             )
           })()}
+
+          {/* Custom Invoice */}
+          {(() => {
+            const ciBody = () => ({
+              amount: Math.round(parseFloat(ciAmount)),
+              driverName: ciDriverName.trim() || undefined,
+              vehiclePlate: ciVehiclePlate.trim() || undefined,
+              customerName: ciCustomerName.trim() || undefined,
+              pickupLocation: ciPickup.trim() || undefined,
+              dropLocation: ciDrop.trim() || undefined,
+              pickupDateTime: ciDateTime ? fromISTISO(ciDateTime).toISOString() : undefined,
+              distanceKm: ciDistance ? parseFloat(ciDistance) : undefined,
+              toll: ciToll ? Math.round(parseFloat(ciToll)) : undefined,
+              discount: ciDiscount ? Math.round(parseFloat(ciDiscount)) : undefined,
+              stops: ciStops.filter(Boolean),
+              note: ciNote.trim() || undefined,
+            })
+
+            const loadCiIntoForm = (ci: CustomInvoice) => {
+              setCiEditingId(ci.id)
+              setCiAmount(String(ci.customAmount))
+              setCiCustomerName(ci.customerName ?? '')
+              setCiDriverName(ci.driverName ?? '')
+              setCiVehiclePlate(ci.vehiclePlate ?? '')
+              setCiPickup(ci.pickupLocation ?? '')
+              setCiDrop(ci.dropLocation ?? '')
+              setCiDateTime(ci.pickupDateTime ? toISTISO(new Date(ci.pickupDateTime)) : '')
+              setCiDistance(ci.distanceKm != null ? String(ci.distanceKm) : '')
+              setCiToll(ci.toll != null ? String(ci.toll) : '')
+              setCiDiscount(ci.discount != null ? String(ci.discount) : '')
+              try { setCiStops(ci.stopsJson ? JSON.parse(ci.stopsJson) : (booking?.stops ?? []).map((s: any) => s.placeName ?? s.location ?? '').filter(Boolean)) } catch { setCiStops([]) }
+              setCiNote(ci.note ?? '')
+              setCiError('')
+            }
+
+            const handleSaveCustomInvoice = async () => {
+              if (!booking) return
+              const amt = parseFloat(ciAmount)
+              if (!ciAmount || isNaN(amt) || amt <= 0) { setCiError('Enter a valid amount'); return }
+              setCiSaving(true); setCiError('')
+              try {
+                const body = ciBody()
+                let id: string, invoiceNo: string
+                if (ciEditingId) {
+                  const r = await updateCustomInvoice(booking.tripCode, ciEditingId, body)
+                  id = r.id; invoiceNo = r.invoiceNo
+                  setCustomInvoices(prev => prev.map(c => c.id === id ? { ...c, customAmount: body.amount, driverName: body.driverName ?? null, vehiclePlate: body.vehiclePlate ?? null, customerName: body.customerName ?? null, pickupLocation: body.pickupLocation ?? null, dropLocation: body.dropLocation ?? null, pickupDateTime: body.pickupDateTime ?? null, distanceKm: body.distanceKm ?? null, toll: body.toll ?? null, discount: body.discount ?? null, stopsJson: body.stops ? JSON.stringify(body.stops) : null, note: body.note ?? null } : c))
+                } else {
+                  const r = await createCustomInvoice(booking.tripCode, body)
+                  id = r.id; invoiceNo = r.invoiceNo
+                  setCustomInvoices(prev => [{ id, invoiceNo, generatedAt: new Date().toISOString(), customAmount: body.amount, driverName: body.driverName ?? null, vehiclePlate: body.vehiclePlate ?? null, customerName: body.customerName ?? null, pickupLocation: body.pickupLocation ?? null, dropLocation: body.dropLocation ?? null, pickupDateTime: body.pickupDateTime ?? null, distanceKm: body.distanceKm ?? null, toll: body.toll ?? null, discount: body.discount ?? null, stopsJson: body.stops ? JSON.stringify(body.stops) : null, note: body.note ?? null }, ...prev])
+                }
+                openCustomInvoice(booking.tripCode, id)
+                setCiEditingId(null)
+                setShowCustomInvoice(false)
+              } catch (e: any) {
+                setCiError(e.message)
+              } finally { setCiSaving(false) }
+            }
+            const inputStyle: React.CSSProperties = { height: 34, padding: '0 10px', borderRadius: 7, border: `1.5px solid ${YL.line}`, fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 12.5, color: YL.ink, background: '#fff', outline: 'none', width: '100%', boxSizing: 'border-box' }
+            const fieldLabel = (label: string) => <div style={{ fontSize: 10.5, color: YL.ink3, fontWeight: 600, marginBottom: 3 }}>{label}</div>
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <button
+                  onClick={() => setShowCustomInvoice(v => !v)}
+                  style={{ width: '100%', padding: '8px 14px', background: showCustomInvoice ? YL.yellowSoft : YL.bg, color: YL.ink, border: `1.5px solid ${YL.line}`, borderRadius: 9, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  📋 {customInvoices.length > 0 ? `Custom Invoice (${customInvoices.length})` : 'Create Custom Invoice'}
+                </button>
+                {showCustomInvoice && (
+                  <div style={{ background: YL.bg, borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: YL.ink3 }}>Custom / Customer-copy invoice</div>
+
+                    {customInvoices.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {customInvoices.map(ci => (
+                          <div key={ci.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', background: ciEditingId === ci.id ? YL.yellowSoft : '#fff', borderRadius: 7, border: `1px solid ${ciEditingId === ci.id ? YL.yellowDeep : YL.line}` }}>
+                            <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11.5, color: YL.ink, flex: 1 }}>{ci.invoiceNo}</span>
+                            <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11.5, color: YL.ink2 }}>₹{ci.customAmount.toLocaleString('en-IN')}</span>
+                            <button onClick={() => openCustomInvoice(booking!.tripCode, ci.id)} style={{ padding: '3px 8px', background: YL.ink, color: YL.yellow, border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: 'inherit' }}>View</button>
+                            <button onClick={() => { loadCiIntoForm(ci); setShowCustomInvoice(true) }} style={{ padding: '3px 8px', background: YL.bg, color: YL.ink, border: `1px solid ${YL.line}`, borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: 'inherit' }}>Edit</button>
+                          </div>
+                        ))}
+                        <div style={{ height: 1, background: YL.line, margin: '2px 0' }}/>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, color: YL.ink2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          {ciEditingId ? 'Editing custom invoice' : 'New custom invoice'}
+                          {ciEditingId && <button onClick={() => { setCiEditingId(null); /* reset to booking defaults */ setCiAmount(booking?.pricing?.totalPrice ? String(booking.pricing.totalPrice) : ''); setCiCustomerName(booking?.guestName ?? ''); setCiDriverName(booking?.assignedDriver?.name ?? ''); setCiVehiclePlate(booking?.assignedVehicle?.licensePlate ?? ''); setCiPickup(booking?.pickup?.placeName ?? ''); setCiDrop(booking?.drop?.placeName ?? ''); setCiDateTime(booking?.pickup?.dateTime ? toISTISO(new Date(booking.pickup.dateTime)) : ''); setCiDistance(booking?.pricing?.distanceKm ? String(booking.pricing.distanceKm) : ''); setCiToll(booking?.pricing?.toll ? String(booking.pricing.toll) : ''); setCiDiscount(booking?.pricing?.discount ? String(booking.pricing.discount) : ''); setCiStops((booking?.stops ?? []).map((s: any) => s.placeName ?? s.location ?? '').filter(Boolean)); setCiNote('') }} style={{ fontSize: 10.5, padding: '2px 7px', background: 'transparent', border: `1px solid ${YL.line}`, borderRadius: 4, cursor: 'pointer', color: YL.ink2, fontFamily: 'inherit' }}>New instead</button>}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Billing */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      <div>
+                        {fieldLabel('Amount (₹) *')}
+                        <input value={ciAmount} onChange={e => setCiAmount(e.target.value)} placeholder="0" style={inputStyle} type="number" min="0"/>
+                      </div>
+                      <div>
+                        {fieldLabel('Customer Name')}
+                        <input value={ciCustomerName} onChange={e => setCiCustomerName(e.target.value)} placeholder="Override name" style={inputStyle}/>
+                      </div>
+                      <div>
+                        {fieldLabel('Toll (₹)')}
+                        <input value={ciToll} onChange={e => setCiToll(e.target.value)} placeholder="0" style={inputStyle} type="number" min="0"/>
+                      </div>
+                      <div>
+                        {fieldLabel('Discount (₹)')}
+                        <input value={ciDiscount} onChange={e => setCiDiscount(e.target.value)} placeholder="0" style={inputStyle} type="number" min="0"/>
+                      </div>
+                    </div>
+
+                    {/* Route */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div>
+                        {fieldLabel('Pickup Location')}
+                        <PlacesInput label="" value={ciPickup} onChange={setCiPickup} onSelect={s => setCiPickup(s.description)}/>
+                      </div>
+                      <div>
+                        {fieldLabel('Drop Location')}
+                        <PlacesInput label="" value={ciDrop} onChange={setCiDrop} onSelect={s => setCiDrop(s.description)}/>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                        <div>
+                          {fieldLabel('Date & Time')}
+                          <DateTimePicker value={ciDateTime} onChange={setCiDateTime} />
+                        </div>
+                        <div>
+                          {fieldLabel('Distance (km)')}
+                          <input value={ciDistance} onChange={e => setCiDistance(e.target.value)} placeholder="0.0" style={inputStyle} type="number" min="0" step="0.1"/>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stops */}
+                    <div>
+                      {fieldLabel('Stops (intermediate)')}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {ciStops.map((s, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+                            <div style={{ flex: 1 }}>
+                              <PlacesInput label="" value={s} onChange={v => setCiStops(prev => prev.map((x, j) => j === i ? v : x))} onSelect={sel => setCiStops(prev => prev.map((x, j) => j === i ? sel.description : x))}/>
+                            </div>
+                            <button onClick={() => setCiStops(prev => prev.filter((_, j) => j !== i))} style={{ height: 36, width: 32, marginTop: 1, background: YL.bg, border: `1.5px solid ${YL.line}`, borderRadius: 6, cursor: 'pointer', color: YL.ink2, fontSize: 15, fontWeight: 600, flexShrink: 0 }}>×</button>
+                          </div>
+                        ))}
+                        <button onClick={() => setCiStops(prev => [...prev, ''])} style={{ padding: '5px 10px', background: 'transparent', border: `1.5px dashed ${YL.line}`, borderRadius: 7, cursor: 'pointer', fontSize: 11.5, color: YL.ink2, fontFamily: 'inherit', textAlign: 'left' }}>+ Add stop</button>
+                      </div>
+                    </div>
+
+                    {/* Driver / Vehicle */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      <div>
+                        {fieldLabel('Driver Name')}
+                        <input value={ciDriverName} onChange={e => setCiDriverName(e.target.value)} placeholder="Override driver" style={inputStyle}/>
+                      </div>
+                      <div>
+                        {fieldLabel('Vehicle Number')}
+                        <input value={ciVehiclePlate} onChange={e => setCiVehiclePlate(e.target.value)} placeholder="Override plate" style={inputStyle}/>
+                      </div>
+                    </div>
+
+                    <div>
+                      {fieldLabel('Internal Note (not printed)')}
+                      <input value={ciNote} onChange={e => setCiNote(e.target.value)} placeholder="Reason for custom amount…" style={inputStyle}/>
+                    </div>
+
+                    {ciError && <div style={{ fontSize: 11.5, color: YL.redInk }}>{ciError}</div>}
+                    <button
+                      onClick={handleSaveCustomInvoice}
+                      disabled={ciSaving}
+                      style={{ padding: '8px 14px', background: ciSaving ? YL.bg : YL.ink, color: ciSaving ? YL.ink2 : YL.yellow, border: 'none', borderRadius: 8, cursor: ciSaving ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', opacity: ciSaving ? 0.6 : 1 }}
+                    >
+                      {ciSaving ? 'Saving…' : ciEditingId ? 'Update & Open' : 'Generate & Open'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           <button
             onClick={handleCopyWhatsApp}
             style={{ width: '100%', padding: '10px 14px', background: copiedWA ? YL.greenSoft : '#25D366', color: copiedWA ? YL.greenInk : '#fff', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
           >
             {copiedWA ? '✓ Copied to clipboard' : '📋 Copy for WhatsApp'}
           </button>
+          </div>
         </div>
+        {saving && <div style={{ padding: '10px 24px', background: YL.yellowSoft, fontSize: 12, color: YL.ink, textAlign: 'center' }}>Saving…</div>}
+        {confirmHourlyComplete && hourlyCompletePreview && (() => {
+          const { actualHours, newTotal } = hourlyCompletePreview
+          const startMs = booking.pickup?.dateTime ? new Date(booking.pickup.dateTime).getTime() : null
+          const startLabel = startMs ? new Date(startMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—'
+          return (
+            <div style={{ padding: '14px 24px', background: YL.yellowSoft, borderTop: `1px solid ${YL.line}` }}>
+              <div style={{ fontSize: 12.5, color: YL.ink, fontWeight: 600, marginBottom: 10 }}>Complete hourly booking?</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: YL.ink2 }}>Start</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: YL.ink, fontFamily: '"JetBrains Mono", monospace' }}>{startLabel}</span>
+                <span style={{ fontSize: 12, color: YL.ink3 }}>→</span>
+                <span style={{ fontSize: 12, color: YL.ink2 }}>End</span>
+                <input
+                  type="time"
+                  value={hourlyEndTimeStr}
+                  onChange={e => handleHourlyEndTimeChange(e.target.value)}
+                  style={{ height: 28, padding: '0 8px', borderRadius: 6, border: `1.5px solid ${YL.line}`, fontFamily: '"JetBrains Mono", monospace', fontSize: 12, color: YL.ink, background: YL.card, outline: 'none' }}
+                />
+                <span style={{ fontSize: 12, color: YL.ink3 }}>·</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: YL.ink }}>
+                  {hourlyPreviewLoading ? '…' : `${actualHours % 1 === 0 ? actualHours : actualHours.toFixed(1)} hrs`}
+                </span>
+                {newTotal > 0 && !hourlyPreviewLoading && (
+                  <>
+                    <span style={{ fontSize: 12, color: YL.ink3 }}>→</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: YL.ink }}>₹{newTotal.toLocaleString('en-IN')}</span>
+                  </>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={handleConfirmHourlyComplete} disabled={hourlyPreviewLoading} style={{ padding: '6px 16px', background: YL.ink, color: YL.yellow, border: 'none', borderRadius: 7, cursor: hourlyPreviewLoading ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', opacity: hourlyPreviewLoading ? 0.6 : 1 }}>
+                  Confirm & complete
+                </button>
+                <button onClick={() => { setConfirmHourlyComplete(false); setHourlyCompletePreview(null) }} style={{ padding: '6px 12px', background: 'transparent', color: YL.ink2, border: `1px solid ${YL.line}`, borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontFamily: 'inherit' }}>Cancel</button>
+              </div>
+            </div>
+          )
+        })()}
         {confirmDelete ? (
           <div style={{ padding: '14px 24px', background: YL.redSoft, borderTop: `1px solid ${YL.line}`, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ flex: 1, fontSize: 12.5, color: YL.redInk }}>Delete this booking permanently?</span>

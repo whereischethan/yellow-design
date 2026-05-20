@@ -25,33 +25,33 @@ function StatCard({ label, value, hint, accent, sparkValues }: any) {
   )
 }
 
-function Pipeline({ bookings }: { bookings: Booking[] }) {
+function Pipeline({ bookings, isMobile }: { bookings: Booking[]; isMobile: boolean }) {
   const stages = [
-    { id: 'pending',     label: 'Pending',     desc: 'Need confirmation' },
+    { id: 'pending',     label: 'Pending',     desc: 'Needs confirm' },
     { id: 'confirmed',   label: 'Confirmed',   desc: 'Awaiting driver' },
-    { id: 'assigned',    label: 'Assigned',    desc: 'Driver scheduled' },
+    { id: 'assigned',    label: 'Assigned',    desc: 'Driver set' },
     { id: 'in_progress', label: 'In progress', desc: 'On the road' },
   ]
   const counts = stages.map(s => bookings.filter(b => b.status === s.id || (s.id === 'in_progress' && b.status === 'arrived')).length)
   const max = Math.max(...counts, 1)
   return (
-    <Card>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 18 }}>
+    <Card padding={isMobile ? 12 : 18}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isMobile ? 10 : 18 }}>
         <Stack gap={3}>
           <div style={{ fontSize: 14, fontWeight: 600, color: YL.ink }}>Today's pipeline</div>
-          <div style={{ fontSize: 12, color: YL.ink2 }}>Where every active booking sits right now</div>
+          {!isMobile && <div style={{ fontSize: 12, color: YL.ink2 }}>Where every active booking sits right now</div>}
         </Stack>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, background: YL.line, borderRadius: 10, overflow: 'hidden', border: `1px solid ${YL.line}` }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: 1, background: YL.line, borderRadius: 10, overflow: 'hidden', border: `1px solid ${YL.line}` }}>
         {stages.map((s, i) => {
           const c = counts[i]
           const intensity = c / max
           return (
-            <div key={s.id} style={{ padding: '14px 16px', background: YL.card, borderTop: `2px solid ${STATUS_STYLE[s.id].bg}` }}>
-              <div style={{ fontSize: 11.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>{s.label}</div>
-              <div style={{ marginTop: 6, fontSize: 28, fontWeight: 600, color: c === 0 ? YL.ink3 : YL.ink, lineHeight: 1 }}>{c}</div>
-              <div style={{ marginTop: 8, fontSize: 11, color: YL.ink3 }}>{s.desc}</div>
-              <div style={{ marginTop: 10, height: 3, background: YL.bg, borderRadius: 2, overflow: 'hidden' }}>
+            <div key={s.id} style={{ padding: isMobile ? '10px 12px' : '14px 16px', background: YL.card, borderTop: `2px solid ${STATUS_STYLE[s.id].bg}` }}>
+              <div style={{ fontSize: isMobile ? 10.5 : 11.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>{s.label}</div>
+              <div style={{ marginTop: 4, fontSize: isMobile ? 24 : 28, fontWeight: 600, color: c === 0 ? YL.ink3 : YL.ink, lineHeight: 1 }}>{c}</div>
+              <div style={{ marginTop: isMobile ? 4 : 8, fontSize: 10.5, color: YL.ink3 }}>{s.desc}</div>
+              <div style={{ marginTop: 8, height: 3, background: YL.bg, borderRadius: 2, overflow: 'hidden' }}>
                 <div style={{ width: `${intensity * 100}%`, height: '100%', background: STATUS_STYLE[s.id].fg, opacity: 0.5 }}/>
               </div>
             </div>
@@ -242,7 +242,7 @@ export default function Dashboard({ bookings, drivers, stats, adminName, onOpen,
         )}
 
         <div style={{ marginBottom: isMobile ? 14 : 18 }}>
-          <Pipeline bookings={[...todayBookings, ...bookings.filter(b => b.pickup?.dateTime && fmtDate(b.pickup.dateTime) === 'Tomorrow')]}/>
+          <Pipeline bookings={[...todayBookings, ...bookings.filter(b => b.pickup?.dateTime && fmtDate(b.pickup.dateTime) === 'Tomorrow')]} isMobile={isMobile}/>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.5fr 1fr', gap: 16 }}>

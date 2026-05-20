@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { View, Text, Pressable, StyleSheet, TextInput, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -6,16 +6,25 @@ import Svg, { Path } from 'react-native-svg'
 import { YL, FONTS } from '../../constants/theme'
 import YButton from '../../components/YButton'
 import { updateProfile } from '../../lib/api'
+import { pixelCompleteRegistration } from '../../lib/pixel'
 import { useAuth } from '../../context/AuthContext'
 
 export default function ScreenName() {
   const router = useRouter()
-  const { updateUser } = useAuth()
+  const { user, updateUser } = useAuth()
   const inputRef = useRef<TextInput>(null)
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
   const [referralCode, setReferralCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      const pending = localStorage.getItem('pending_referral_code')
+      if (pending) setReferralCode(pending)
+    }
+  }, [])
 
   const isReady = name.trim().length >= 2
 
@@ -25,9 +34,15 @@ export default function ScreenName() {
     setError('')
     try {
       const updates: Parameters<typeof updateProfile>[0] = { name: name.trim() }
+      if (email.trim()) updates.email = email.trim()
       if (referralCode.trim()) updates.appliedReferralCode = referralCode.trim().toUpperCase()
       const updated = await updateProfile(updates)
-      updateUser({ name: updated.name, referralCode: updated.referralCode, referralCredits: updated.referralCredits })
+      updateUser({ name: updated.name, email: updated.email, referralCode: updated.referralCode, referralCredits: updated.referralCredits, referredById: updated.referredById })
+      // CompleteRegistration pixel — eventID matches the Conversions API event sent by the server
+      pixelCompleteRegistration({ userId: updated.id })
+      if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+        localStorage.removeItem('pending_referral_code')
+      }
       router.replace('/(app)/home')
     } catch (e: any) {
       setError(e.message || 'Could not save name')
@@ -44,10 +59,19 @@ export default function ScreenName() {
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.headline}>{"What's your\nname?"}</Text>
+        <Text style={styles.headline}>{"Set up your\nprofile"}</Text>
         <Text style={styles.description}>
           Your chauffeur will greet you by name.
         </Text>
+
+        {/* Phone (confirmed, read-only) */}
+        <View style={{ marginBottom: 16 }}>
+          <Text style={styles.fieldLabel}>Phone</Text>
+          <View style={[styles.fieldBox, { backgroundColor: YL.bg2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+            <Text style={[styles.nameInput, { color: YL.ink2 }]}>{user?.phone ?? ''}</Text>
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 10, color: YL.leaf, letterSpacing: 0.3 }}>VERIFIED</Text>
+          </View>
+        </View>
 
         <Pressable onPress={() => inputRef.current?.focus()} style={{ marginBottom: 16 }}>
           <Text style={styles.fieldLabel}>Full name</Text>
@@ -62,10 +86,25 @@ export default function ScreenName() {
               autoFocus
               autoCapitalize="words"
               returnKeyType="next"
-              onSubmitEditing={handleContinue}
             />
           </View>
         </Pressable>
+
+        <View style={{ marginBottom: 16 }}>
+          <Text style={styles.fieldLabel}>Email (optional)</Text>
+          <View style={[styles.fieldBox, email.length > 0 && styles.fieldBoxActive]}>
+            <TextInput
+              value={email}
+              onChangeText={(t) => { setEmail(t); if (error) setError('') }}
+              style={[styles.nameInput, Platform.OS === 'web' && ({ outlineWidth: 0 } as any)]}
+              placeholder="e.g. aarushi@email.com"
+              placeholderTextColor={YL.ink3}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              returnKeyType="next"
+            />
+          </View>
+        </View>
 
         <View style={{ marginBottom: 16 }}>
           <Text style={styles.fieldLabel}>Referral code (optional)</Text>

@@ -2,6 +2,7 @@ import { Router, Response } from 'express'
 import { randomUUID } from 'crypto'
 import { requireAuth, AuthRequest } from '../middleware/auth'
 import prisma from '../lib/prisma'
+import { sendMetaEvent } from '../lib/metaPixel'
 
 const router = Router()
 
@@ -27,7 +28,7 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
     let user = await prisma.user.findUnique({
       where: { id: req.userId! },
       select: { id: true, phone: true, name: true, email: true, role: true,
-                referralCode: true, referralCredits: true },
+                referralCode: true, referralCredits: true, referredById: true },
     })
     if (!user) return res.status(404).json({ error: 'User not found' })
 
@@ -38,7 +39,7 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
         where: { id: req.userId! },
         data: { referralCode: code },
         select: { id: true, phone: true, name: true, email: true, role: true,
-                  referralCode: true, referralCredits: true },
+                  referralCode: true, referralCredits: true, referredById: true },
       })
     }
 
@@ -81,15 +82,29 @@ router.put('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
       if (referrer.id === req.userId) return res.status(400).json({ error: 'Cannot use your own referral code' })
 
       data.referredById = referrer.id
-      data.referralCredits = { increment: 100 }
     }
+
+    const isFirstName = name && !current.name  // name set for the first time = onboarding complete
 
     const user = await prisma.user.update({
       where: { id: req.userId! },
       data,
       select: { id: true, phone: true, name: true, email: true, role: true,
-                referralCode: true, referralCredits: true },
+                referralCode: true, referralCredits: true, referredById: true },
     })
+
+    // Meta Conversions API — CompleteRegistration when onboarding name step completes
+    if (isFirstName) {
+      sendMetaEvent('CompleteRegistration', {
+        phone:          user.phone,
+        email:          user.email,
+        userAgent:      req.headers['user-agent'],
+        fbp:            req.cookies?.['_fbp'],
+        eventId:        `reg_${user.id}`,
+        eventSourceUrl: 'https://book.ridewithyellow.com',
+      })
+    }
+
     return res.json({ user })
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Failed to update profile' })

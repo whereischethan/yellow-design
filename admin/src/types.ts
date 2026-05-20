@@ -88,8 +88,6 @@ export interface Booking {
   tripType: 'pickup' | 'drop' | 'outstation' | 'hourly'
   vehicleType: string
   passengers: number
-  luggage: number
-  cabinBags: number
   pickup: BookingLocation
   drop: BookingLocation
   stops?: StopLocation[] | null
@@ -121,6 +119,24 @@ export interface Invoice {
   paymentStatus: string
   paymentMethod: string | null
   razorpayPaymentId: string | null
+}
+
+export interface CustomInvoice {
+  id: string
+  invoiceNo: string
+  generatedAt: string
+  customAmount: number
+  driverName: string | null
+  vehiclePlate: string | null
+  customerName: string | null
+  pickupLocation: string | null
+  dropLocation: string | null
+  pickupDateTime: string | null
+  distanceKm: number | null
+  toll: number | null
+  discount: number | null
+  stopsJson: string | null
+  note: string | null
 }
 
 export interface Customer {

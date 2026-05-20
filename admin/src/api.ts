@@ -117,6 +117,14 @@ export const syncPaymentStatus = (id: string) =>
 
 export const getStats = () => adminFetch('/stats')
 
+export const getFinanceSummary = (from?: string, to?: string) => {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to)   params.set('to',   to)
+  const qs = params.toString()
+  return adminFetch(`/finance/summary${qs ? `?${qs}` : ''}`)
+}
+
 export function downloadCSV(rows: object[], filename: string) {
   if (!rows.length) return
   const escape = (v: unknown) => {
@@ -161,6 +169,65 @@ export async function emailInvoice(tripCode: string, to: string[]): Promise<void
   }
 }
 
+export type CustomInvoiceBody = {
+  amount: number
+  driverName?: string; vehiclePlate?: string; customerName?: string
+  pickupLocation?: string; dropLocation?: string; pickupDateTime?: string
+  distanceKm?: number; toll?: number; discount?: number
+  stops?: string[]; note?: string
+}
+
+export const createCustomInvoice = (
+  tripCode: string,
+  body: CustomInvoiceBody,
+): Promise<{ id: string; invoiceNo: string }> => {
+  const token = getStoredAdminToken()
+  return fetch(`/invoices/${encodeURIComponent(tripCode)}/custom`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  }).then(async r => {
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Failed')
+    return r.json()
+  })
+}
+
+export const updateCustomInvoice = (
+  tripCode: string,
+  id: string,
+  body: Partial<CustomInvoiceBody>,
+): Promise<{ id: string; invoiceNo: string }> => {
+  const token = getStoredAdminToken()
+  return fetch(`/invoices/${encodeURIComponent(tripCode)}/custom/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  }).then(async r => {
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Failed')
+    return r.json()
+  })
+}
+
+export const listCustomInvoices = (tripCode: string): Promise<any[]> => {
+  const token = getStoredAdminToken()
+  return fetch(`/invoices/${encodeURIComponent(tripCode)}/custom`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).then(r => r.json())
+}
+
+export function openCustomInvoice(tripCode: string, id: string): void {
+  const token = getStoredAdminToken()
+  const url = `/invoices/${encodeURIComponent(tripCode)}/custom/${encodeURIComponent(id)}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  const win = window.open(url, '_blank')
+  if (!win) alert('Pop-up blocked — please allow pop-ups for this site and try again.')
+}
+
 export const getSettings  = ()               => adminFetch('/settings')
 export const saveSettings = (config: object) =>
   adminFetch('/settings', { method: 'PUT', body: JSON.stringify({ config }) })
@@ -173,3 +240,9 @@ export const addTeamMember  = (body: object)      => adminFetch('/team', { metho
 export const removeTeamMember = (id: string)      => adminFetch(`/team/${id}`, { method: 'DELETE' })
 export const updateMyProfile  = (body: { name: string }) =>
   adminFetch('/team/me', { method: 'PATCH', body: JSON.stringify(body) })
+
+export const getEmptyLegStatus = () => adminFetch('/empty-leg/status')
+export const setEmptyLegToggle = (key: string, value: 0 | 1) =>
+  adminFetch('/empty-leg/toggle', { method: 'PATCH', body: JSON.stringify({ key, value }) })
+export const saveEmptyLegConfig = (config: Record<string, number>) =>
+  adminFetch('/empty-leg/config', { method: 'PATCH', body: JSON.stringify(config) })

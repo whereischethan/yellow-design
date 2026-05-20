@@ -81,7 +81,6 @@ export default function ScreenHourly() {
 
       const vehicleParams = {
         passengers: '1',
-        bags: '0',
         meetAndGreet: '0',
         petFriendly: '0',
         tripType: 'pickup',

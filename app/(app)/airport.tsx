@@ -16,7 +16,7 @@ import { YL, FONTS } from '../../constants/theme'
 import YAppChrome from '../../components/YAppChrome'
 import YButton from '../../components/YButton'
 import StepBtn from '../../components/StepBtn'
-import { IconPerson, IconBag } from '../../components/icons'
+import { IconPerson } from '../../components/icons'
 import LocationAutocomplete from '../../components/location/LocationAutocomplete'
 import SavedPlacesSuggest from '../../components/SavedPlacesSuggest'
 import DateTimePicker from '../../components/DateTimePicker'
@@ -103,13 +103,6 @@ export default function ScreenAirport() {
   const [loadingFlight, setLoadingFlight] = useState(false)
   const [dateTime, setDateTime] = useState<Date>(defaultDateTime)
   const [passengers, setPassengers] = useState(4)
-  const [checkInBags, setCheckInBags] = useState(1)
-  const [cabinBags, setCabinBags] = useState(0)
-
-  const MAX_TOTAL_BAGS = 5
-  const MAX_CHECKIN_BAGS = 3
-  const cabinMax = Math.max(0, MAX_TOTAL_BAGS - checkInBags)
-  const checkInMax = Math.min(MAX_CHECKIN_BAGS, Math.max(0, MAX_TOTAL_BAGS - cabinBags))
 const [stops, setStops] = useState<Array<LocationData | null>>([])
   const [loadingPricing, setLoadingPricing] = useState(false)
   const [pricingError, setPricingError] = useState('')
@@ -158,7 +151,14 @@ const [stops, setStops] = useState<Array<LocationData | null>>([])
       const originPlaceId = location.placeId
       const stopPlaceIds = stops.filter(s => s?.placeId).map(s => s!.placeId)
 
-      const pricing = await fetchPricing({ originPlaceId, tripType, stops: stopPlaceIds })
+      const pricing = await fetchPricing({
+        originPlaceId,
+        tripType,
+        stops: stopPlaceIds,
+        pickupDateTime: dateTime.toISOString(),
+        originLat: location.lat,
+        originLng: location.lng,
+      })
 
       const userLoc = {
         location: location.description,
@@ -195,8 +195,6 @@ const [stops, setStops] = useState<Array<LocationData | null>>([])
 
       const vehicleParams = {
         passengers: String(passengers),
-        checkInBags: String(checkInBags),
-        cabinBags: String(cabinBags),
 tripType,
         terminal,
         pickup: JSON.stringify(pickupLoc),
@@ -406,7 +404,7 @@ tripType,
             />
           </View>
 
-          {/* Passengers & Bags */}
+          {/* Passengers */}
           <View style={styles.passengerCard}>
             <CompactStepper
               label="Passengers"
@@ -417,28 +415,6 @@ tripType,
               icon={<IconPerson size={20} color={YL.ink} />}
               min={1}
               max={6}
-            />
-            <View style={styles.passengerDivider} />
-            <CompactStepper
-              label="Check-in bags"
-              sub="fits in boot · max 3"
-              value={checkInBags}
-              onInc={() => { const n = Math.min(checkInBags + 1, checkInMax); setCheckInBags(n); setCabinBags(c => Math.min(c, MAX_TOTAL_BAGS - n)) }}
-              onDec={() => setCheckInBags(v => Math.max(0, v - 1))}
-              icon={<IconBag size={22} large color={YL.ink} />}
-              min={0}
-              max={checkInMax}
-            />
-            <View style={styles.passengerDivider} />
-            <CompactStepper
-              label="Cabin bags"
-              sub="hand luggage · max 5"
-              value={cabinBags}
-              onInc={() => { const n = Math.min(cabinBags + 1, cabinMax); setCabinBags(n); setCheckInBags(c => Math.min(c, MAX_CHECKIN_BAGS, MAX_TOTAL_BAGS - n)) }}
-              onDec={() => setCabinBags(v => Math.max(0, v - 1))}
-              icon={<IconBag size={20} color={YL.ink} />}
-              min={0}
-              max={cabinMax}
             />
           </View>
 

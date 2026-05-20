@@ -1,0 +1,2 @@
+ALTER TABLE bookings DROP COLUMN IF EXISTS bags;
+ALTER TABLE bookings DROP COLUMN IF EXISTS cabin_bags;

@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Lead, Booking } from '../types'
 import { patchLead, createBooking, downloadCSV } from '../api'
-import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile } from '../components/ui'
+import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile, formatPhone, telPhone } from '../components/ui'
 
 const minutesUntil = (iso: string) => Math.round((new Date(iso).getTime() - Date.now()) / 60000)
 const fmtAge = (iso: string) => {
@@ -66,7 +66,7 @@ function LeadDrawer({ lead, onClose, onMark, onConvert, isMobile }: { lead: Lead
             <Avatar name={name} size={40}/>
             <Stack gap={3} style={{ flex: 1 }}>
               <div style={{ fontSize: 14, color: YL.ink, fontWeight: 500 }}>{name}</div>
-              {phone && <Mono size={12} color={YL.ink2}>{phone}</Mono>}
+              {phone && <Mono size={12} color={YL.ink2}>{formatPhone(phone)}</Mono>}
             </Stack>
           </div>
         </div>
@@ -199,14 +199,14 @@ function LeadDrawer({ lead, onClose, onMark, onConvert, isMobile }: { lead: Lead
           {lead.status !== 'converted' && lead.status !== 'lost' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {phone && (
-                <a href={`tel:${phone.replace(/\s/g, '')}`} style={{ textDecoration: 'none' }}>
+                <a href={`tel:${telPhone(phone)}`} style={{ textDecoration: 'none' }}>
                   <Button variant="secondary" icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.phone}</span>} style={{ width: '100%', justifyContent: 'center' }}>
                     Call {name.split(' ')[0]}
                   </Button>
                 </a>
               )}
               {phone && (
-                <a href={`https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${name.split(' ')[0]}, this is Yellow. Following up on your ride quote.`)}`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                <a href={`https://wa.me/${telPhone(phone).replace('+', '')}?text=${encodeURIComponent(`Hi ${name.split(' ')[0]}, this is Yellow. Following up on your ride quote.`)}`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
                   <Button variant="ghost" icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.whatsapp}</span>} style={{ width: '100%', justifyContent: 'center' }}>WhatsApp</Button>
                 </a>
               )}
@@ -285,8 +285,6 @@ export default function LeadsPage({ leads, bookings: _bookings, onUpdate, onBook
         tripType: lead.trip_type || 'drop',
         vehicleType: 'yellowSky',
         passengers: 1,
-        luggage: 1,
-        cabinBags: 0,
         pickup,
         drop: lead.drop,
         pricing,
@@ -388,7 +386,7 @@ export default function LeadsPage({ leads, bookings: _bookings, onUpdate, onBook
                     <Avatar name={lead.user_name || lead.user_phone || '?'} size={32} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.user_name || '—'}</div>
-                      <Mono size={11} color={YL.ink2}>{lead.user_phone}</Mono>
+                      <Mono size={11} color={YL.ink2}>{formatPhone(lead.user_phone)}</Mono>
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <Mono size={13} weight={700}>{fmtINR(lead.price)}</Mono>

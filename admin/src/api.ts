@@ -73,6 +73,8 @@ export const getBookings   = ()             => adminFetch('/bookings')
 export const getBooking    = (id: string)   => adminFetch(`/bookings/${id}`)
 export const patchBooking  = (id: string, body: object) =>
   adminFetch(`/bookings/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+export const deleteBooking = (id: string)   =>
+  adminFetch(`/bookings/${id}`, { method: 'DELETE' })
 export const createBooking = (body: object) =>
   adminFetch('/bookings', { method: 'POST', body: JSON.stringify(body) })
 
@@ -80,16 +82,21 @@ export const getDrivers   = ()             => adminFetch('/drivers')
 export const createDriver = (body: object) => adminFetch('/drivers', { method: 'POST', body: JSON.stringify(body) })
 export const patchDriver  = (id: string, body: object) =>
   adminFetch(`/drivers/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+export const getDriverBookings = (id: string) => adminFetch(`/drivers/${id}/bookings`)
 
 export const getVehicles   = ()             => adminFetch('/vehicles')
 export const createVehicle = (body: object) => adminFetch('/vehicles', { method: 'POST', body: JSON.stringify(body) })
 export const patchVehicle  = (id: string, body: object) =>
   adminFetch(`/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+export const syncVehicleTrips = ()          => adminFetch('/vehicles/sync-trips', { method: 'POST' })
+export const assignAllTripsToVehicle = (id: string) => adminFetch(`/vehicles/${id}/assign-all-trips`, { method: 'POST' })
 
 export const getCustomers = () => adminFetch('/customers')
 export const patchCustomer = (id: string, body: object) =>
   adminFetch(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const getCustomerBookings = (id: string) => adminFetch(`/customers/${id}/bookings`)
+export const generateReferralCodes = () =>
+  adminFetch('/customers/generate-referral-codes', { method: 'POST' })
 
 export const getLeads   = ()             => adminFetch('/leads')
 export const createLead = (body: object) => adminFetch('/leads', { method: 'POST', body: JSON.stringify(body) })
@@ -99,16 +106,67 @@ export const patchLead  = (id: string, body: object) =>
 export const getPricing  = ()               => adminFetch('/pricing')
 export const savePricing = (config: object) =>
   adminFetch('/pricing', { method: 'PUT', body: JSON.stringify({ config }) })
-export const calcPricing = (body: { originPlaceId?: string; tripType?: string; distanceKm?: number; stopPlaceIds?: string[] }) =>
+export const calcPricing = (body: { originPlaceId?: string; destPlaceId?: string; tripType?: string; distanceKm?: number; stopPlaceIds?: string[]; durationHours?: number }) =>
   adminFetch('/pricing/calculate', { method: 'POST', body: JSON.stringify(body) })
 
-export const generatePaymentLink = (id: string) =>
-  adminFetch(`/bookings/${id}/payment-link`, { method: 'POST' })
+export const generatePaymentLink = (id: string, type: 'upi' | 'standard' = 'upi') =>
+  adminFetch(`/bookings/${id}/payment-link`, { method: 'POST', body: JSON.stringify({ type }), headers: { 'Content-Type': 'application/json' } })
+
+export const syncPaymentStatus = (id: string) =>
+  adminFetch(`/bookings/${id}/sync-payment`, { method: 'POST' })
 
 export const getStats = () => adminFetch('/stats')
 
+export function downloadCSV(rows: object[], filename: string) {
+  if (!rows.length) return
+  const escape = (v: unknown) => {
+    const s = v == null ? '' : String(v).replace(/"/g, '""')
+    return /[",\n\r]/.test(s) ? `"${s}"` : s
+  }
+  const headers = Object.keys(rows[0])
+  const csv = [headers.join(','), ...rows.map(r => headers.map(h => escape((r as any)[h])).join(','))].join('\n')
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 export const lookupFlight = (flightNumber: string, date?: string) =>
   adminFetch(`/flights/lookup?flight_number=${encodeURIComponent(flightNumber)}${date ? `&date=${date}` : ''}`)
+
+export const getInvoices = (offset = 0, search = '') =>
+  adminFetch(`/invoices?offset=${offset}&limit=50${search ? `&search=${encodeURIComponent(search)}` : ''}`)
+
+export function openInvoice(tripCode: string): void {
+  const token = getStoredAdminToken()
+  const url = `/invoices/${encodeURIComponent(tripCode)}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  const win = window.open(url, '_blank')
+  if (!win) alert('Pop-up blocked — please allow pop-ups for this site and try again.')
+}
+
+export async function emailInvoice(tripCode: string, to: string[]): Promise<void> {
+  const token = getStoredAdminToken()
+  const res = await fetch(`/invoices/${encodeURIComponent(tripCode)}/email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ to }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || 'Failed to send email')
+  }
+}
+
+export const getSettings  = ()               => adminFetch('/settings')
+export const saveSettings = (config: object) =>
+  adminFetch('/settings', { method: 'PUT', body: JSON.stringify({ config }) })
+
+export const lookupGstin = (gstin: string) =>
+  adminFetch(`/gstin-lookup?gstin=${encodeURIComponent(gstin)}`)
 
 export const getTeam        = ()                  => adminFetch('/team')
 export const addTeamMember  = (body: object)      => adminFetch('/team', { method: 'POST', body: JSON.stringify(body) })

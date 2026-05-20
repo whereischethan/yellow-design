@@ -40,8 +40,8 @@ router.get('/lookup', async (req: Request, res: Response) => {
     return res.json({
       flightNumber: flight?.number ?? flight_number,
       airline: flight?.airline?.name ?? '',
-      departure: flight?.departure?.scheduledTimeLocal ?? flight?.departure?.scheduledTimeUtc ?? '',
-      arrival: flight?.arrival?.scheduledTimeLocal ?? flight?.arrival?.scheduledTimeUtc ?? '',
+      departure: flight?.departure?.scheduledTime?.local ?? flight?.departure?.scheduledTime?.utc ?? '',
+      arrival: flight?.arrival?.revisedTime?.local ?? flight?.arrival?.scheduledTime?.local ?? flight?.arrival?.scheduledTime?.utc ?? '',
       status: flight?.status ?? 'scheduled',
       terminal: flight?.arrival?.terminal ?? '',
       gate: flight?.arrival?.gate ?? '',

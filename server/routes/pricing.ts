@@ -14,6 +14,39 @@ async function getDistanceKm(originPlaceId: string, destPlaceId: string): Promis
   if (!GOOGLE_MAPS_KEY) {
     return { distanceKm: 28, durationMinutes: 45 }
   }
+
+  // Try Routes API first (supports avoidTolls:false to force highway route)
+  try {
+    const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
+        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+      },
+      body: JSON.stringify({
+        origin: { placeId: originPlaceId },
+        destination: { placeId: destPlaceId },
+        travelMode: 'DRIVE',
+        routingPreference: 'TRAFFIC_AWARE_OPTIMAL',
+        routeModifiers: { avoidTolls: false, avoidHighways: false, avoidFerries: true },
+      }),
+    })
+    const data = await res.json() as any
+    const route = data?.routes?.[0]
+    if (route?.distanceMeters) {
+      return {
+        distanceKm: Math.round((route.distanceMeters / 1000) * 10) / 10,
+        // duration comes back as e.g. "1234s"
+        durationMinutes: Math.round(parseInt(String(route.duration)) / 60),
+      }
+    }
+    console.warn('[pricing] Routes API failed, falling back to Distance Matrix:', JSON.stringify(data?.error ?? data))
+  } catch (e) {
+    console.warn('[pricing] Routes API error, falling back to Distance Matrix:', e)
+  }
+
+  // Fallback: Distance Matrix API
   const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=place_id:${encodeURIComponent(originPlaceId)}&destinations=place_id:${encodeURIComponent(destPlaceId)}&key=${GOOGLE_MAPS_KEY}&mode=driving`
   const res = await fetch(url)
   const data = await res.json() as any
@@ -116,6 +149,19 @@ router.post('/', async (req: Request, res: Response) => {
     })
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Pricing calculation failed' })
+  }
+})
+
+// Public endpoint: returns customer-facing config values (hourly rate, etc.)
+router.get('/config', async (_req: Request, res: Response) => {
+  try {
+    const cfg = await getPricingConfig()
+    res.json({
+      hourlyRate: cfg.hourly_base_rate ?? 500,
+      hourlyGst: cfg.hourly_gst ?? 5,
+    })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
   }
 })
 

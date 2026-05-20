@@ -103,10 +103,14 @@ export default function ScreenAirport() {
   const [loadingFlight, setLoadingFlight] = useState(false)
   const [dateTime, setDateTime] = useState<Date>(defaultDateTime)
   const [passengers, setPassengers] = useState(4)
-  const [bags, setBags] = useState(5)
-  const [meetAndGreet, setMeetAndGreet] = useState(false)
-  const [petFriendly, setPetFriendly] = useState(false)
-  const [stops, setStops] = useState<Array<LocationData | null>>([])
+  const [checkInBags, setCheckInBags] = useState(1)
+  const [cabinBags, setCabinBags] = useState(0)
+
+  const MAX_TOTAL_BAGS = 5
+  const MAX_CHECKIN_BAGS = 3
+  const cabinMax = Math.max(0, MAX_TOTAL_BAGS - checkInBags)
+  const checkInMax = Math.min(MAX_CHECKIN_BAGS, Math.max(0, MAX_TOTAL_BAGS - cabinBags))
+const [stops, setStops] = useState<Array<LocationData | null>>([])
   const [loadingPricing, setLoadingPricing] = useState(false)
   const [pricingError, setPricingError] = useState('')
 
@@ -191,10 +195,9 @@ export default function ScreenAirport() {
 
       const vehicleParams = {
         passengers: String(passengers),
-        bags: String(bags),
-        meetAndGreet: meetAndGreet ? '1' : '0',
-        petFriendly: petFriendly ? '1' : '0',
-        tripType,
+        checkInBags: String(checkInBags),
+        cabinBags: String(cabinBags),
+tripType,
         terminal,
         pickup: JSON.stringify(pickupLoc),
         drop: JSON.stringify(dropLoc),
@@ -417,39 +420,29 @@ export default function ScreenAirport() {
             />
             <View style={styles.passengerDivider} />
             <CompactStepper
-              label="Bags"
-              sub="check-in size"
-              value={bags}
-              onInc={() => setBags(v => v + 1)}
-              onDec={() => setBags(v => v - 1)}
+              label="Check-in bags"
+              sub="fits in boot · max 3"
+              value={checkInBags}
+              onInc={() => { const n = Math.min(checkInBags + 1, checkInMax); setCheckInBags(n); setCabinBags(c => Math.min(c, MAX_TOTAL_BAGS - n)) }}
+              onDec={() => setCheckInBags(v => Math.max(0, v - 1))}
               icon={<IconBag size={22} large color={YL.ink} />}
               min={0}
-              max={6}
+              max={checkInMax}
+            />
+            <View style={styles.passengerDivider} />
+            <CompactStepper
+              label="Cabin bags"
+              sub="hand luggage · max 5"
+              value={cabinBags}
+              onInc={() => { const n = Math.min(cabinBags + 1, cabinMax); setCabinBags(n); setCheckInBags(c => Math.min(c, MAX_CHECKIN_BAGS, MAX_TOTAL_BAGS - n)) }}
+              onDec={() => setCabinBags(v => Math.max(0, v - 1))}
+              icon={<IconBag size={20} color={YL.ink} />}
+              min={0}
+              max={cabinMax}
             />
           </View>
 
-          {/* Add-ons */}
-          <View style={styles.addOnsSection}>
-            <Text style={styles.monoLabel}>ADD-ONS (OPTIONAL)</Text>
-            <View style={styles.chipsRow}>
-              <Pressable
-                style={[styles.chip, meetAndGreet && styles.chipActive]}
-                onPress={() => setMeetAndGreet(v => !v)}
-              >
-                {meetAndGreet && <View style={{ marginRight: 4 }}><CheckIcon /></View>}
-                <Text style={[styles.chipText, meetAndGreet && styles.chipTextActive]}>Meet & greet +₹100</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.chip, petFriendly && styles.chipActive]}
-                onPress={() => setPetFriendly(v => !v)}
-              >
-                {petFriendly && <View style={{ marginRight: 4 }}><CheckIcon /></View>}
-                <Text style={[styles.chipText, petFriendly && styles.chipTextActive]}>Pet-friendly</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {!!pricingError && (
+{!!pricingError && (
             <Text style={styles.pricingError}>{pricingError}</Text>
           )}
         </ScrollView>

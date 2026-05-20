@@ -1,366 +1,276 @@
-import DateTimePicker from "@react-native-community/datetimepicker";
-import { router } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useState } from 'react'
 import {
-  ActivityIndicator, KeyboardAvoidingView, Modal, Platform,
-  Pressable, ScrollView, StyleSheet, Text, View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { LocationAutocomplete, LocationData } from "../../components/location/LocationAutocomplete";
-import { YL } from "../../constants/theme";
-import { fetchPricing } from "../../lib/api";
+  View, Text, Pressable, StyleSheet, ScrollView, Linking,
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
+import Svg, { Path } from 'react-native-svg'
+import { YL, FONTS } from '../../constants/theme'
+import YAppChrome from '../../components/YAppChrome'
+import YButton from '../../components/YButton'
+import StepBtn from '../../components/StepBtn'
+import LocationAutocomplete from '../../components/location/LocationAutocomplete'
+import SavedPlacesSuggest from '../../components/SavedPlacesSuggest'
+import DateTimePicker from '../../components/DateTimePicker'
+import type { LocationData } from '../../types/booking'
+import { SUPPORT_WHATSAPP } from '../../constants/config'
 
-function fmtDate(d: Date) {
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-}
-function fmtTime(d: Date) {
-  return d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
-}
-function roundTo15(d: Date) {
-  const n = new Date(d);
-  n.setMinutes(Math.round(n.getMinutes() / 15) * 15, 0, 0);
-  return n;
-}
-function toLocalDateString(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+type TripKind = 'oneway' | 'round'
+
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d)
+  r.setDate(r.getDate() + n)
+  return r
 }
 
-export default function OutstationScreen() {
-  const [pickup, setPickup] = useState<LocationData>({ description: "", placeId: "" });
-  const [destination, setDestination] = useState<LocationData>({ description: "", placeId: "" });
-  const [tripVariant, setTripVariant] = useState<"one_way" | "round_trip">("one_way");
-  const [dateTime, setDateTime] = useState<Date | null>(null);
-  const [dateSelected, setDateSelected] = useState(false);
-  const [passengers, setPassengers] = useState(1);
-  const [luggage, setLuggage] = useState(1);
-  const [pricing, setPricing] = useState<any>(null);
-  const [loadingPricing, setLoadingPricing] = useState(false);
-  const [pricingError, setPricingError] = useState<string | null>(null);
-  const [showPicker, setShowPicker] = useState(false);
-  const [pickerMode, setPickerMode] = useState<"date" | "time">("date");
-  const [isWebClient, setIsWebClient] = useState(false);
-  const [isIOSWeb, setIsIOSWeb] = useState(false);
+function fmtDate(d: Date): string {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const h = d.getHours()
+  const m = d.getMinutes().toString().padStart(2, '0')
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 || 12
+  return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} at ${h12}:${m} ${ampm}`
+}
 
-  const dateRef = useRef<HTMLInputElement | null>(null);
-  const timeRef = useRef<HTMLInputElement | null>(null);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+function WhatsAppIcon() {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 20 20" fill="none">
+      <Path
+        d="M10 1.5C5.306 1.5 1.5 5.306 1.5 10C1.5 11.572 1.928 13.044 2.672 14.306L1.5 18.5L5.832 17.354C7.056 18.044 8.48 18.44 10 18.44C14.694 18.44 18.5 14.634 18.5 9.94C18.5 5.246 14.694 1.5 10 1.5Z"
+        fill="#25D366"
+      />
+      <Path
+        d="M7.6 6.4C7.4 6 7.1 6 6.9 6C6.7 6 6.5 6 6.3 6C6.1 6 5.8 6.1 5.5 6.4C5.2 6.7 4.5 7.4 4.5 8.7C4.5 10 5.5 11.3 5.6 11.5C5.7 11.7 7.4 14.5 10.2 15.5C12.5 16.4 13 16.2 13.5 16.2C14 16.2 15.1 15.5 15.4 14.8C15.7 14.1 15.7 13.5 15.6 13.4C15.5 13.3 15.3 13.2 15 13.1C14.7 13 13.4 12.4 13.2 12.3C13 12.2 12.8 12.2 12.6 12.4C12.4 12.6 11.9 13.2 11.7 13.4C11.5 13.6 11.4 13.6 11.1 13.5C10.8 13.4 9.9 13.1 8.8 12.1C7.9 11.3 7.3 10.3 7.2 10C7.1 9.7 7.2 9.6 7.4 9.4C7.5 9.3 7.7 9.1 7.8 8.9C7.9 8.7 8 8.6 8.1 8.4C8.2 8.2 8.1 8 8 7.8C7.9 7.6 7.4 6.4 7.6 6.4Z"
+        fill="white"
+      />
+    </Svg>
+  )
+}
 
-  useEffect(() => {
-    if (Platform.OS === "web") {
-      setIsWebClient(true);
-      setIsIOSWeb(/iPhone|iPad|iPod/.test(navigator.userAgent));
+export default function ScreenOutstation() {
+  const router = useRouter()
+  const [tripKind, setTripKind] = useState<TripKind>('round')
+  const [origin, setOrigin] = useState<LocationData | null>(null)
+  const [dest, setDest] = useState<LocationData | null>(null)
+  const [departDate, setDepartDate] = useState<Date>(() => { const d = addDays(new Date(), 3); d.setHours(7, 0, 0, 0); return d })
+  const [returnDate, setReturnDate] = useState<Date>(() => { const d = addDays(new Date(), 5); d.setHours(18, 0, 0, 0); return d })
+  const [passengers, setPassengers] = useState(2)
+  const [bags, setBags] = useState(2)
+  const [error, setError] = useState('')
+
+  const canRequest = !!(origin && dest)
+
+  const handleRequestWhatsApp = () => {
+    if (!origin || !dest) {
+      setError('Please enter pickup and destination.')
+      return
     }
-  }, []);
+    setError('')
 
-  const canContinue = pickup.placeId.length > 0 && destination.placeId.length > 0 && dateSelected && pricing !== null;
+    const from = origin.placeName ?? origin.description
+    const to = dest.placeName ?? dest.description
+    const lines = [
+      `Hi Yellow! I'd like to book an outstation trip.`,
+      ``,
+      `Type: ${tripKind === 'round' ? 'Round trip' : 'One-way'}`,
+      `From: ${from}`,
+      `To: ${to}`,
+      `Depart: ${fmtDate(departDate)}`,
+      ...(tripKind === 'round' ? [`Return: ${fmtDate(returnDate)}`] : []),
+      `Passengers: ${passengers}`,
+      `Bags: ${bags}`,
+    ]
 
-  const fetchPrice = useCallback(async (pu: LocationData, dest: LocationData, variant: "one_way" | "round_trip") => {
-    if (!pu.placeId || !dest.placeId) return;
-    setLoadingPricing(true);
-    setPricingError(null);
-    try {
-      const result = await fetchPricing({
-        rideType: "outstation",
-        originPlaceId: pu.placeId,
-        destinationPlaceId: dest.placeId,
-        tripVariant: variant,
-      });
-      setPricing(result);
-    } catch (err) {
-      setPricing(null);
-      setPricingError(err instanceof Error ? err.message : "Unable to calculate price");
-    } finally {
-      setLoadingPricing(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchPrice(pickup, destination, tripVariant); }, [pickup.placeId, destination.placeId, tripVariant]);
-
-  const openPicker = (mode: "date" | "time") => {
-    if (Platform.OS === "web") {
-      if (mode === "date") (dateRef.current as any)?.showPicker?.();
-      else (timeRef.current as any)?.showPicker?.();
-      return;
-    }
-    setPickerMode(mode); setShowPicker(true);
-  };
-
-  const onNativeChange = (event: any, selected?: Date) => {
-    setShowPicker(false);
-    if (event.type === "dismissed" || !selected) return;
-    const base = dateTime ?? roundTo15(new Date());
-    const n = new Date(base);
-    if (pickerMode === "date") { n.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate()); setDateSelected(true); }
-    else n.setHours(selected.getHours(), selected.getMinutes());
-    setDateTime(n);
-  };
-
-  function proceed() {
-    if (!canContinue || !dateTime || !pricing) return;
-    const booking = {
-      rideType: "outstation",
-      vehicle: "yellow",
-      tripVariant,
-      passengers, luggage,
-      price: pricing.vehicleOptions?.yellow?.totalPrice ?? pricing.totalPrice,
-      pricing: { distanceKm: pricing.distanceKm, basePrice: pricing.basePrice, extraKmCharge: pricing.extraKmCharge, totalPrice: pricing.totalPrice, vehicleOptions: pricing.vehicleOptions },
-      pickup: { location: pickup.description, placeName: pickup.placeName, placeId: pickup.placeId, lat: pickup.lat, lng: pickup.lng, time: fmtTime(dateTime), dateTime: dateTime.toISOString() },
-      drop: { location: destination.description, placeName: destination.placeName, placeId: destination.placeId, lat: destination.lat, lng: destination.lng, dateTime: dateTime.toISOString() },
-      stops: [],
-    };
-    router.push({ pathname: "/(app)/vehicle", params: { booking: JSON.stringify(booking), journeyId: `${Date.now()}` } });
+    const msg = encodeURIComponent(lines.join('\n'))
+    Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP}?text=${msg}`)
   }
 
   return (
-    <SafeAreaView style={s.root}>
-      <View style={s.chrome}>
-        <Pressable style={s.backBtn} onPress={() => router.back()}>
-          <Text style={s.backIcon}>‹</Text>
-        </Pressable>
-        <Text style={s.screenTitle}>Outstation</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <SafeAreaView style={styles.root} edges={['top']}>
+      <YAppChrome
+        right={
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: YL.ink3, letterSpacing: 0.4 }}>
+            OUTSTATION
+          </Text>
+        }
+      />
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="always">
-          <View style={s.body}>
-
-            {/* Trip variant */}
-            <View style={s.tabRow}>
-              {(["one_way", "round_trip"] as const).map((v) => (
-                <Pressable key={v} style={[s.tab, tripVariant === v && s.tabActive]}
-                  onPress={() => setTripVariant(v)}>
-                  <Text style={[s.tabText, tripVariant === v && s.tabTextActive]}>
-                    {v === "one_way" ? "One-way" : "Round trip"}
-                  </Text>
-                  {v === "one_way" && <Text style={[s.tabSub, tripVariant === v && s.tabSubActive]}>25% off</Text>}
-                </Pressable>
-              ))}
-            </View>
-
-            {/* Route card */}
-            <View style={s.card}>
-              <Text style={s.cardLabel}>ROUTE · ಮಾರ್ಗ</Text>
-              <View style={s.routeWrap}>
-                <View style={s.routeRow}>
-                  <View style={s.dotCol}>
-                    <View style={[s.dot, { backgroundColor: YL.ink }]} />
-                    <View style={s.dash} />
-                  </View>
-                  <View style={s.routeContent}>
-                    <Text style={s.routeLabel}>FROM · ಎಲ್ಲಿಂದ</Text>
-                    <LocationAutocomplete placeholder="Bengaluru pickup address" value={pickup.description} onLocationSelect={setPickup} />
-                  </View>
-                </View>
-                <View style={s.routeRow}>
-                  <View style={s.dotCol}>
-                    <View style={[s.dot, { backgroundColor: YL.yellow, borderWidth: 1.5, borderColor: YL.ink }]} />
-                  </View>
-                  <View style={s.routeContent}>
-                    <Text style={s.routeLabel}>TO · ಎಲ್ಲಿಗೆ</Text>
-                    <LocationAutocomplete placeholder="Destination city or address" value={destination.description} onLocationSelect={setDestination} />
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* Popular destinations */}
-            <View>
-              <Text style={s.sectionLabel}>POPULAR FROM BENGALURU</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 2 }}>
-                {["Coorg", "Mysuru", "Ooty", "Chikmagalur", "Pondicherry", "Goa"].map((city) => (
-                  <Pressable key={city} style={s.destChip}
-                    onPress={() => setDestination({ description: city + ", Karnataka", placeId: "", placeName: city })}>
-                    <Text style={s.destChipText}>{city}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* Date & time */}
-            <View style={s.card}>
-              <Text style={s.cardLabel}>DEPARTURE · ಹೊರಡುವ ಸಮಯ</Text>
-              <View style={s.row}>
-                <Pressable style={[s.inputField, { flex: 1.2 }]} onPress={() => !isIOSWeb && openPicker("date")}>
-                  <Text style={s.fieldLabel}>DATE</Text>
-                  <Text style={[s.fieldValue, !dateTime && { color: YL.ink3 }]}>{dateTime ? fmtDate(dateTime) : "Select date"}</Text>
-                  {isWebClient && !isIOSWeb && (
-                    <input ref={dateRef} type="date" min={toLocalDateString(today)}
-                      style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" } as any}
-                      value={dateTime ? toLocalDateString(dateTime) : ""}
-                      onChange={(e: any) => {
-                        if (!e.target.value) return;
-                        const [y, m, d] = e.target.value.split("-");
-                        const base = dateTime ?? roundTo15(new Date());
-                        const n = new Date(base); n.setFullYear(+y, +m - 1, +d);
-                        setDateTime(n); setDateSelected(true);
-                      }} />
-                  )}
-                </Pressable>
-                <Pressable style={[s.inputField, { flex: 1 }]} onPress={() => !isIOSWeb && openPicker("time")}>
-                  <Text style={s.fieldLabel}>TIME</Text>
-                  <Text style={[s.fieldValue, !dateTime && { color: YL.ink3 }]}>{dateTime ? fmtTime(dateTime) : "Select"}</Text>
-                  {isWebClient && !isIOSWeb && (
-                    <input ref={timeRef} type="time"
-                      style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" } as any}
-                      value={dateTime ? dateTime.toTimeString().slice(0, 5) : ""}
-                      onChange={(e: any) => {
-                        const [h, m] = e.target.value.split(":");
-                        const base = dateTime ?? roundTo15(new Date());
-                        const n = new Date(base); n.setHours(+h, +m);
-                        setDateTime(roundTo15(n));
-                      }} />
-                  )}
-                </Pressable>
-                {isIOSWeb && (
-                  <input type="datetime-local" min={toLocalDateString(today) + "T00:00"}
-                    style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" } as any}
-                    value={dateTime ? `${toLocalDateString(dateTime)}T${dateTime.toTimeString().slice(0, 5)}` : ""}
-                    onChange={(e: any) => { if (!e.target.value) return; setDateTime(roundTo15(new Date(e.target.value))); setDateSelected(true); }} />
-                )}
-              </View>
-            </View>
-
-            {/* Passengers */}
-            <View style={s.card}>
-              <Text style={s.cardLabel}>PASSENGERS & BAGS</Text>
-              <StepperRow label="Passengers" sub="ಪ್ರಯಾಣಿಕರು" value={passengers} min={1} max={6} onChange={setPassengers} />
-              <View style={s.divider} />
-              <StepperRow label="Bags" sub="ಚೀಲಗಳು" value={luggage} min={0} max={8} onChange={setLuggage} />
-            </View>
-
-            {/* Price */}
-            {loadingPricing && (
-              <View style={s.pricingRow}>
-                <ActivityIndicator size="small" color={YL.yellow} />
-                <Text style={s.pricingText}>Calculating fare…</Text>
-              </View>
-            )}
-            {pricingError && <Text style={s.errorText}>{pricingError}</Text>}
-            {pricing && !loadingPricing && (
-              <View style={s.priceCard}>
-                <View style={s.priceRow}>
-                  <Text style={s.priceLabel}>Distance</Text>
-                  <Text style={s.priceVal}>{pricing.distanceKm} km</Text>
-                </View>
-                <View style={s.priceRow}>
-                  <Text style={s.priceLabel}>{tripVariant === "round_trip" ? "Round trip · ₹32/km × 2" : "One-way · ₹32/km × 0.75"}</Text>
-                  <Text style={s.priceTotal}>₹{(pricing.vehicleOptions?.yellow?.totalPrice ?? pricing.totalPrice).toLocaleString("en-IN")}</Text>
-                </View>
-                <Text style={s.priceNote}>Tolls & GST included · Driver allowance included</Text>
-              </View>
-            )}
-          </View>
-        </ScrollView>
-
-        <View style={s.ctaWrap}>
-          <Pressable style={[s.cta, (!canContinue || loadingPricing) && s.ctaDisabled]} onPress={proceed} disabled={!canContinue || loadingPricing}>
-            <Text style={s.ctaText}>Choose vehicle →</Text>
-          </Pressable>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 20 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 }}>
+          <Text style={styles.headline}>
+            Take Yellow out of{' '}
+            <Text style={{ fontStyle: 'italic' }}>town</Text>
+          </Text>
         </View>
-      </KeyboardAvoidingView>
 
-      {Platform.OS === "android" && showPicker && (
-        <DateTimePicker value={dateTime ?? new Date()} mode={pickerMode} is24Hour={false} display="default"
-          minimumDate={pickerMode === "date" ? today : undefined} onChange={onNativeChange} />
-      )}
-      {Platform.OS === "ios" && (
-        <Modal transparent visible={showPicker} animationType="slide" onRequestClose={() => setShowPicker(false)}>
-          <View style={s.overlay}>
-            <Pressable style={{ flex: 1 }} onPress={() => setShowPicker(false)} />
-            <View style={s.sheet}>
-              <View style={s.sheetHeader}>
-                <Text style={s.sheetTitle}>Select {pickerMode === "date" ? "Date" : "Time"}</Text>
-                <Pressable onPress={() => setShowPicker(false)}><Text style={s.sheetDone}>Done</Text></Pressable>
+        {/* Trip type */}
+        <View style={styles.segmentRow}>
+          {(['oneway', 'round'] as TripKind[]).map(k => (
+            <Pressable
+              key={k}
+              style={[styles.segmentBtn, tripKind === k && styles.segmentBtnActive]}
+              onPress={() => setTripKind(k)}
+            >
+              <Text style={[styles.segmentText, tripKind === k && styles.segmentTextActive]}>
+                {k === 'oneway' ? 'One-way' : 'Round trip'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* Route */}
+        <View style={{ paddingHorizontal: 20, gap: 10, marginBottom: 10 }}>
+          <View>
+            <Text style={styles.fieldLabel}>PICKUP IN BANGALORE</Text>
+            <SavedPlacesSuggest onSelect={loc => setOrigin(loc)} />
+            <LocationAutocomplete
+              placeholder="Area or locality in Bangalore"
+              value={origin?.placeName ?? origin?.description}
+              onLocationSelect={loc => setOrigin(loc)}
+              restrictToBangalore
+            />
+          </View>
+          <View>
+            <Text style={styles.fieldLabel}>DESTINATION</Text>
+            <LocationAutocomplete
+              placeholder="City, place anywhere in India"
+              value={dest?.placeName ?? dest?.description}
+              onLocationSelect={loc => setDest(loc)}
+            />
+          </View>
+        </View>
+
+        {/* Dates */}
+        <View style={styles.datesCard}>
+          <View>
+            <Text style={styles.dateLabel}>PICKUP DATE & TIME</Text>
+            <DateTimePicker
+              value={departDate}
+              onChange={setDepartDate}
+              minimumDate={addDays(new Date(), 1)}
+            />
+          </View>
+          {tripKind === 'round' && (
+            <>
+              <View style={styles.dateDivider} />
+              <View>
+                <Text style={styles.dateLabel}>RETURN DATE & TIME</Text>
+                <DateTimePicker
+                  value={returnDate}
+                  onChange={setReturnDate}
+                  minimumDate={addDays(departDate, 1)}
+                />
               </View>
-              <DateTimePicker value={dateTime ?? new Date()} mode={pickerMode} display="spinner" minuteInterval={15}
-                minimumDate={pickerMode === "date" ? today : undefined}
-                onChange={(_, d) => { if (d) { setDateTime(d); if (pickerMode === "date") setDateSelected(true); } }}
-                textColor="black" style={{ width: "100%", height: 200 }} />
+            </>
+          )}
+        </View>
+
+        {/* Passengers & bags */}
+        <View style={styles.stepperCard}>
+          <View style={styles.stepperRow}>
+            <Text style={styles.stepperLabel}>Passengers</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <StepBtn label="-" onPress={() => setPassengers(v => Math.max(1, v - 1))} disabled={passengers <= 1} />
+              <Text style={styles.stepperValue}>{passengers}</Text>
+              <StepBtn label="+" onPress={() => setPassengers(v => Math.min(6, v + 1))} disabled={passengers >= 6} />
             </View>
           </View>
-        </Modal>
-      )}
+          <View style={styles.stepperDivider} />
+          <View style={styles.stepperRow}>
+            <Text style={styles.stepperLabel}>Bags</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <StepBtn label="-" onPress={() => setBags(v => Math.max(0, v - 1))} disabled={bags <= 0} />
+              <Text style={styles.stepperValue}>{bags}</Text>
+              <StepBtn label="+" onPress={() => setBags(v => Math.min(6, v + 1))} disabled={bags >= 6} />
+            </View>
+          </View>
+        </View>
+
+        {/* Info */}
+        <View style={styles.infoCard}>
+          <Text style={styles.infoText}>
+            Our team will confirm pricing and availability on WhatsApp. Inter-state permits, fuel & driver bata included.
+          </Text>
+        </View>
+
+        {!!error && <Text style={styles.error}>{error}</Text>}
+      </ScrollView>
+
+      <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 20 }}>
+        <Pressable
+          onPress={handleRequestWhatsApp}
+          style={({ pressed }) => [styles.waBtn, !canRequest && styles.waBtnDisabled, { opacity: pressed && canRequest ? 0.85 : 1 }]}
+        >
+          <WhatsAppIcon />
+          <Text style={styles.waBtnText}>Request via WhatsApp →</Text>
+        </Pressable>
+      </View>
     </SafeAreaView>
-  );
+  )
 }
 
-function StepperRow({ label, sub, value, min, max, onChange }: { label: string; sub: string; value: number; min: number; max: number; onChange(v: number): void }) {
-  return (
-    <View style={s.stepRow}>
-      <View style={{ flex: 1 }}>
-        <Text style={s.stepLabel}>{label}</Text>
-        <Text style={s.stepKn}>{sub}</Text>
-      </View>
-      <View style={s.stepControls}>
-        <Pressable style={[s.stepBtn, value <= min && s.stepBtnOff]} onPress={() => value > min && onChange(value - 1)}>
-          <Text style={[s.stepBtnTxt, value <= min && s.stepBtnTxtOff]}>−</Text>
-        </Pressable>
-        <Text style={s.stepVal}>{value}</Text>
-        <Pressable style={[s.stepBtn, value >= max && s.stepBtnOff]} onPress={() => value < max && onChange(value + 1)}>
-          <Text style={[s.stepBtnTxt, value >= max && s.stepBtnTxtOff]}>+</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: YL.bg },
-  chrome: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 8, minHeight: 56 },
-  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: YL.bg2, justifyContent: "center", alignItems: "center" },
-  backIcon: { fontSize: 24, color: YL.ink, marginTop: -2 },
-  screenTitle: { fontSize: 16, fontWeight: "600", color: YL.ink },
-  body: { paddingHorizontal: 16, paddingTop: 8, gap: 12 },
-  tabRow: { flexDirection: "row", gap: 8 },
-  tab: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: YL.card, borderWidth: 1.5, borderColor: YL.line, alignItems: "center", gap: 2 },
-  tabActive: { backgroundColor: YL.yellow, borderColor: YL.ink },
-  tabText: { fontSize: 14, fontWeight: "500", color: YL.ink2 },
-  tabTextActive: { fontWeight: "600", color: YL.ink },
-  tabSub: { fontSize: 11, color: YL.leaf, fontWeight: "600" },
-  tabSubActive: { color: YL.ink, opacity: 0.7 },
-  sectionLabel: { fontSize: 11, fontWeight: "700", color: YL.ink3, letterSpacing: 0.5, marginBottom: 8 },
-  card: { backgroundColor: YL.card, borderRadius: 18, borderWidth: 1, borderColor: YL.line, padding: 16, gap: 10 },
-  cardLabel: { fontSize: 11, fontWeight: "700", color: YL.ink3, letterSpacing: 0.5 },
-  routeWrap: {},
-  routeRow: { flexDirection: "row", alignItems: "stretch", minHeight: 52 },
-  dotCol: { width: 24, alignItems: "center", paddingTop: 4 },
-  dot: { width: 12, height: 12, borderRadius: 6 },
-  dash: { flex: 1, width: 0, borderLeftWidth: 1.5, borderLeftColor: YL.line, borderStyle: "dashed", marginVertical: 4 },
-  routeContent: { flex: 1, paddingBottom: 12, paddingLeft: 8, overflow: "visible" },
-  routeLabel: { fontSize: 10.5, fontWeight: "700", color: YL.ink3, letterSpacing: 0.3, marginBottom: 3 },
-  destChip: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: YL.card, borderRadius: 100, borderWidth: 1, borderColor: YL.line },
-  destChipText: { fontSize: 13, fontWeight: "500", color: YL.ink },
-  row: { flexDirection: "row", gap: 10, position: "relative" },
-  inputField: { backgroundColor: YL.bg2, borderRadius: 12, padding: 12, position: "relative" },
-  fieldLabel: { fontSize: 10.5, fontWeight: "600", color: YL.ink3, letterSpacing: 0.3, marginBottom: 4 },
-  fieldValue: { fontSize: 15, fontWeight: "600", color: YL.ink },
-  divider: { height: 1, backgroundColor: YL.lineSoft },
-  stepRow: { flexDirection: "row", alignItems: "center", paddingVertical: 2 },
-  stepLabel: { fontSize: 15, fontWeight: "500", color: YL.ink },
-  stepKn: { fontSize: 11.5, color: YL.ink3, marginTop: 1 },
-  stepControls: { flexDirection: "row", alignItems: "center", gap: 8 },
-  stepBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: YL.ink, justifyContent: "center", alignItems: "center" },
-  stepBtnOff: { backgroundColor: YL.bg2 },
-  stepBtnTxt: { fontSize: 20, fontWeight: "500", color: "#fff", lineHeight: 24 },
-  stepBtnTxtOff: { color: YL.ink3 },
-  stepVal: { width: 28, textAlign: "center", fontSize: 20, fontWeight: "600", color: YL.ink },
-  pricingRow: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", padding: 14, backgroundColor: YL.yellowSoft, borderRadius: 14 },
-  pricingText: { fontSize: 14, color: YL.ink2 },
-  errorText: { fontSize: 12.5, color: "#EF4444", fontWeight: "500", paddingHorizontal: 4 },
-  priceCard: { backgroundColor: YL.card, borderRadius: 16, borderWidth: 1, borderColor: YL.line, padding: 14, gap: 6 },
-  priceRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  priceLabel: { fontSize: 13, color: YL.ink2 },
-  priceVal: { fontSize: 13, color: YL.ink, fontWeight: "500" },
-  priceTotal: { fontSize: 18, fontWeight: "700", color: YL.ink },
-  priceNote: { fontSize: 11.5, color: YL.ink3, marginTop: 2 },
-  ctaWrap: { padding: 16, paddingBottom: 24, borderTopWidth: 1, borderTopColor: YL.lineSoft, backgroundColor: YL.bg },
-  cta: { height: 56, backgroundColor: YL.ink, borderRadius: 16, justifyContent: "center", alignItems: "center" },
-  ctaDisabled: { backgroundColor: YL.line },
-  ctaText: { color: "#fff", fontSize: 16, fontWeight: "600", letterSpacing: -0.2 },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 16 },
-  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, marginBottom: 10 },
-  sheetTitle: { fontSize: 16, fontWeight: "600", color: YL.ink2 },
-  sheetDone: { fontSize: 16, fontWeight: "700", color: YL.ink },
-});
+  headline: {
+    fontFamily: FONTS.display,
+    fontSize: 26,
+    letterSpacing: -0.7,
+    fontWeight: '500',
+    color: YL.ink,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 6,
+    gap: 6,
+  },
+  segmentBtn: {
+    flex: 1, paddingVertical: 9, borderRadius: 12,
+    borderWidth: 1, borderColor: YL.line, backgroundColor: YL.card, alignItems: 'center',
+  },
+  segmentBtnActive: { backgroundColor: YL.ink, borderColor: YL.ink },
+  segmentText: { fontFamily: FONTS.display, fontSize: 12.5, fontWeight: '500', color: YL.ink2 },
+  segmentTextActive: { fontWeight: '600', color: '#FFFFFF' },
+  fieldLabel: {
+    fontFamily: FONTS.mono, fontSize: 10.5, color: YL.ink3,
+    letterSpacing: 0.5, marginBottom: 6,
+  },
+  datesCard: {
+    marginHorizontal: 20, marginBottom: 10, padding: 14,
+    backgroundColor: YL.card, borderWidth: 1, borderColor: YL.line, borderRadius: 18, gap: 12,
+  },
+  dateDivider: { height: 1, backgroundColor: YL.lineSoft },
+  dateLabel: { fontFamily: FONTS.mono, fontSize: 10.5, letterSpacing: 0.3, color: YL.ink3, marginBottom: 6 },
+  stepperCard: {
+    marginHorizontal: 20, marginBottom: 10,
+    backgroundColor: YL.card, borderWidth: 1, borderColor: YL.line, borderRadius: 18,
+    paddingHorizontal: 16,
+  },
+  stepperRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12,
+  },
+  stepperDivider: { height: 1, backgroundColor: YL.lineSoft },
+  stepperLabel: { fontFamily: FONTS.display, fontSize: 14.5, color: YL.ink },
+  stepperValue: { fontFamily: FONTS.display, fontSize: 16, fontWeight: '500', color: YL.ink, minWidth: 24, textAlign: 'center' },
+  infoCard: {
+    marginHorizontal: 20, marginBottom: 10, padding: 12,
+    paddingHorizontal: 14, backgroundColor: YL.leafSoft, borderRadius: 12,
+  },
+  infoText: { fontFamily: FONTS.display, fontSize: 12, color: YL.ink2, lineHeight: 18 },
+  error: { marginHorizontal: 20, color: '#C0392B', fontSize: 13, textAlign: 'center' },
+  waBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    backgroundColor: YL.ink, borderRadius: 16, paddingVertical: 17,
+  },
+  waBtnDisabled: { opacity: 0.4 },
+  waBtnText: {
+    fontFamily: FONTS.display, fontWeight: '600', fontSize: 16, color: YL.yellow,
+  },
+})

@@ -3,7 +3,9 @@ import { randomUUID, createHmac } from 'crypto'
 import jwt from 'jsonwebtoken'
 import prisma from '../lib/prisma'
 import { sendStatusSms, collectPhones } from '../lib/sms'
+import { getInvoiceCounter, getCompanyConfig, COMPANY_KEYS } from '../lib/invoice'
 import { genTripCode } from '../lib/tripcode'
+import { getEmptyLegStatus } from '../lib/emptyLeg'
 
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || ''
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''
@@ -11,7 +13,10 @@ const RAZORPAY_WEBHOOK_SECRET = (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim
 
 const router = Router()
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_prod'
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET env var is required in production')
+  return 'dev_secret_change_in_prod'
+})()
 const ADMIN_KEY = process.env.ADMIN_KEY || 'yellow-ops-dev'
 
 function signAdminToken(phone: string): string {
@@ -188,6 +193,11 @@ router.get('/otp-lookup', async (req, res) => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function tryParse(json: string | null | undefined): any {
+  if (!json) return null
+  try { return JSON.parse(json) } catch { return null }
+}
+
 function buildBooking(row: any) {
   return {
     id: row.id,
@@ -199,31 +209,34 @@ function buildBooking(row: any) {
     tripType: row.tripType,
     vehicleType: row.vehicleType,
     passengers: row.passengerCount,
-    luggage: row.bags,
-    cabinBags: row.cabinBags ?? 0,
-    pickup: row.pickupJson ? JSON.parse(row.pickupJson) : null,
-    drop: row.dropJson ? JSON.parse(row.dropJson) : null,
-    stops: row.stopsJson ? JSON.parse(row.stopsJson) : null,
-    flight: row.flightJson ? JSON.parse(row.flightJson) : null,
-    pricing: row.pricingJson ? JSON.parse(row.pricingJson) : null,
+    pickup: tryParse(row.pickupJson),
+    drop: tryParse(row.dropJson),
+    stops: tryParse(row.stopsJson),
+    flight: tryParse(row.flightJson),
+    pricing: tryParse(row.pricingJson),
     guestName: row.guestName,
     guestPhone: row.guestPhone,
-    assignedDriver: row.assignedDriverJson ? JSON.parse(row.assignedDriverJson) : null,
-    assignedVehicle: row.assignedVehicleJson ? JSON.parse(row.assignedVehicleJson) : null,
+    assignedDriver: tryParse(row.assignedDriverJson),
+    assignedVehicle: tryParse(row.assignedVehicleJson),
     paymentStatus: row.paymentStatus || 'pending',
     paymentMethod: row.paymentMethod ?? null,
     razorpayPaymentId: row.razorpayPaymentId ?? null,
     razorpayLinkId: row.razorpayLinkId ?? null,
     razorpayLinkUrl: row.razorpayLinkUrl ?? null,
+    customerGstin: row.customerGstin ?? null,
+    customerGstName: row.customerGstName ?? null,
+    invoiceNo: row.invoice?.invoiceNo ?? null,
     createdAt: row.createdAt,
   }
 }
 
 // ─── Bookings ─────────────────────────────────────────────────────────────────
 
-router.get('/bookings', async (_req, res) => {
+router.get('/bookings', async (req, res) => {
   try {
-    const rows = await prisma.booking.findMany({ orderBy: { createdAt: 'desc' } })
+    const limit = Math.min(Number(req.query.limit) || 200, 500)
+    const offset = Number(req.query.offset) || 0
+    const rows = await prisma.booking.findMany({ orderBy: { createdAt: 'desc' }, take: limit, skip: offset, include: { invoice: true } })
     const userIds = [...new Set(rows.map(r => r.userId).filter((id): id is string => id != null))]
     const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
     const userMap = new Map(users.map(u => [u.id, u]))
@@ -235,7 +248,7 @@ router.get('/bookings', async (_req, res) => {
 
 router.get('/bookings/:id', async (req, res) => {
   try {
-    const row = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
+    const row = await prisma.booking.findUnique({ where: { id: String(req.params.id) }, include: { invoice: true } })
     if (!row) return res.status(404).json({ error: 'Booking not found' })
     const user = row.userId ? await prisma.user.findUnique({ where: { id: row.userId }, select: { id: true, name: true, phone: true } }) : null
     res.json({ booking: buildBooking({ ...row, user }) })
@@ -246,7 +259,7 @@ router.get('/bookings/:id', async (req, res) => {
 
 router.post('/bookings', async (req, res) => {
   try {
-    const { tripType, vehicleType = 'yellowSky', passengers = 1, luggage = 0, cabinBags = 0,
+    const { tripType, vehicleType = 'yellowSky', passengers = 1,
       pickup, drop, stops, flight, pricing, guestName, guestPhone, userId,
       assignedDriver, assignedVehicle } = req.body
     if (!pickup || !drop || !pricing) return res.status(400).json({ error: 'pickup, drop, pricing required' })
@@ -275,8 +288,6 @@ router.post('/bookings', async (req, res) => {
         vehicleType,
         price: pricing.totalPrice ?? 0,
         passengerCount: passengers,
-        bags: luggage,
-        cabinBags,
         pickupJson: JSON.stringify(pickup),
         dropJson: JSON.stringify(drop),
         stopsJson: stops?.length ? JSON.stringify(stops) : null,
@@ -318,7 +329,9 @@ router.patch('/bookings/:id', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'Booking not found' })
 
     const { status, assignedDriver, assignedVehicle, paymentStatus, paymentMethod,
-            pickupDateTime, guestName, guestPhone, price } = req.body
+            pickupDateTime, guestName, guestPhone, price, fareBreakdown, durationHours,
+            tripType, vehicleType, passengerCount, meetAndGreet, petFriendly,
+            pickup, drop, flight, stops, customerGstin, customerGstName, completedAt } = req.body
     const data: any = {}
 
     if (status !== undefined) data.status = status
@@ -328,16 +341,110 @@ router.patch('/bookings/:id', async (req, res) => {
     if (paymentMethod !== undefined) data.paymentMethod = paymentMethod
     if (guestName !== undefined) data.guestName = guestName || null
     if (guestPhone !== undefined) data.guestPhone = guestPhone || null
-    if (price !== undefined) data.price = Number(price)
+    if (price !== undefined) {
+      data.price = Number(price)
+      if (fareBreakdown === undefined) {
+        const existing = tryParse(row.pricingJson) ?? {}
+        data.pricingJson = JSON.stringify({ ...existing, totalPrice: Number(price) })
+      }
+    }
+    if (fareBreakdown !== undefined) {
+      const { fareBeforeTax, discount, toll, durationHours } = fareBreakdown as { fareBeforeTax: number; discount?: number; toll: number; durationHours?: number }
+      const taxable = Math.max(0, fareBeforeTax + (toll ?? 0) - (discount ?? 0))
+      const gst = Math.round(taxable * 0.05)
+      const total = taxable + gst
+      const existing = tryParse(row.pricingJson) ?? {}
+      data.pricingJson = JSON.stringify({
+        ...existing,
+        fareBeforeTax,
+        basePrice: fareBeforeTax,
+        discount: discount ?? 0,
+        gst,
+        toll: toll ?? 0,
+        totalPrice: total,
+        ...(durationHours != null ? { durationMinutes: durationHours * 60 } : {}),
+      })
+      data.price = total
+    }
+    if (durationHours !== undefined && fareBreakdown === undefined) {
+      const existing = tryParse(row.pricingJson) ?? {}
+      data.pricingJson = JSON.stringify({ ...existing, durationMinutes: Number(durationHours) * 60 })
+    }
+
+    // Auto-compute actual fare when completing a hourly booking (unless fareBreakdown was explicitly sent)
+    if (status === 'completed' && fareBreakdown === undefined && row.tripType === 'hourly') {
+      const existingPickup = tryParse(row.pickupJson)
+      if (existingPickup?.dateTime) {
+        const startMs = new Date(existingPickup.dateTime).getTime()
+        // Use admin-supplied completedAt (edited end time) if provided, otherwise now
+        const endMs = completedAt ? new Date(completedAt).getTime() : Date.now()
+        const elapsedHours = Math.max(0, (endMs - startMs) / 3_600_000)
+        // Round up to nearest 0.5 hr, minimum 0.5 hr
+        const actualHours = Math.max(0.5, Math.ceil(elapsedHours * 2) / 2)
+        const cfgRows = await prisma.pricingConfig.findMany()
+        const cfgMap: Record<string, number> = cfgRows.reduce(
+          (acc, r) => ({ ...acc, [r.key]: parseFloat(r.value) }),
+          {} as Record<string, number>
+        )
+        const hourlyRate = cfgMap.hourly_base_rate ?? 500
+        const gstRate = (cfgMap.hourly_gst ?? 5) / 100
+        const base = Math.round(actualHours * hourlyRate)
+        const gst = Math.round(base * gstRate)
+        const existingPricing = tryParse(row.pricingJson) ?? {}
+        const toll = existingPricing.toll ?? 0
+        const total = base + gst + toll
+        data.pricingJson = JSON.stringify({
+          ...existingPricing,
+          fareBeforeTax: base,
+          basePrice: base,
+          gst,
+          toll,
+          totalPrice: total,
+          durationMinutes: actualHours * 60,
+          actualEndTime: new Date(endMs).toISOString(),
+          breakdown: {
+            ...(existingPricing.breakdown ?? {}),
+            hours: `${actualHours}h`,
+            rate: `₹${hourlyRate}/hr`,
+            gst: `${cfgMap.hourly_gst ?? 5}%`,
+          },
+        })
+        data.price = total
+      }
+    }
+
+    if (tripType !== undefined) data.tripType = tripType
+    if (vehicleType !== undefined) data.vehicleType = vehicleType
+    if (passengerCount !== undefined) data.passengerCount = Number(passengerCount)
+    if (meetAndGreet !== undefined) data.meetAndGreet = Number(meetAndGreet)
+    if (petFriendly !== undefined) data.petFriendly = Number(petFriendly)
+    if (pickup !== undefined) data.pickupJson = JSON.stringify(pickup)
+    if (drop !== undefined) data.dropJson = JSON.stringify(drop)
+    if (stops !== undefined) data.stopsJson = stops?.length ? JSON.stringify(stops) : null
+    if (flight !== undefined) data.flightJson = flight ? JSON.stringify(flight) : null
+    if (customerGstin !== undefined) data.customerGstin = customerGstin || null
+    if (customerGstName !== undefined) data.customerGstName = customerGstName || null
     if (pickupDateTime !== undefined && row.pickupJson) {
-      const pickup = JSON.parse(row.pickupJson)
-      pickup.dateTime = pickupDateTime
-      data.pickupJson = JSON.stringify(pickup)
+      const existingPickup = tryParse(row.pickupJson) ?? {}
+      existingPickup.dateTime = pickupDateTime
+      data.pickupJson = JSON.stringify(existingPickup)
     }
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Nothing to update' })
 
-    const updated = await prisma.booking.update({ where: { id: String(req.params.id) }, data })
+    // If price changed and there's an unpaid Razorpay link, cancel it so the old URL goes void
+    const priceChanged = data.price !== undefined && data.price !== row.price
+    if (priceChanged && row.razorpayLinkId && row.paymentStatus !== 'paid' && RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) {
+      const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')
+      await fetch(`https://api.razorpay.com/v1/payment_links/${row.razorpayLinkId}/cancel`, {
+        method: 'POST',
+        headers: { 'Authorization': `Basic ${auth}` },
+      }).catch(() => {}) // best-effort; don't block the save
+      data.razorpayLinkId = null
+      data.razorpayLinkUrl = null
+    }
+
+    const updated = await prisma.booking.update({ where: { id: String(req.params.id) }, data, include: { invoice: true } })
 
     if (assignedDriver?.id) {
       const activeStatuses = ['in_progress', 'arrived', 'enroute']
@@ -349,11 +456,9 @@ router.patch('/bookings/:id', async (req, res) => {
       }
     } else if (status === 'completed' || status === 'cancelled') {
       const existingDriverJson = updated.assignedDriverJson ?? row.assignedDriverJson
-      if (existingDriverJson) {
-        const existingDriver = JSON.parse(existingDriverJson)
-        if (existingDriver?.id) {
-          await prisma.driver.update({ where: { id: existingDriver.id }, data: { status: 'available' } }).catch(() => {})
-        }
+      const existingDriver = tryParse(existingDriverJson)
+      if (existingDriver?.id) {
+        await prisma.driver.update({ where: { id: existingDriver.id }, data: { status: 'available' } }).catch(() => {})
       }
     }
 
@@ -363,9 +468,9 @@ router.patch('/bookings/:id', async (req, res) => {
         try {
           const user = updated.userId ? await prisma.user.findUnique({ where: { id: updated.userId }, select: { phone: true } }) : null
           const phones = collectPhones(user?.phone, updated.guestPhone)
-          const driver = assignedDriver ?? (updated.assignedDriverJson ? JSON.parse(updated.assignedDriverJson) : null)
-          const vehicle = updated.assignedVehicleJson ? JSON.parse(updated.assignedVehicleJson) : null
-          const pickup = updated.pickupJson ? JSON.parse(updated.pickupJson) : null
+          const driver = assignedDriver ?? tryParse(updated.assignedDriverJson)
+          const vehicle = tryParse(updated.assignedVehicleJson)
+          const pickup = tryParse(updated.pickupJson)
           const ctx = {
             tripType: updated.tripType ?? undefined,
             pickupDateTime: pickup?.dateTime,
@@ -381,19 +486,13 @@ router.patch('/bookings/:id', async (req, res) => {
 
     // Increment driver and vehicle trip count on completion
     if (status === 'completed') {
-      const driverJson = updated.assignedDriverJson ?? row.assignedDriverJson
-      if (driverJson) {
-        const d = JSON.parse(driverJson)
-        if (d?.id) {
-          await prisma.driver.update({ where: { id: d.id }, data: { trips: { increment: 1 } } }).catch(() => {})
-        }
+      const d = tryParse(updated.assignedDriverJson ?? row.assignedDriverJson)
+      if (d?.id) {
+        await prisma.driver.update({ where: { id: d.id }, data: { trips: { increment: 1 } } }).catch(() => {})
       }
-      const vehicleJson = updated.assignedVehicleJson ?? row.assignedVehicleJson
-      if (vehicleJson) {
-        const v = JSON.parse(vehicleJson)
-        if (v?.licensePlate) {
-          await prisma.vehicle.updateMany({ where: { plate: v.licensePlate }, data: { trips: { increment: 1 } } }).catch(() => {})
-        }
+      const v = tryParse(updated.assignedVehicleJson ?? row.assignedVehicleJson)
+      if (v?.licensePlate) {
+        await prisma.vehicle.updateMany({ where: { plate: v.licensePlate }, data: { trips: { increment: 1 } } }).catch(() => {})
       }
     }
 
@@ -422,6 +521,19 @@ router.patch('/bookings/:id', async (req, res) => {
       })()
     }
 
+    // Generate invoice on completion (if not already generated)
+    if (status === 'completed' && !updated.invoice) {
+      ;(async () => {
+        try {
+          const invoiceNo = await getInvoiceCounter(prisma)
+          const inv = await prisma.invoice.create({ data: { invoiceNo, bookingId: updated.id } })
+          ;(updated as any).invoice = inv
+        } catch (err) {
+          console.error('[INVOICE] Failed to generate invoice:', err)
+        }
+      })()
+    }
+
     res.json({ booking: buildBooking(updated) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
@@ -443,11 +555,12 @@ router.delete('/bookings/:id', async (req, res) => {
 
 router.post('/bookings/:id/payment-link', async (req, res) => {
   try {
+    const type: 'upi' | 'standard' = req.body?.type === 'standard' ? 'standard' : 'upi'
     const row = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
     if (!row) return res.status(404).json({ error: 'Booking not found' })
     if (row.paymentStatus === 'paid' && row.razorpayPaymentId) return res.status(400).json({ error: 'Booking already paid' })
 
-    // Return existing link if already generated
+    // Return cached link if one already exists
     if (row.razorpayLinkUrl) {
       return res.json({ linkUrl: row.razorpayLinkUrl, linkId: row.razorpayLinkId })
     }
@@ -457,21 +570,23 @@ router.post('/bookings/:id/payment-link', async (req, res) => {
     }
 
     const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')
+    const body: Record<string, any> = {
+      amount: (row.price ?? 0) * 100,
+      currency: 'INR',
+      description: `Trip ${row.tripCode}`,
+      reference_id: `${row.tripCode}-${type}`,
+      notify: { sms: false, email: false },
+    }
+    if (type === 'upi') body.upi_link = true
+
     const r = await fetch('https://api.razorpay.com/v1/payment_links', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
-      body: JSON.stringify({
-        upi_link: true,
-        amount: (row.price ?? 0) * 100,
-        currency: 'INR',
-        description: `Trip ${row.tripCode}`,
-        reference_id: row.tripCode,
-        notify: { sms: false, email: false },
-      }),
+      body: JSON.stringify(body),
     })
     if (!r.ok) {
-      const body = await r.text().catch(() => '')
-      return res.status(502).json({ error: `Razorpay error: ${body}` })
+      const text = await r.text().catch(() => '')
+      return res.status(502).json({ error: `Razorpay error: ${text}` })
     }
     const data = await r.json() as any
     const linkId: string = data.id
@@ -554,7 +669,8 @@ router.get('/drivers/:id/bookings', async (req, res) => {
 })
 
 router.post('/drivers', async (req, res) => {
-  const { name, phone, plate, vehicle, doc_license, doc_aadhaar, doc_pan, doc_police, license_no, license_exp, photo_url } = req.body
+  const { name, phone, plate, vehicle, doc_license, doc_aadhaar, doc_pan, doc_police, license_no, license_exp, photo_url,
+    bank_holder, bank_ifsc, bank_account, bank_upi } = req.body
   if (!name || !phone) return res.status(400).json({ error: 'name and phone required' })
   try {
     const id = 'd' + randomUUID().slice(0, 8)
@@ -574,6 +690,10 @@ router.post('/drivers', async (req, res) => {
         licenseNo: license_no ?? null,
         licenseExp: license_exp ?? null,
         photoUrl: photo_url ?? null,
+        bankHolder: bank_holder ?? null,
+        bankIfsc: bank_ifsc ?? null,
+        bankAccount: bank_account ?? null,
+        bankUpi: bank_upi ?? null,
       },
     })
     res.json({ driver: row })
@@ -591,6 +711,7 @@ router.patch('/drivers/:id', async (req, res) => {
       status: 'status', name: 'name', phone: 'phone', rating: 'rating', plate: 'plate', vehicle: 'vehicle',
       doc_license: 'docLicense', doc_aadhaar: 'docAadhaar', doc_pan: 'docPan', doc_police: 'docPolice',
       license_no: 'licenseNo', license_exp: 'licenseExp', photo_url: 'photoUrl',
+      bank_holder: 'bankHolder', bank_ifsc: 'bankIfsc', bank_account: 'bankAccount', bank_upi: 'bankUpi',
     }
     const data: any = {}
     for (const [rawKey, prismaKey] of Object.entries(fieldMap)) {
@@ -607,19 +728,38 @@ router.patch('/drivers/:id', async (req, res) => {
 
 // ─── Vehicles ─────────────────────────────────────────────────────────────────
 
+function mapVehicle(v: any) {
+  return {
+    id: v.id,
+    plate: v.plate,
+    make: v.make,
+    model: v.model,
+    color: v.color,
+    type: v.type,
+    class_key: v.classKey ?? v.class_key,
+    year: v.year,
+    status: v.status,
+    driver_id: v.driverId ?? v.driver_id ?? null,
+    trips: v.trips,
+    is_ev: v.isEv ?? v.is_ev ?? 0,
+    soc: v.soc,
+    odometer: v.odometer,
+    insurance_expiry: v.insuranceExpiry ?? v.insurance_expiry ?? null,
+    fc_expiry: v.fcExpiry ?? v.fc_expiry ?? null,
+    maintenance_note: v.maintenanceNote ?? v.maintenance_note ?? null,
+    driver_name: v.driver?.name ?? v.driver_name ?? null,
+    driver_status: v.driver?.status ?? v.driver_status ?? null,
+    driver_phone: v.driver?.phone ?? v.driver_phone ?? null,
+  }
+}
+
 router.get('/vehicles', async (_req, res) => {
   try {
     const rows = await prisma.vehicle.findMany({
       include: { driver: { select: { name: true, status: true, phone: true } } },
       orderBy: { plate: 'asc' },
     })
-    const vehicles = rows.map(v => ({
-      ...v,
-      driver_name: v.driver?.name ?? null,
-      driver_status: v.driver?.status ?? null,
-      driver_phone: v.driver?.phone ?? null,
-      driver: undefined,
-    }))
+    const vehicles = rows.map(mapVehicle)
     res.json({ vehicles })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
@@ -659,7 +799,7 @@ router.post('/vehicles', async (req, res) => {
       }).catch(() => {})
     }
 
-    res.json({ vehicle: { ...vehicle, driver_name: vehicle.driver?.name ?? null, driver: undefined } })
+    res.json({ vehicle: mapVehicle(vehicle) })
   } catch (e: any) {
     res.status(400).json({ error: e.message })
   }
@@ -674,7 +814,7 @@ router.patch('/vehicles/:id', async (req, res) => {
       status: 'status', driver_id: 'driverId', make: 'make', model: 'model',
       color: 'color', plate: 'plate', soc: 'soc', odometer: 'odometer',
       insurance_expiry: 'insuranceExpiry', fc_expiry: 'fcExpiry', maintenance_note: 'maintenanceNote',
-      class_key: 'classKey', year: 'year',
+      class_key: 'classKey', year: 'year', is_ev: 'isEv',
     }
     const data: any = {}
     for (const [rawKey, prismaKey] of Object.entries(fieldMap)) {
@@ -699,15 +839,7 @@ router.patch('/vehicles/:id', async (req, res) => {
       }
     }
 
-    res.json({
-      vehicle: {
-        ...updated,
-        driver_name: updated.driver?.name ?? null,
-        driver_status: updated.driver?.status ?? null,
-        driver_phone: updated.driver?.phone ?? null,
-        driver: undefined,
-      },
-    })
+    res.json({ vehicle: mapVehicle(updated) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -728,11 +860,44 @@ router.post('/vehicles/sync-trips', async (req, res) => {
   }
 })
 
+router.post('/vehicles/:id/assign-all-trips', requireAdmin, async (req, res) => {
+  try {
+    const vehicle = await prisma.vehicle.findUnique({ where: { id: String(req.params.id) } })
+    if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' })
+
+    const vehicleJson = JSON.stringify({
+      make: vehicle.make, model: vehicle.model,
+      licensePlate: vehicle.plate, color: vehicle.color,
+    })
+
+    // Only update completed bookings that have no vehicle assigned yet
+    const { count } = await prisma.booking.updateMany({
+      where: {
+        status: 'completed',
+        OR: [{ assignedVehicleJson: null }, { assignedVehicleJson: '' }],
+      },
+      data: { assignedVehicleJson: vehicleJson },
+    })
+
+    // Re-sync trip count for this vehicle
+    const tripCount = await prisma.booking.count({
+      where: { assignedVehicleJson: { contains: vehicle.plate }, status: 'completed' },
+    })
+    await prisma.vehicle.update({ where: { id: vehicle.id }, data: { trips: tripCount } })
+
+    res.json({ assigned: count, trips: tripCount })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Customers ────────────────────────────────────────────────────────────────
 
-router.get('/customers', async (_req, res) => {
+router.get('/customers', async (req, res) => {
   try {
-    const rows = await prisma.user.findMany({ orderBy: { createdAt: 'desc' } })
+    const limit = Math.min(Number(req.query.limit) || 200, 500)
+    const offset = Number(req.query.offset) || 0
+    const rows = await prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: limit, skip: offset })
     const tripCounts = await prisma.booking.groupBy({ by: ['userId'], _count: { id: true } })
     const countMap = new Map(tripCounts.map(t => [t.userId, t._count.id]))
 
@@ -829,8 +994,10 @@ router.get('/customers/:id/bookings', async (req, res) => {
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
-router.get('/leads', async (_req, res) => {
+router.get('/leads', async (req, res) => {
   try {
+    const limit = Math.min(Number(req.query.limit) || 200, 500)
+    const offset = Number(req.query.offset) || 0
     // Auto-expire open leads older than 24 hours to 'lost'
     const cutoff = new Date(Date.now() - 24 * 3600000).toISOString()
     await prisma.lead.updateMany({
@@ -841,6 +1008,8 @@ router.get('/leads', async (_req, res) => {
     const rows = await prisma.lead.findMany({
       include: { user: { select: { name: true, phone: true } } },
       orderBy: { quotedAt: 'desc' },
+      take: limit,
+      skip: offset,
     })
     res.json({
       leads: rows.map(r => ({
@@ -856,9 +1025,9 @@ router.get('/leads', async (_req, res) => {
         trip_code: r.tripCode,
         user_name: r.user?.name ?? null,
         user_phone: r.user?.phone ?? null,
-        pickup: r.pickupJson ? JSON.parse(r.pickupJson) : null,
-        drop: r.dropJson ? JSON.parse(r.dropJson) : null,
-        pricing: r.pricingJson ? JSON.parse(r.pricingJson) : null,
+        pickup: tryParse(r.pickupJson),
+        drop: tryParse(r.dropJson),
+        pricing: tryParse(r.pricingJson),
       })),
     })
   } catch (e: any) {
@@ -949,9 +1118,24 @@ router.put('/pricing', async (req, res) => {
 
 router.post('/pricing/calculate', async (req, res) => {
   try {
-    const { originPlaceId, tripType = 'airport', distanceKm: manualKm, stopPlaceIds = [] } = req.body
+    const { originPlaceId, destPlaceId, tripType = 'airport', distanceKm: manualKm, stopPlaceIds = [], durationHours } = req.body
     const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || ''
     const BLR_AIRPORT_PLACE_ID = 'ChIJZWJEdf4crjsRjkEpoelwbCk'
+
+    const rows = await prisma.pricingConfig.findMany()
+    const cfg: Record<string, number> = rows.reduce((acc, r) => ({ ...acc, [r.key]: parseFloat(r.value) }), {} as Record<string, number>)
+
+    // Hourly: no distance calculation needed
+    if (tripType === 'hourly') {
+      const hours = parseFloat(durationHours) || 4
+      const hourlyRate = cfg.hourly_base_rate ?? 500
+      const gstRate = (cfg.hourly_gst ?? 5) / 100
+      const base = Math.round(hours * hourlyRate)
+      const gst = Math.round(base * gstRate)
+      const total = base + gst
+      return res.json({ distanceKm: 0, durationMinutes: hours * 60, tripType, basePrice: base, fareBeforeTax: base, gst, toll: 0, totalPrice: total,
+        breakdown: { hours: `${hours}h`, rate: `₹${hourlyRate}/hr`, gst: `${cfg.hourly_gst ?? 5}%` } })
+    }
 
     let distanceKm: number
     let durationMinutes: number
@@ -960,8 +1144,9 @@ router.post('/pricing/calculate', async (req, res) => {
       distanceKm = parseFloat(manualKm)
       durationMinutes = Math.round(distanceKm * 1.5)
     } else if (originPlaceId && GOOGLE_MAPS_KEY) {
-      // Sum leg distances: origin → stop1 → stop2 → ... → airport
-      const waypoints: string[] = [originPlaceId, ...stopPlaceIds, BLR_AIRPORT_PLACE_ID]
+      // For outstation use destPlaceId when provided; otherwise fall back to airport
+      const destinationId = (tripType === 'outstation' && destPlaceId) ? destPlaceId : BLR_AIRPORT_PLACE_ID
+      const waypoints: string[] = [originPlaceId, ...stopPlaceIds, destinationId]
       const legResults = await Promise.all(
         waypoints.slice(0, -1).map(async (from, i) => {
           const to = waypoints[i + 1]
@@ -979,16 +1164,15 @@ router.post('/pricing/calculate', async (req, res) => {
       return res.status(400).json({ error: 'originPlaceId or distanceKm required' })
     }
 
-    const rows = await prisma.pricingConfig.findMany()
-    const cfg: Record<string, number> = rows.reduce((acc, r) => ({ ...acc, [r.key]: parseFloat(r.value) }), {} as Record<string, number>)
-
     if (tripType === 'outstation') {
       const perKm = cfg.outstation_per_km ?? 18
       const driverBata = cfg.outstation_driver_bata ?? 500
       const gstRate = (cfg.outstation_gst ?? 5) / 100
       const base = distanceKm * perKm
-      const total = Math.round((base + driverBata) * (1 + gstRate))
-      return res.json({ distanceKm, durationMinutes, tripType, basePrice: Math.round(base), totalPrice: total,
+      const withBata = base + driverBata
+      const gst = Math.round(withBata * gstRate)
+      const total = Math.round(withBata + gst)
+      return res.json({ distanceKm, durationMinutes, tripType, basePrice: Math.round(base), fareBeforeTax: Math.round(base), gst, toll: 0, totalPrice: total,
         breakdown: { distanceFare: `₹${Math.round(base)} @ ₹${perKm}/km`, driverBata: `₹${driverBata}`, gst: `${cfg.outstation_gst ?? 5}%` } })
     }
 
@@ -1002,6 +1186,138 @@ router.post('/pricing/calculate', async (req, res) => {
     const total = fareBeforeTax + gst + toll
     res.json({ distanceKm, durationMinutes, tripType, fareBeforeTax, gst, toll, totalPrice: total, basePrice: fareBeforeTax,
       breakdown: { kmFare: `₹${kmFare} @ ₹${perKm}/km`, tripCharge: `₹${tripCharge}`, gst: `${cfg.airport_gst ?? 5}% on ₹${fareBeforeTax}`, toll: `₹${toll} (pass-through)` } })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Finance summary ──────────────────────────────────────────────────────────
+
+router.get('/finance/summary', async (req, res) => {
+  try {
+    // Default: last 12 complete months + current month
+    const now = new Date()
+    const fromDefault = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    const from = req.query.from ? new Date(String(req.query.from)) : fromDefault
+    const to   = req.query.to   ? new Date(String(req.query.to))   : new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+    const rows = await prisma.$queryRaw<any[]>`
+      SELECT
+        trip_type,
+        payment_status,
+        payment_method,
+        pricing_json,
+        pickup_json,
+        status
+      FROM bookings
+      WHERE status NOT IN ('cancelled')
+        AND pickup_json::json->>'dateTime' >= ${from.toISOString()}
+        AND pickup_json::json->>'dateTime' <  ${to.toISOString()}
+    `
+
+    // Aggregate helpers
+    const getPrice = (row: any): number => {
+      try {
+        const p = typeof row.pricing_json === 'string' ? JSON.parse(row.pricing_json) : (row.pricing_json ?? {})
+        return Number(p.totalPrice ?? p.total_price ?? row.price ?? 0)
+      } catch { return 0 }
+    }
+    const getGst = (row: any): number => {
+      try {
+        const p = typeof row.pricing_json === 'string' ? JSON.parse(row.pricing_json) : (row.pricing_json ?? {})
+        return Number(p.gst ?? 0)
+      } catch { return 0 }
+    }
+    const getMonth = (row: any): string => {
+      try {
+        const dt = JSON.parse(row.pickup_json)?.dateTime
+        if (!dt) return 'unknown'
+        const d = new Date(dt)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      } catch { return 'unknown' }
+    }
+    const labelTripType = (tt: string | null): string => {
+      if (tt === 'pickup')    return 'Airport Pickup'
+      if (tt === 'drop')      return 'Airport Drop'
+      if (tt === 'outstation') return 'Outstation'
+      if (tt === 'hourly')    return 'Hourly'
+      return 'Other'
+    }
+
+    // Monthly buckets: revenue = completed (earned), collected = paid, upcoming = confirmed/assigned
+    const monthlyMap: Record<string, { revenue: number; collected: number; upcoming: number; gst: number; rides: number }> = {}
+    // Revenue by trip type (completed only)
+    const byType: Record<string, { revenue: number; gst: number; rides: number }> = {}
+    // Payment method breakdown (completed + paid)
+    const byMethod: Record<string, number> = {}
+    // Receivables: completed but not paid
+    let outstandingAmount = 0
+    let outstandingCount  = 0
+    let totalCollected    = 0
+
+    for (const row of rows) {
+      const price = getPrice(row)
+      const gst   = getGst(row)
+      const month = getMonth(row)
+      const typeLabel = labelTripType(row.trip_type)
+      const completed = row.status === 'completed'
+      const upcoming  = ['pending', 'confirmed', 'assigned', 'arrived', 'in_progress'].includes(row.status)
+      const paid      = row.payment_status === 'paid'
+
+      if (!monthlyMap[month]) monthlyMap[month] = { revenue: 0, collected: 0, upcoming: 0, gst: 0, rides: 0 }
+      monthlyMap[month].rides++
+
+      if (completed) {
+        monthlyMap[month].revenue += price
+        monthlyMap[month].gst    += gst
+        if (paid) {
+          monthlyMap[month].collected += price
+          totalCollected += price
+        } else {
+          outstandingAmount += price
+          outstandingCount++
+        }
+      } else if (upcoming) {
+        monthlyMap[month].upcoming += price
+      }
+
+      // By type — completed only
+      if (completed) {
+        if (!byType[typeLabel]) byType[typeLabel] = { revenue: 0, gst: 0, rides: 0 }
+        byType[typeLabel].revenue += price
+        byType[typeLabel].gst    += gst
+        byType[typeLabel].rides++
+      }
+
+      // Payment method — completed + paid
+      if (completed && paid) {
+        const method = row.payment_method || 'cash'
+        byMethod[method] = (byMethod[method] ?? 0) + price
+      }
+    }
+
+    // Sort months chronologically
+    const monthly = Object.entries(monthlyMap)
+      .filter(([k]) => k !== 'unknown')
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, v]) => ({ month, ...v }))
+
+    const typeOrder = ['Airport Pickup', 'Airport Drop', 'Outstation', 'Hourly', 'Other']
+    const byTypeSorted = typeOrder
+      .filter(t => byType[t])
+      .map(t => ({ type: t, ...byType[t] }))
+
+    const totalRevenue  = monthly.reduce((s, m) => s + m.revenue, 0)
+    const totalUpcoming = monthly.reduce((s, m) => s + m.upcoming, 0)
+    const totalGst      = monthly.reduce((s, m) => s + m.gst, 0)
+    const totalRides    = monthly.reduce((s, m) => s + m.rides, 0)
+
+    res.json({
+      totalRevenue, totalCollected, totalGst, totalRides,
+      outstandingAmount, outstandingCount, totalUpcoming,
+      monthly, byType: byTypeSorted, byMethod,
+      from: from.toISOString(), to: to.toISOString(),
+    })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -1167,6 +1483,217 @@ router.get('/flights/lookup', requireAdmin, async (req: Request, res: Response) 
     })
   } catch (e: any) {
     return res.status(500).json({ error: `Flight lookup error: ${e?.message ?? 'unknown'}` })
+  }
+})
+
+// ─── Invoice list ─────────────────────────────────────────────────────────────
+
+router.get('/invoices', async (req, res) => {
+  try {
+    const limit  = Math.min(Number(req.query.limit)  || 50, 200)
+    const offset = Number(req.query.offset) || 0
+    const search = String(req.query.search || '').trim().toLowerCase()
+
+    const rows = await prisma.invoice.findMany({
+      orderBy: { generatedAt: 'desc' },
+      take: limit,
+      skip: offset,
+      include: {
+        booking: {
+          include: { user: { select: { name: true, phone: true } } },
+        },
+      },
+    })
+
+    const invoices = rows
+      .filter(inv => {
+        if (!search) return true
+        const b = inv.booking
+        return [
+          inv.invoiceNo, b.tripCode, b.guestName, b.guestPhone,
+          b.user?.name, b.user?.phone,
+        ].some(v => v && v.toLowerCase().includes(search))
+      })
+      .map(inv => ({
+        id: inv.id,
+        invoiceNo: inv.invoiceNo,
+        generatedAt: inv.generatedAt,
+        tripCode: inv.booking.tripCode,
+        customerName: inv.booking.user?.name ?? inv.booking.guestName ?? null,
+        customerPhone: inv.booking.user?.phone ?? inv.booking.guestPhone ?? null,
+        amount: inv.booking.price ?? 0,
+        paymentStatus: inv.booking.paymentStatus,
+        paymentMethod: inv.booking.paymentMethod,
+        razorpayPaymentId: inv.booking.razorpayPaymentId ?? null,
+      }))
+
+    const total = await prisma.invoice.count()
+    res.json({ invoices, total })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Settings (company config stored in pricing_config KV table) ──────────────
+
+router.get('/settings', async (_req, res) => {
+  try {
+    const rows = await prisma.pricingConfig.findMany({ where: { key: { in: COMPANY_KEYS } } })
+    const config: Record<string, string> = {}
+    for (const { key, value } of rows) config[key] = value
+    res.json({ config })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.put('/settings', async (req, res) => {
+  try {
+    const { config } = req.body
+    if (!config || typeof config !== 'object') return res.status(400).json({ error: 'config object required' })
+
+    const allowed = Object.fromEntries(
+      Object.entries(config).filter(([k]) => COMPANY_KEYS.includes(k))
+    )
+    await Promise.all(
+      Object.entries(allowed).map(([key, value]) =>
+        prisma.pricingConfig.upsert({
+          where: { key },
+          update: { value: String(value) },
+          create: { key, value: String(value) },
+        })
+      )
+    )
+    const rows = await prisma.pricingConfig.findMany({ where: { key: { in: COMPANY_KEYS } } })
+    const updated: Record<string, string> = {}
+    for (const { key, value } of rows) updated[key] = value
+    res.json({ config: updated })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── GSTIN lookup ─────────────────────────────────────────────────────────────
+
+// ─── Empty leg ────────────────────────────────────────────────────────────────
+
+router.get('/empty-leg/status', async (_req, res) => {
+  try {
+    const status = await getEmptyLegStatus()
+    res.json(status)
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.patch('/empty-leg/toggle', async (req, res) => {
+  try {
+    const { key, value } = req.body
+    const allowed = ['empty_leg_drops_active', 'empty_leg_pickups_active']
+    if (!allowed.includes(key)) return res.status(400).json({ error: 'Invalid key' })
+    await prisma.pricingConfig.upsert({
+      where: { key },
+      update: { value: String(value) },
+      create: { key, value: String(value) },
+    })
+    res.json({ ok: true })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.patch('/empty-leg/config', async (req, res) => {
+  try {
+    const allowed = [
+      'empty_leg_discount_pct',
+      'empty_leg_pre_start_min', 'empty_leg_pre_end_min',
+      'empty_leg_post_start_min', 'empty_leg_post_end_min',
+      'empty_leg_pre_radius_km', 'empty_leg_post_radius_km',
+      'home_base_fare', 'home_base_radius_km',
+    ]
+    const entries = Object.entries(req.body).filter(([k]) => allowed.includes(k))
+    await Promise.all(entries.map(([key, value]) =>
+      prisma.pricingConfig.upsert({
+        where: { key },
+        update: { value: String(value) },
+        create: { key, value: String(value) },
+      })
+    ))
+    res.json({ ok: true })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+router.get('/gstin-lookup', async (req, res) => {
+  try {
+    const gstin = String(req.query.gstin || '').trim().toUpperCase()
+    // Basic 15-char GSTIN format validation
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin)) {
+      return res.status(400).json({ error: 'Invalid GSTIN format' })
+    }
+    const apiKey = process.env.GSTN_API_KEY
+    if (!apiKey) {
+      // Return validated GSTIN with state code derived from first 2 digits
+      return res.json({ gstin, tradeName: '', legalName: '', address: '' })
+    }
+    // Placeholder: call GSTN sandbox API when configured
+    const apiRes = await fetch(`https://api.gst.gov.in/commonapi/v1.1/search?action=TP&gstin=${gstin}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })
+    if (!apiRes.ok) return res.json({ gstin, tradeName: '', legalName: '', address: '' })
+    const data = await apiRes.json() as any
+    res.json({
+      gstin,
+      tradeName: data?.pradr?.ntr ?? data?.tradeNam ?? '',
+      legalName: data?.lgnm ?? '',
+      address: data?.pradr?.adr ?? '',
+    })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// One-time migration: recalculate GST on all open airport bookings to include toll in taxable base
+// Restate open airport bookings: keep total unchanged, fold toll into fareBeforeTax,
+// recalculate gst backwards so (fareBeforeTax + gst = total, toll = 0).
+router.post('/migrate/gst-on-toll-restate', requireAdmin, async (req, res) => {
+  try {
+    const openBookings = await prisma.booking.findMany({
+      where: {
+        status: { notIn: ['completed', 'cancelled'] },
+        tripType: { in: ['pickup', 'drop'] },
+      },
+    })
+    let updated = 0
+    for (const b of openBookings) {
+      const p = tryParse(b.pricingJson) ?? {}
+      const toll = p.toll ?? 0
+      if (toll <= 0) continue  // no toll → nothing to restate
+      const total = b.price ?? p.totalPrice ?? 0
+      if (total <= 0) continue
+      // Back-calculate from existing total using new formula: total = fareBeforeTax * 1.05
+      const fareBeforeTax = Math.round(total / 1.05)
+      const gst = total - fareBeforeTax
+      await prisma.booking.update({
+        where: { id: b.id },
+        data: {
+          // price stays the same — total is unchanged
+          pricingJson: JSON.stringify({
+            ...p,
+            fareBeforeTax,
+            basePrice: fareBeforeTax,
+            gst,
+            toll: 0,          // no longer a separate pass-through line
+            totalPrice: total,
+          }),
+        },
+      })
+      updated++
+    }
+    res.json({ message: `Restated ${updated} bookings (total unchanged, toll folded into fare)` })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
   }
 })
 

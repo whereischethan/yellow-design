@@ -89,6 +89,26 @@ function fmtTime(dt: string | null | undefined): string {
   } catch { return '' }
 }
 
+function fmtPhone(phone: string | null | undefined): string {
+  if (!phone) return ''
+  // Already well-formed international number — keep as-is
+  if (phone.startsWith('+')) return phone
+  const digits = phone.replace(/\D/g, '')
+  if (!digits) return phone
+  // Indian numbers stored without + prefix
+  if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
+  if (digits.length === 11 && digits.startsWith('0')) {
+    const d = digits.slice(1)
+    return `+91 ${d.slice(0, 5)} ${d.slice(5)}`
+  }
+  if (digits.length === 12 && digits.startsWith('91')) {
+    const d = digits.slice(2)
+    return `+91 ${d.slice(0, 5)} ${d.slice(5)}`
+  }
+  // Any other international number — just ensure + prefix
+  return `+${digits}`
+}
+
 function tripTypeLabel(type: string | null | undefined): string {
   if (!type) return 'Cab Service'
   if (type === 'pickup') return 'Airport Pickup'
@@ -119,30 +139,35 @@ export function generateInvoiceHtml(
   const driverParsed  = booking.assignedDriverJson  ? JSON.parse(booking.assignedDriverJson)  : driver
   const vehicleParsed = booking.assignedVehicleJson ? JSON.parse(booking.assignedVehicleJson) : vehicle
   const flightParsed  = booking.flightJson  ? JSON.parse(booking.flightJson)  : flight
+  const stopsParsed: any[] = (() => {
+    try { return JSON.parse(booking.stopsJson || '[]') } catch { return [] }
+  })()
 
   const customerName  = user?.name ?? booking.guestName ?? booking.userName ?? 'Customer'
   const customerPhone = user?.phone ?? booking.guestPhone ?? booking.userPhone ?? ''
   const customerGstin = booking.customerGstin ?? ''
   const customerGstName = booking.customerGstName ?? ''
 
-  const taxable = pricingParsed?.fareBeforeTax ?? pricingParsed?.basePrice ?? booking.price ?? 0
-  const cgst = Math.round(taxable * 0.025)
-  const sgst = Math.round(taxable * 0.025)
-  const toll = pricingParsed?.toll ?? 0
-  const total = taxable + cgst + sgst + toll
+  const toll       = pricingParsed?.toll ?? 0
+  const discount   = pricingParsed?.discount ?? 0
+  const total      = booking.price ?? 0   // authoritative — what was actually charged
+
+  // Back-calculate taxable from the ground-truth total so the invoice always adds up:
+  //   total = taxable + CGST(2.5%) + SGST(2.5%) + toll
+  //   total - toll = taxable × 1.05
+  const serviceTotal = total - toll       // GST-inclusive cab service amount
+  const taxable = Math.round(serviceTotal / 1.05)
+  const cgst    = Math.round(taxable * 0.025)
+  const sgst    = Math.round(taxable * 0.025)
 
   const sac = company.company_sac_code || '996412'
   const serviceDesc = tripTypeLabel(booking.tripType)
+  const durationMins = pricingParsed?.durationMinutes || (parseFloat((pricingParsed?.breakdown?.hours ?? '0')) * 60) || 0
+  const durationHrs  = durationMins ? (durationMins / 60 % 1 === 0 ? `${durationMins/60}` : (durationMins/60).toFixed(1)) : null
+  const hourlyDesc   = durationHrs ? `${serviceDesc} · ${durationHrs} hrs · Unlimited kms (Bangalore)` : `${serviceDesc} · Unlimited kms (Bangalore)`
 
-  const paymentLine = (() => {
-    if (booking.paymentStatus === 'paid' || booking.paymentStatus === 'Paid') {
-      const method = (booking.paymentMethod ?? '').toLowerCase()
-      if (method === 'upi' && booking.razorpayPaymentId) return `Paid · UPI · Ref: ${booking.razorpayPaymentId}`
-      if (method === 'upi') return 'Paid · UPI'
-      return 'Paid · Cash'
-    }
-    return 'Payment Pending'
-  })()
+  const isPaid = booking.paymentStatus === 'paid' || booking.paymentStatus === 'Paid'
+  const paymentLine = isPaid ? 'Paid' : 'Unpaid'
 
   const addressLines = (company.company_address || '').split('|').map(l => l.trim()).filter(Boolean)
 
@@ -163,9 +188,9 @@ export function generateInvoiceHtml(
   .header-left{display:flex;flex-direction:column;gap:4}
   .company-name{font-size:22px;font-weight:700;letter-spacing:-0.5px;color:#2B2720}
   .company-sub{font-size:12px;color:#5a5246;line-height:1.5}
-  .header-right{text-align:right}
-  .invoice-label{font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#5a5246;margin-bottom:6px}
-  .invoice-no{font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600;color:#2B2720;letter-spacing:-0.3px}
+  .header-right{text-align:right;flex-shrink:0}
+  .invoice-label{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#5a5246;margin-bottom:6px}
+  .invoice-no{font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:600;color:#2B2720;letter-spacing:-0.3px}
   .invoice-date{font-size:12px;color:#5a5246;margin-top:4px}
   .body{padding:28px 32px;display:flex;flex-direction:column;gap:22px}
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}
@@ -192,22 +217,28 @@ export function generateInvoiceHtml(
   tbody td:last-child,tbody td:nth-last-child(2),tbody td:nth-last-child(3){text-align:right;font-family:'JetBrains Mono',monospace;color:#2B2720}
   .total-row td{padding:12px 10px;font-weight:700;border-top:2px solid #2B2720;border-bottom:none;font-size:14px}
   .total-row td:last-child{font-size:17px;font-family:'JetBrains Mono',monospace;color:#2B2720}
+  .total-line{display:flex;justify-content:flex-end;align-items:baseline;gap:16px;padding:12px 10px 0;border-top:2px solid #2B2720;margin-top:4px}
+  .total-label{font-size:14px;font-weight:700;color:#2B2720}
+  .total-amount{font-size:19px;font-weight:700;font-family:'JetBrains Mono',monospace;color:#2B2720}
   .payment-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;background:#D4F4CD;color:#2B6B24;font-size:11.5px;font-weight:600}
   .payment-badge.pending{background:#FFF0A8;color:#5a5246}
   .footer{padding:16px 32px;border-top:1px solid #E2DDD7;display:flex;align-items:center;justify-content:space-between;gap:12;flex-wrap:wrap}
   .footer-note{font-size:11px;color:#9E9A91}
   .print-btn{padding:8px 18px;background:#2B2720;color:#FFD84A;border:none;border-radius:8px;font-family:'Bricolage Grotesque',system-ui;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:-0.2px}
   @media print{
-    body{background:#fff;padding:0}
-    .page{border-radius:0;box-shadow:none;max-width:100%}
-    .print-btn{display:none}
-    .footer{justify-content:flex-start}
+    *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+    @page{margin:12mm;size:A4 portrait}
+    body{background:#fff!important;padding:0!important;margin:0!important}
+    .page{border-radius:0!important;box-shadow:none!important;max-width:100%!important;min-height:auto!important}
+    .header{background:#FFD84A!important;-webkit-print-color-adjust:exact!important}
+    .print-btn{display:none!important}
+    .footer{justify-content:flex-start!important}
   }
   @media(max-width:540px){
     .two-col{grid-template-columns:1fr}
     .header{flex-direction:column;gap:12}
     .header-right{text-align:left}
-    thead th:nth-child(3),thead th:nth-child(4),tbody td:nth-child(3),tbody td:nth-child(4){display:none}
+    thead th:nth-child(2),thead th:nth-child(3),thead th:nth-child(4),tbody td:nth-child(2),tbody td:nth-child(3),tbody td:nth-child(4){display:none}
   }
 </style>
 </head>
@@ -219,7 +250,7 @@ export function generateInvoiceHtml(
       <div class="company-name">${escHtml(company.company_name || 'Yellow')}</div>
       ${company.company_gstin ? `<div class="company-sub">GSTIN: <span style="font-family:'JetBrains Mono',monospace">${escHtml(company.company_gstin)}</span></div>` : ''}
       ${addressLines.map(l => `<div class="company-sub">${escHtml(l)}</div>`).join('')}
-      ${company.company_phone ? `<div class="company-sub">${escHtml(company.company_phone)}</div>` : ''}
+      ${company.company_phone ? `<div class="company-sub">${escHtml(fmtPhone(company.company_phone))}</div>` : ''}
       ${company.company_email ? `<div class="company-sub">${escHtml(company.company_email)}</div>` : ''}
     </div>
     <div class="header-right">
@@ -236,7 +267,7 @@ export function generateInvoiceHtml(
       <div>
         <div class="section-label">Bill To</div>
         <div class="info-name">${escHtml(customerName)}</div>
-        ${customerPhone ? `<div class="info-line">${escHtml(customerPhone)}</div>` : ''}
+        ${customerPhone ? `<div class="info-line">${escHtml(fmtPhone(customerPhone))}</div>` : ''}
         ${customerGstin ? `<div class="info-line" style="margin-top:4px">GSTIN: <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">${escHtml(customerGstin)}</span></div>` : ''}
         ${customerGstName ? `<div class="info-line">${escHtml(customerGstName)}</div>` : ''}
       </div>
@@ -265,6 +296,16 @@ export function generateInvoiceHtml(
             ${pickupParsed.dateTime ? `<div class="route-time">${fmtTime(pickupParsed.dateTime)}</div>` : ''}
           </div>
         </div>` : ''}
+        ${stopsParsed.map((s: any, i: number) => `
+        <div class="route-row">
+          <div style="display:flex;flex-direction:column;align-items:center;padding-top:4px">
+            <div class="route-dot" style="background:#F6F3EB;border-color:#9E9A91"></div>
+          </div>
+          <div>
+            <div class="route-label">Stop ${i + 1}</div>
+            <div class="route-place" style="font-size:13px;color:#736E65">${escHtml(s.placeName ?? s.location ?? '—')}</div>
+          </div>
+        </div>`).join('')}
         ${dropParsed ? `
         <div class="route-row">
           <div style="display:flex;flex-direction:column;align-items:center;padding-top:4px">
@@ -275,6 +316,7 @@ export function generateInvoiceHtml(
             <div class="route-place">${escHtml(dropParsed.placeName ?? dropParsed.location ?? '—')}</div>
           </div>
         </div>` : ''}
+        ${pricingParsed?.distanceKm ? `<div class="info-line" style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11.5px">${Number(pricingParsed.distanceKm).toFixed(1)} km</div>` : ''}
         ${flightParsed?.flightNumber ? `<div class="info-line" style="margin-top:4px">Flight: <span style="font-family:'JetBrains Mono',monospace">${escHtml(flightParsed.flightNumber)}</span>${flightParsed.airline ? ` · ${escHtml(flightParsed.airline)}` : ''}</div>` : ''}
       </div>
     </div>
@@ -282,10 +324,11 @@ export function generateInvoiceHtml(
     ${driverParsed ? `
     <div class="driver-row">
       <div class="driver-avatar">${(driverParsed.name ?? 'D').charAt(0).toUpperCase()}</div>
-      <div>
+      <div style="flex:1">
         <div class="driver-name">${escHtml(driverParsed.name ?? '—')}</div>
         <div class="driver-sub">${escHtml(vehicleParsed?.licensePlate ?? driverParsed.plate ?? '')}${vehicleParsed ? ` · ${escHtml(vehicleParsed.make ?? '')} ${escHtml(vehicleParsed.model ?? '')}` : ''}</div>
       </div>
+      <img src="https://yellow-design-admin.web.app/logo.png" alt="Yellow" style="height:28px;width:auto;object-fit:contain;opacity:0.85;flex-shrink:0" onerror="this.style.display='none'"/>
     </div>` : ''}
 
     <div class="divider"></div>
@@ -306,33 +349,42 @@ export function generateInvoiceHtml(
         </thead>
         <tbody>
           <tr>
-            <td>${escHtml(serviceDesc)}</td>
+            <td>${escHtml(booking.tripType === 'hourly' ? hourlyDesc : serviceDesc)}</td>
             <td class="mono">${escHtml(sac)}</td>
             <td>${fmt(taxable)}</td>
             <td>${fmt(cgst)}</td>
             <td>${fmt(sgst)}</td>
             <td>${fmt(taxable + cgst + sgst)}</td>
           </tr>
+          ${discount > 0 ? `
+          <tr>
+            <td style="color:#C0392B">Discount</td>
+            <td class="mono">—</td>
+            <td style="color:#C0392B">−${fmt(discount)}</td>
+            <td>—</td>
+            <td>—</td>
+            <td style="color:#C0392B">−${fmt(discount)}</td>
+          </tr>` : ''}
           ${toll > 0 ? `
           <tr>
-            <td style="color:#736E65">Airport Toll (pass-through)</td>
+            <td style="color:#736E65">Tolls</td>
             <td class="mono">—</td>
             <td>—</td>
             <td>—</td>
             <td>—</td>
             <td>${fmt(toll)}</td>
           </tr>` : ''}
-          <tr class="total-row">
-            <td colspan="5">Total</td>
-            <td>${fmt(total)}</td>
-          </tr>
         </tbody>
       </table>
+      <div class="total-line">
+        <span class="total-label">Total</span>
+        <span class="total-amount">${fmt(total)}</span>
+      </div>
     </div>
 
     <!-- Payment status -->
-    <div style="display:flex;align-items:center;gap:12;flex-wrap:wrap;gap:12px">
-      <span class="payment-badge${booking.paymentStatus !== 'paid' ? ' pending' : ''}">${escHtml(paymentLine)}</span>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="payment-badge${!isPaid ? ' pending' : ''}">${escHtml(paymentLine)}</span>
       ${company.company_gstin ? `<span style="font-size:11.5px;color:#9E9A91">Place of supply: Karnataka (29)</span>` : ''}
     </div>
   </div>
@@ -340,9 +392,22 @@ export function generateInvoiceHtml(
   <!-- Footer -->
   <div class="footer">
     <div class="footer-note">This is a computer-generated invoice and does not require a physical signature.</div>
-    <button class="print-btn" onclick="window.print()">Print / Download PDF</button>
+    <button class="print-btn" id="printBtn" onclick="printNow()">Print / Download PDF</button>
   </div>
 </div>
+<script>
+function printNow(){
+  var btn=document.getElementById('printBtn');
+  btn.disabled=true;btn.textContent='Preparing…';
+  document.fonts.ready.then(function(){
+    window.focus();
+    setTimeout(function(){
+      window.print();
+      btn.disabled=false;btn.textContent='Print / Download PDF';
+    },200);
+  });
+}
+</script>
 </body>
 </html>`
 }

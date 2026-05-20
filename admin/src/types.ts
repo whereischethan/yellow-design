@@ -10,6 +10,13 @@ export interface Driver {
   vehicle: string
   joined: string
   trips: number
+  photoUrl?: string | null
+  licenseNo?: string | null
+  licenseExp?: string | null
+  docLicense?: string | null
+  docAadhaar?: string | null
+  docPan?: string | null
+  docPolice?: string | null
 }
 
 export interface Vehicle {
@@ -60,7 +67,9 @@ export interface Pricing {
   totalPrice: number
   fareBeforeTax?: number
   gst?: number
+  discount?: number
   toll?: number
+  durationMinutes?: number
 }
 
 export interface StopLocation {
@@ -76,10 +85,11 @@ export interface Booking {
   userName?: string | null
   userPhone?: string | null
   status: BookingStatus
-  tripType: 'pickup' | 'drop'
+  tripType: 'pickup' | 'drop' | 'outstation' | 'hourly'
   vehicleType: string
   passengers: number
   luggage: number
+  cabinBags: number
   pickup: BookingLocation
   drop: BookingLocation
   stops?: StopLocation[] | null
@@ -90,10 +100,27 @@ export interface Booking {
   assignedDriver?: Driver
   assignedVehicle?: { make: string; model: string; licensePlate: string; color: string }
   paymentStatus?: string
+  paymentMethod?: 'cash' | 'upi' | null
   razorpayPaymentId?: string
   razorpayLinkId?: string | null
   razorpayLinkUrl?: string | null
+  customerGstin?: string | null
+  customerGstName?: string | null
+  invoiceNo?: string | null
   createdAt: string
+}
+
+export interface Invoice {
+  id: string
+  invoiceNo: string
+  generatedAt: string
+  tripCode: string
+  customerName: string | null
+  customerPhone: string | null
+  amount: number
+  paymentStatus: string
+  paymentMethod: string | null
+  razorpayPaymentId: string | null
 }
 
 export interface Customer {
@@ -103,6 +130,10 @@ export interface Customer {
   email?: string
   created_at: string
   trip_count: number
+  referral_code?: string | null
+  referred_by?: { id: string; name: string | null; phone: string } | null
+  referral_count?: number
+  referral_credits?: number
 }
 
 export interface LeadPricing {

@@ -1,9 +1,10 @@
 import React from 'react'
-import type { Booking, Driver, Vehicle } from '../types'
-import { patchBooking, generatePaymentLink, lookupFlight, getBooking } from '../api'
+import type { Booking, Driver, Vehicle, Customer } from '../types'
+import { patchBooking, deleteBooking, generatePaymentLink, lookupFlight, getBooking, syncPaymentStatus, downloadCSV, lookupGstin, openInvoice, emailInvoice } from '../api'
 import {
   YL, STATUS_STYLE, Icons, Mono, Stack, Button, Input, Chip, Card,
   PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, formatPhone, useIsMobile,
+  DateTimePicker, toISTISO, fromISTISO,
 } from '../components/ui'
 
 function FilterBar({ statusFilter, setStatusFilter, search, setSearch, tripType, setTripType, counts }: any) {
@@ -132,7 +133,7 @@ function BookingRow({ b, onClick }: { b: Booking; onClick: (b: Booking) => void 
             <Avatar name={b.assignedDriver.name} size={22}/>
             <Stack gap={2}>
               <div style={{ fontSize: 12.5, color: YL.ink }}>{b.assignedDriver.name}</div>
-              <Mono size={10.5} color={YL.ink2}>{(b.assignedDriver.rating ?? 0).toFixed(2)}★</Mono>
+              <Mono size={10.5} color={YL.ink2}>{formatPhone(b.assignedDriver.phone)}</Mono>
             </Stack>
           </div>
         ) : (
@@ -188,7 +189,18 @@ export function BookingsList({ bookings, onOpen, onNewBooking }: BookingsListPro
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: YL.bg }}>
       <PageHeader title="Bookings" subtitle={`${filtered.length} of ${bookings.length}`}
-        actions={<Button variant="primary" onClick={onNewBooking} icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.plus}</span>}>{isMobile ? '+' : 'New booking'}</Button>}/>
+        actions={<>
+          {!isMobile && <Button variant="secondary" icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.download}</span>} onClick={() => downloadCSV(filtered.map(b => ({
+            trip_code: b.tripCode, status: b.status, trip_type: b.tripType, vehicle: b.vehicleType,
+            pickup_time: b.pickup?.dateTime ?? '', pickup: b.pickup?.location ?? '',
+            drop: b.drop?.location ?? '', passengers: b.passengers, luggage: b.luggage,
+            flight: b.flight?.flightNumber ?? '', driver: b.assignedDriver?.name ?? '',
+            guest_name: b.guestName ?? '', guest_phone: b.guestPhone ?? '',
+            price: b.pricing?.totalPrice ?? '', payment_status: b.paymentStatus ?? '',
+            created_at: b.createdAt,
+          })), `bookings-${new Date().toISOString().slice(0,10)}.csv`)}>Export CSV</Button>}
+          <Button variant="primary" onClick={onNewBooking} icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.plus}</span>}>{isMobile ? '+' : 'New booking'}</Button>
+        </>}/>
       <FilterBar statusFilter={statusFilter} setStatusFilter={setStatusFilter} search={search} setSearch={setSearch} tripType={tripType} setTripType={setTripType} counts={counts}/>
       {!isMobile && (
         <div style={{ display: 'grid', gridTemplateColumns: '110px 110px 95px 1fr 165px 145px 90px 28px', gap: 16, padding: '10px 28px', background: YL.bg, borderBottom: `1px solid ${YL.line}`, fontSize: 11, color: YL.ink2, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0 }}>
@@ -240,6 +252,11 @@ function StatusFlow({ status, onChange }: { status: string; onChange: (s: string
             <span style={{ width: 12, height: 12, display: 'flex' }}>{Icons.arrowRight}</span>
           </Button>
         )}
+        {idx > 0 && status !== 'completed' && (
+          <Button size="sm" variant="secondary" onClick={() => onChange(flow[idx - 1])}>
+            ← Back to {STATUS_STYLE[flow[idx - 1]]?.label.toLowerCase()}
+          </Button>
+        )}
         {status !== 'cancelled' && status !== 'completed' && (
           <Button size="sm" variant="danger" onClick={() => onChange('cancelled')}>Cancel</Button>
         )}
@@ -262,7 +279,7 @@ function DriverPicker({ booking, drivers, onAssign }: { booking: Booking; driver
         <Avatar name={d.name} size={36}/>
         <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{d.name}</div>
-          <Mono size={11} color={YL.ink2}>{formatPhone(d.phone)} · {(d.rating ?? 0).toFixed(2)}★</Mono>
+          <Mono size={11} color={YL.ink2}>{formatPhone(d.phone)}</Mono>
         </Stack>
         <Button size="sm" variant="ghost" onClick={() => onAssign(null)}>Reassign</Button>
       </div>
@@ -294,7 +311,7 @@ function DriverPicker({ booking, drivers, onAssign }: { booking: Booking; driver
                         <span style={{ width: 5, height: 5, borderRadius: 999, background: isAvail ? YL.leaf : d.status === 'on-trip' ? YL.yellowDeep : YL.ink3 }}/>
                         {isAvail ? 'Available' : d.status === 'on-trip' ? 'On trip' : 'Offline'}
                       </span>
-                      <Mono size={10.5} color={YL.ink2}>{(d.rating ?? 0).toFixed(2)}★ · {d.trips} trips</Mono>
+                      <Mono size={10.5} color={YL.ink2}>{d.trips} trips</Mono>
                     </div>
                   </Stack>
                 </button>
@@ -364,29 +381,67 @@ interface DrawerProps {
   booking: Booking | null
   drivers: Driver[]
   vehicles: Vehicle[]
+  customers: Customer[]
   onClose: () => void
   onUpdate: (b: Booking) => void
+  onDelete?: (id: string) => void
 }
 
-export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }: DrawerProps) {
+export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, onUpdate, onDelete }: DrawerProps) {
   const isMobile = useIsMobile()
+  const [editMode, setEditMode] = React.useState(false)
+  const [editError, setEditError] = React.useState('')
+  // Edit field state
+  const [ePickup, setEPickup] = React.useState('')
+  const [eDateTime, setEDateTime] = React.useState('')
+  const [eTerminal, setETerminal] = React.useState('T2')
+  const [eStops, setEStops] = React.useState<string[]>([])
+  const [eDrop, setEDrop] = React.useState('')
+  const [eFlight, setEFlight] = React.useState('')
+  const [ePax, setEPax] = React.useState('1')
+  const [eCheckIn, setECheckIn] = React.useState('0')
+  const [eCabin, setECabin] = React.useState('0')
+  const [eHours, setEHours] = React.useState('')
+  const [eFare, setEFare] = React.useState('')
+  const [eDiscount, setEDiscount] = React.useState('')
+  const [eToll, setEToll] = React.useState('')
+  const [eGuestName, setEGuestName] = React.useState('')
+  const [eGuestPhone, setEGuestPhone] = React.useState('')
+  const [eGstin, setEGstin] = React.useState('')
+  const [eGstName, setEGstName] = React.useState('')
+  const [gstinLookupLoading, setGstinLookupLoading] = React.useState(false)
+  const [gstinLookupError, setGstinLookupError] = React.useState('')
+
   const [saving, setSaving] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
+  const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [linkUrl, setLinkUrl] = React.useState<string | null>(null)
   const [generatingLink, setGeneratingLink] = React.useState(false)
+  const [linkType, setLinkType] = React.useState<'upi' | 'standard'>('upi')
   const [linkError, setLinkError] = React.useState('')
   const [copied, setCopied] = React.useState(false)
+  const [copiedWA, setCopiedWA] = React.useState(false)
+  const [showEmailPanel, setShowEmailPanel] = React.useState(false)
+  const [emailTo, setEmailTo] = React.useState('')
+  const [emailSending, setEmailSending] = React.useState(false)
+  const [emailResult, setEmailResult] = React.useState<{ ok: boolean; msg: string } | null>(null)
   const [flightData, setFlightData] = React.useState<any>(null)
   const [flightLoading, setFlightLoading] = React.useState(false)
   const [flightError, setFlightError] = React.useState('')
   const [refreshingBooking, setRefreshingBooking] = React.useState(false)
+  const [markingPaid, setMarkingPaid] = React.useState(false)
 
   React.useEffect(() => {
+    setEditMode(false)
     setLinkUrl(booking?.razorpayLinkUrl ?? null)
     setLinkError('')
     setCopied(false)
+    setLinkType('upi')
     setFlightData(null)
     setFlightError('')
-    // Auto-fetch flight if flightNumber exists but departure is missing
+    setShowEmailPanel(false)
+    setEmailTo('')
+    setEmailResult(null)
     if (booking?.flight?.flightNumber && !booking.flight.departure) {
       const date = booking.pickup?.dateTime ? booking.pickup.dateTime.split('T')[0] : undefined
       setFlightLoading(true)
@@ -398,16 +453,114 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
         })
         .finally(() => setFlightLoading(false))
     }
+    if (booking?.razorpayLinkId && booking.paymentStatus !== 'paid') {
+      syncPaymentStatus(booking.id).then((r: any) => { if (r?.booking) onUpdate(r.booking) }).catch(() => {})
+    }
   }, [booking?.id])
+
+  const enterEdit = () => {
+    if (!booking) return
+    const isAirport = booking.tripType === 'pickup' || booking.tripType === 'drop'
+    // For drop: pickup = customer address. For pickup: drop = customer address
+    setEPickup(booking.pickup?.placeName ?? booking.pickup?.location ?? '')
+    setEDateTime(booking.pickup?.dateTime ? toISTISO(new Date(booking.pickup.dateTime)) : '')
+    const airportTerminal = isAirport
+      ? (booking.tripType === 'pickup' ? (booking.pickup as any)?.terminal : (booking.drop as any)?.terminal) ?? 'T2'
+      : 'T2'
+    setETerminal(airportTerminal)
+    setEStops((booking.stops ?? []).map((s: any) => s.placeName ?? s.location ?? '').filter(Boolean))
+    setEDrop(booking.drop?.placeName ?? booking.drop?.location ?? '')
+    setEFlight(booking.flight?.flightNumber ?? '')
+    setEPax(String(booking.passengers ?? 1))
+    setECheckIn(String(booking.luggage ?? 0))
+    setECabin(String(booking.cabinBags ?? 0))
+    const p = booking.pricing
+    const fareBeforeTax = p?.fareBeforeTax ?? p?.basePrice ?? 0
+    const toll = p?.toll ?? 0
+    const durationMins = p?.durationMinutes || (parseFloat((p as any)?.breakdown?.hours ?? '0') * 60) || 0
+    setEHours(durationMins ? String(durationMins / 60) : '')
+    setEFare(fareBeforeTax ? String(fareBeforeTax) : '')
+    setEDiscount(p?.discount ? String(p.discount) : '')
+    setEToll(toll ? String(toll) : '')
+    setEGuestName(booking.guestName ?? '')
+    setEGuestPhone(booking.guestPhone ?? '')
+    setEGstin(booking.customerGstin ?? '')
+    setEGstName(booking.customerGstName ?? '')
+    setGstinLookupError('')
+    setEditError('')
+    setEditMode(true)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!booking) return
+    setSaving(true)
+    setEditError('')
+    try {
+      const isAirport = booking.tripType === 'pickup' || booking.tripType === 'drop'
+      const pickupObj = {
+        ...booking.pickup,
+        placeName: ePickup,
+        location: ePickup,
+        dateTime: eDateTime ? fromISTISO(eDateTime).toISOString() : booking.pickup?.dateTime,
+        ...(isAirport && booking.tripType === 'pickup' ? { terminal: eTerminal } : {}),
+      }
+      const dropObj = {
+        ...booking.drop,
+        placeName: eDrop,
+        location: eDrop,
+        ...(isAirport && booking.tripType === 'drop' ? { terminal: eTerminal } : {}),
+      }
+      const stopsArr = eStops.filter(s => s.trim()).map(s => ({ location: s, placeName: s }))
+      const flightObj = isAirport && eFlight ? { ...(booking.flight ?? {}), flightNumber: eFlight } : (eFlight ? { flightNumber: eFlight } : null)
+      const res = await patchBooking(booking.id, {
+        pickup: pickupObj,
+        drop: dropObj,
+        stops: stopsArr,
+        flight: flightObj,
+        passengerCount: Number(ePax),
+        bags: Number(eCheckIn),
+        cabinBags: Number(eCabin),
+        fareBreakdown: eFare ? {
+          fareBeforeTax: Number(eFare),
+          discount: Number(eDiscount) || 0,
+          toll: Number(eToll) || 0,
+          durationHours: booking.tripType === 'hourly' && eHours ? Number(eHours) : undefined,
+        } : undefined,
+        ...(booking.tripType === 'hourly' && eHours && !eFare ? { durationHours: Number(eHours) } : {}),
+        ...(booking.guestPhone ? { guestName: eGuestName, guestPhone: eGuestPhone } : {}),
+        customerGstin: eGstin.trim() || null,
+        customerGstName: eGstName.trim() || null,
+      })
+      onUpdate(res.booking)
+      setEditMode(false)
+    } catch (e: any) {
+      setEditError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const handleRefreshBooking = async () => {
     if (!booking) return
     setRefreshingBooking(true)
     try {
-      const r: any = await getBooking(booking.id)
-      onUpdate(r.booking)
+      // If booking has a payment link and isn't paid yet, sync status from Razorpay
+      if (booking.razorpayLinkId && booking.paymentStatus !== 'paid') {
+        const r: any = await syncPaymentStatus(booking.id)
+        onUpdate(r.booking)
+      } else {
+        const r: any = await getBooking(booking.id)
+        onUpdate(r.booking)
+      }
     } catch {}
     finally { setRefreshingBooking(false) }
+  }
+
+  const handleMarkPaid = async () => {
+    if (!booking) return
+    setMarkingPaid(true)
+    try { const r: any = await patchBooking(booking.id, { paymentStatus: 'paid', paymentMethod: 'cash' }); onUpdate(r.booking) }
+    catch {} finally { setMarkingPaid(false) }
   }
 
   if (!booking) return null
@@ -416,7 +569,7 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
     setGeneratingLink(true)
     setLinkError('')
     try {
-      const r: any = await generatePaymentLink(booking.id)
+      const r: any = await generatePaymentLink(booking.id, linkType)
       setLinkUrl(r.linkUrl)
     } catch (e: any) {
       setLinkError(e.message)
@@ -428,6 +581,43 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
   const handleCopy = () => {
     if (!linkUrl) return
     navigator.clipboard.writeText(linkUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+  }
+
+  const handleCopyWhatsApp = () => {
+    if (!booking) return
+    const d = booking.assignedDriver
+    const v = booking.assignedVehicle
+    const pickupDt = booking.pickup?.dateTime
+      ? `${fmtDate(booking.pickup.dateTime)} · ${fmtTime(booking.pickup.dateTime)}`
+      : '—'
+    const route = booking.tripType === 'pickup'
+      ? `BLR ${booking.pickup?.terminal ?? ''} → ${booking.drop?.placeName ?? ''}`
+      : `${booking.pickup?.placeName ?? ''} → BLR ${booking.drop?.terminal ?? ''}`
+
+    const lines: string[] = [
+      `✅ *Booking Confirmed — Yellow*`,
+      ``,
+      `*${booking.tripCode}*`,
+      `${pickupDt}`,
+      `${route}`,
+    ]
+    if (booking.flight?.flightNumber) {
+      lines.push(`Flight: ${booking.flight.flightNumber}`)
+    }
+    if (d) {
+      lines.push(``, `🚗 *Your Driver*`, `${d.name}`, `${formatPhone(d.phone)}`)
+    }
+    if (v) {
+      const vehicleLabel = [v.make, v.model].filter(Boolean).join(' ') || v.model || 'Yellow Sky'
+      lines.push(``, `🚙 *Vehicle*`, vehicleLabel, `${v.color ? v.color + ' · ' : ''}${v.licensePlate}`)
+    }
+    if (booking.pricing?.totalPrice) {
+      lines.push(``, `💰 *Fare: ${fmtINR(booking.pricing.totalPrice)}* (all inclusive)`)
+    }
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setCopiedWA(true)
+      setTimeout(() => setCopiedWA(false), 2500)
+    })
   }
 
   const handleStatusChange = async (newStatus: string) => {
@@ -462,6 +652,19 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
     }
   }
 
+  const handleDelete = async () => {
+    if (!booking) return
+    setDeleting(true)
+    try {
+      await deleteBooking(booking.id)
+      onDelete?.(booking.id)
+      onClose()
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
+
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(43,39,32,0.4)', animation: 'yl-fade-in 200ms ease-out', zIndex: 50 }}/>
@@ -471,17 +674,33 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <Mono size={15} weight={600}>{booking.tripCode}</Mono>
               <StatusBadge status={booking.status} size="sm"/>
-              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', background: booking.tripType === 'pickup' ? YL.greenSoft : YL.yellowSoft, color: booking.tripType === 'pickup' ? YL.greenInk : YL.ink, padding: '2px 7px', borderRadius: 3 }}>
-                {booking.tripType === 'pickup' ? '← Pickup' : 'Drop →'}
+              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', background: booking.tripType === 'pickup' ? YL.greenSoft : booking.tripType === 'hourly' ? YL.blueSoft : YL.yellowSoft, color: booking.tripType === 'pickup' ? YL.greenInk : booking.tripType === 'hourly' ? YL.blueInk : YL.ink, padding: '2px 7px', borderRadius: 3 }}>
+                {booking.tripType === 'pickup' ? '← Pickup' : booking.tripType === 'hourly' ? 'Hourly' : booking.tripType === 'outstation' ? 'Outstation' : 'Drop →'}
               </span>
             </div>
             <div style={{ fontSize: 13, color: YL.ink2 }}>
-              {booking.pickup?.dateTime ? fmtDate(booking.pickup.dateTime) : '—'} at {booking.pickup?.dateTime ? <Mono size={12}>{fmtTime(booking.pickup.dateTime)}</Mono> : '—'} · {booking.passengers} pax · {booking.luggage} bags
+              {booking.pickup?.dateTime ? fmtDate(booking.pickup.dateTime) : '—'} at {booking.pickup?.dateTime ? <Mono size={12}>{fmtTime(booking.pickup.dateTime)}</Mono> : '—'} · {booking.passengers} pax{booking.tripType === 'hourly' ? (() => { const mins = booking.pricing?.durationMinutes ?? 0; const hrs = mins ? (mins/60 % 1 === 0 ? mins/60 : (mins/60).toFixed(1)) : null; return hrs ? ` · ${hrs} hrs` : '' })() : ` · ${booking.luggage} check-in${booking.cabinBags > 0 ? ` · ${booking.cabinBags} cabin` : ''}`}
             </div>
           </Stack>
-          <button onClick={onClose} style={{ width: 30, height: 30, background: 'transparent', border: `1px solid ${YL.line}`, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: YL.ink }}>
-            <span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.close}</span>
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            {editMode ? (
+              <>
+                <button onClick={handleSaveEdit} disabled={saving} style={{ padding: '5px 13px', background: YL.ink, border: `1px solid ${YL.ink}`, borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: saving ? 'not-allowed' : 'pointer', color: YL.yellow, whiteSpace: 'nowrap' }}>
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button onClick={() => setEditMode(false)} style={{ padding: '5px 11px', background: 'transparent', border: `1px solid ${YL.line}`, borderRadius: 8, fontSize: 12, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', color: YL.ink2, whiteSpace: 'nowrap' }}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button onClick={enterEdit} style={{ padding: '5px 11px', background: YL.yellow, border: `1px solid ${YL.yellowDeep}`, borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', color: YL.ink, whiteSpace: 'nowrap' }}>
+                Edit details
+              </button>
+            )}
+            <button onClick={onClose} style={{ width: 30, height: 30, background: 'transparent', border: `1px solid ${YL.line}`, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: YL.ink }}>
+              <span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.close}</span>
+            </button>
+          </div>
         </div>
 
         <div style={{ flex: 1, overflow: 'auto' }}>
@@ -494,91 +713,264 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
           {/* Route */}
           <div style={{ padding: '18px 24px', borderBottom: `1px solid ${YL.line}` }}>
             <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600, marginBottom: 14 }}>Route</div>
-            <div style={{ display: 'flex', gap: 14 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 999, background: YL.leaf, boxShadow: `0 0 0 1.5px ${YL.leaf}` }}/>
-                {booking.stops?.length ? (
-                  <>
-                    <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 24, margin: '4px 0' }}/>
-                    {booking.stops.map((_, si) => (
-                      <React.Fragment key={si}>
-                        <div style={{ width: 8, height: 8, borderRadius: 999, border: `1.5px solid ${YL.ink2}`, background: '#fff' }}/>
-                        <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 24, margin: '4px 0' }}/>
-                      </React.Fragment>
-                    ))}
-                  </>
-                ) : (
-                  <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 36, margin: '4px 0' }}/>
-                )}
-                <div style={{ width: 10, height: 10, background: YL.gulmohar, boxShadow: `0 0 0 1.5px ${YL.gulmohar}` }}/>
-              </div>
-              <Stack gap={20} style={{ flex: 1 }}>
-                <Stack gap={3}>
-                  <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Pickup · {booking.pickup?.dateTime ? <Mono size={11}>{fmtTime(booking.pickup.dateTime)}</Mono> : '—'}</div>
-                  <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{booking.pickup?.placeName}</div>
-                  {booking.pickup?.location && (
-                    <a
-                      href={booking.pickup.lat && booking.pickup.lng
-                        ? `https://www.google.com/maps?q=${booking.pickup.lat},${booking.pickup.lng}`
-                        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(booking.pickup.location)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}
-                    >
-                      {booking.pickup.location}
-                    </a>
-                  )}
-                </Stack>
-                {booking.stops?.map((stop, si) => (
-                  <Stack key={si} gap={3}>
-                    <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Stop {si + 1}</div>
-                    <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{stop.placeName || stop.location}</div>
-                    {stop.location && (
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.location)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}
-                      >
-                        {stop.placeName && stop.placeName !== stop.location ? stop.location : 'Open in Maps'}
-                      </a>
-                    )}
-                  </Stack>
-                ))}
-                <Stack gap={3}>
-                  <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Drop</div>
-                  <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{booking.drop?.placeName}</div>
-                  {booking.drop?.location && (
-                    <a
-                      href={booking.drop.lat && booking.drop.lng
-                        ? `https://www.google.com/maps?q=${booking.drop.lat},${booking.drop.lng}`
-                        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(booking.drop.location)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}
-                    >
-                      {booking.drop.location}
-                    </a>
-                  )}
-                </Stack>
-                {booking.pricing && (
-                  <div style={{ display: 'flex', gap: 14, paddingTop: 4, borderTop: `1px dashed ${YL.line}` }}>
-                    <Stack gap={4} style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Distance</div>
-                      <Mono size={13}>{booking.pricing.distanceKm} km</Mono>
-                    </Stack>
-                    <Stack gap={4} style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Pax</div>
-                      <Mono size={13}>{booking.passengers}</Mono>
-                    </Stack>
-                    <Stack gap={4} style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Bags</div>
-                      <Mono size={13}>{booking.luggage}</Mono>
-                    </Stack>
+
+            {editMode ? (
+              <Stack gap={12}>
+                {/* Guest info if applicable */}
+                {booking.guestPhone && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, paddingBottom: 12, borderBottom: `1px dashed ${YL.line}` }}>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Guest name</div>
+                      <input value={eGuestName} onChange={e => setEGuestName(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Phone</div>
+                      <input value={eGuestPhone} onChange={e => setEGuestPhone(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 12, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                    </div>
                   </div>
                 )}
+                {/* Customer GSTIN (B2B) */}
+                <div style={{ paddingBottom: 12, borderBottom: `1px dashed ${YL.line}` }}>
+                  <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Customer GSTIN <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional · for B2B invoices)</span></div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      value={eGstin} onChange={e => { setEGstin(e.target.value.toUpperCase()); setGstinLookupError('') }}
+                      placeholder="29AABCY1234F1Z5"
+                      maxLength={15}
+                      style={{ flex: 1, boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 12.5, color: YL.ink, background: YL.card, outline: 'none' }}
+                    />
+                    <button
+                      disabled={eGstin.length !== 15 || gstinLookupLoading}
+                      onClick={async () => {
+                        setGstinLookupLoading(true); setGstinLookupError('')
+                        try {
+                          const r: any = await lookupGstin(eGstin)
+                          setEGstName(r.tradeName || r.legalName || '')
+                          if (!r.tradeName && !r.legalName) setGstinLookupError('GSTIN valid but company details not available')
+                        } catch (e: any) {
+                          setGstinLookupError(e.message)
+                        } finally { setGstinLookupLoading(false) }
+                      }}
+                      style={{ height: 34, padding: '0 10px', background: YL.bg, border: `1.5px solid ${YL.line}`, borderRadius: 8, cursor: eGstin.length === 15 ? 'pointer' : 'not-allowed', fontSize: 12, color: YL.ink2, fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: eGstin.length !== 15 ? 0.5 : 1 }}
+                    >
+                      {gstinLookupLoading ? '…' : 'Look up'}
+                    </button>
+                  </div>
+                  {gstinLookupError && <div style={{ fontSize: 11.5, color: YL.redInk, marginTop: 4 }}>{gstinLookupError}</div>}
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Company name (from GSTIN)</div>
+                    <input value={eGstName} onChange={e => setEGstName(e.target.value)} placeholder="Auto-filled on lookup" style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                  </div>
+                </div>
+                {/* Pickup */}
+                <div>
+                  <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Pickup location</div>
+                  <input value={ePickup} onChange={e => setEPickup(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                </div>
+                {/* Stops */}
+                {eStops.map((s, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Stop {i + 1}</div>
+                      <input value={s} onChange={e => setEStops(prev => prev.map((x, idx) => idx === i ? e.target.value : x))} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                    </div>
+                    <button onClick={() => setEStops(prev => prev.filter((_, idx) => idx !== i))} style={{ height: 34, width: 34, flexShrink: 0, background: YL.bg, border: `1.5px solid ${YL.line}`, borderRadius: 8, cursor: 'pointer', color: YL.ink2, fontSize: 16, fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                  </div>
+                ))}
+                <button onClick={() => setEStops(prev => [...prev, ''])} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: YL.ink2, fontSize: 12, cursor: 'pointer', padding: '2px 0', fontFamily: 'inherit' }}>＋ Add stop</button>
+                {/* Drop */}
+                <div>
+                  <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Drop location</div>
+                  <input value={eDrop} onChange={e => setEDrop(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                </div>
+                {/* Date & time + Terminal */}
+                <div style={{ display: 'grid', gridTemplateColumns: (booking.tripType === 'pickup' || booking.tripType === 'drop') ? '1fr auto' : '1fr', gap: 8, alignItems: 'end' }}>
+                  <div>
+                    <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Pickup date & time</div>
+                    <DateTimePicker value={eDateTime} onChange={setEDateTime} />
+                  </div>
+                  {(booking.tripType === 'pickup' || booking.tripType === 'drop') && (
+                    <div>
+                      <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Terminal</div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {(['T1', 'T2'] as const).map(t => (
+                          <button key={t} onClick={() => setETerminal(t)} style={{ height: 34, padding: '0 12px', borderRadius: 8, border: `1.5px solid ${eTerminal === t ? YL.ink : YL.line}`, background: eTerminal === t ? YL.ink : YL.bg, color: eTerminal === t ? YL.yellow : YL.ink, fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{t}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Flight + pax/bags */}
+                {(booking.tripType === 'pickup' || booking.tripType === 'drop') && (
+                  <div>
+                    <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Flight number</div>
+                    <input value={eFlight} onChange={e => setEFlight(e.target.value)} placeholder="e.g. AI 207" style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                  </div>
+                )}
+                {booking.tripType === 'hourly' ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {[['Passengers', ePax, setEPax], ['Hours', eHours, setEHours]].map(([label, val, setter]: any) => (
+                      <div key={label}>
+                        <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>{label}</div>
+                        <input type="number" min={0} step={label === 'Hours' ? 0.5 : 1} value={val} onChange={e => setter(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none', textAlign: 'center' }}/>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                    {[['Passengers', ePax, setEPax], ['Check-in bags', eCheckIn, setECheckIn], ['Cabin bags', eCabin, setECabin]].map(([label, val, setter]: any) => (
+                      <div key={label}>
+                        <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>{label}</div>
+                        <input type="number" min={0} value={val} onChange={e => setter(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none', textAlign: 'center' }}/>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Fare breakdown */}
+                <div>
+                  <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Fare breakdown (₹)</div>
+                  <div style={{ background: '#F6F3EB', borderRadius: 10, overflow: 'hidden', border: `1px solid ${YL.line}` }}>
+                    {[
+                      { label: 'Fare (before tax)', val: eFare, setter: setEFare, placeholder: '0' },
+                      { label: 'Discount', val: eDiscount, setter: setEDiscount, placeholder: '0' },
+                      { label: 'Toll', val: eToll, setter: setEToll, placeholder: '0' },
+                    ].map(({ label, val, setter, placeholder }) => (
+                      <div key={label} style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
+                        <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>{label}</span>
+                        <input
+                          type="number" min={0} value={val} placeholder={placeholder}
+                          onChange={e => setter(e.target.value)}
+                          style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: label === 'Discount' ? YL.redInk : YL.ink, background: YL.card, outline: 'none', textAlign: 'right' }}
+                        />
+                      </div>
+                    ))}
+                    {/* GST (auto, on discounted fare) */}
+                    {(() => {
+                      const fare = Number(eFare) || 0
+                      const disc = Number(eDiscount) || 0
+                      const toll = Number(eToll) || 0
+                      const taxable = Math.max(0, fare - disc)
+                      const gst = Math.round(taxable * 0.05)
+                      const total = taxable + gst + toll
+                      return <>
+                        <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
+                          <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>GST (5%)</span>
+                          <span style={{ width: 90, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 10, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink3, borderLeft: `1px solid ${YL.line}` }}>
+                            {fare ? `₹${gst.toLocaleString('en-IN')}` : '—'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', background: YL.card }}>
+                          <span style={{ flex: 1, fontSize: 12.5, color: YL.ink, fontWeight: 600, paddingLeft: 12 }}>Total</span>
+                          <span style={{ width: 90, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 10, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, fontWeight: 600, color: YL.ink, borderLeft: `1px solid ${YL.line}` }}>
+                            {fare ? `₹${total.toLocaleString('en-IN')}` : '—'}
+                          </span>
+                        </div>
+                      </>
+                    })()}
+                  </div>
+                </div>
+                {editError && <div style={{ padding: '8px 12px', background: YL.redSoft, color: YL.redInk, borderRadius: 8, fontSize: 12.5 }}>{editError}</div>}
               </Stack>
-            </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 14 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 6 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 999, background: YL.leaf, boxShadow: `0 0 0 1.5px ${YL.leaf}` }}/>
+                  {booking.tripType !== 'hourly' && (
+                    <>
+                      {booking.stops?.length ? (
+                        <>
+                          <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 24, margin: '4px 0' }}/>
+                          {booking.stops.map((_, si) => (
+                            <React.Fragment key={si}>
+                              <div style={{ width: 8, height: 8, borderRadius: 999, border: `1.5px solid ${YL.ink2}`, background: '#fff' }}/>
+                              <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 24, margin: '4px 0' }}/>
+                            </React.Fragment>
+                          ))}
+                        </>
+                      ) : (
+                        <div style={{ width: 1.5, flex: 1, background: YL.line, minHeight: 36, margin: '4px 0' }}/>
+                      )}
+                      <div style={{ width: 10, height: 10, background: YL.gulmohar, boxShadow: `0 0 0 1.5px ${YL.gulmohar}` }}/>
+                    </>
+                  )}
+                </div>
+                <Stack gap={20} style={{ flex: 1 }}>
+                  <Stack gap={3}>
+                    <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Pickup · {booking.pickup?.dateTime ? <Mono size={11}>{fmtTime(booking.pickup.dateTime)}</Mono> : '—'}</div>
+                    <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{booking.pickup?.placeName}</div>
+                    {booking.pickup?.location && (
+                      <a href={booking.pickup.lat && booking.pickup.lng ? `https://www.google.com/maps?q=${booking.pickup.lat},${booking.pickup.lng}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(booking.pickup.location)}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}>{booking.pickup.location}</a>
+                    )}
+                  </Stack>
+                  {booking.tripType === 'hourly' ? (
+                    <Stack gap={3}>
+                      <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Coverage</div>
+                      <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>Unlimited kms · Bangalore City Limits</div>
+                    </Stack>
+                  ) : (
+                    <>
+                      {booking.stops?.map((stop, si) => (
+                        <Stack key={si} gap={3}>
+                          <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Stop {si + 1}</div>
+                          <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{stop.placeName || stop.location}</div>
+                          {stop.location && (
+                            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.location)}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}>
+                              {stop.placeName && stop.placeName !== stop.location ? stop.location : 'Open in Maps'}
+                            </a>
+                          )}
+                        </Stack>
+                      ))}
+                      <Stack gap={3}>
+                        <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Drop</div>
+                        <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{booking.drop?.placeName}</div>
+                        {booking.drop?.location && (
+                          <a href={booking.drop.lat && booking.drop.lng ? `https://www.google.com/maps?q=${booking.drop.lat},${booking.drop.lng}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(booking.drop.location)}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: YL.blueInk, textDecoration: 'underline', cursor: 'pointer' }}>{booking.drop.location}</a>
+                        )}
+                      </Stack>
+                    </>
+                  )}
+                  {booking.pricing && (
+                    <div style={{ display: 'flex', gap: 14, paddingTop: 4, borderTop: `1px dashed ${YL.line}` }}>
+                      {booking.tripType === 'hourly' ? (() => {
+                        const bkStr: string = (booking.pricing as any)?.breakdown?.hours ?? ''
+                        const parsedHrs = bkStr ? parseFloat(bkStr) : 0
+                        const mins = booking.pricing.durationMinutes || (parsedHrs * 60) || 0
+                        const hours = mins / 60
+                        const startISO = booking.pickup?.dateTime
+                        const endISO = startISO && mins ? new Date(fromISTISO(toISTISO(new Date(startISO))).getTime() + mins * 60000).toISOString() : null
+                        return <>
+                          <Stack gap={4} style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Hours</div>
+                            <Mono size={13}>{hours % 1 === 0 ? hours : hours.toFixed(1)} hr</Mono>
+                          </Stack>
+                          <Stack gap={4} style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Start</div>
+                            <Mono size={13}>{startISO ? fmtTime(startISO) : '—'}</Mono>
+                          </Stack>
+                          <Stack gap={4} style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>End</div>
+                            <Mono size={13}>{endISO ? fmtTime(endISO) : '—'}</Mono>
+                          </Stack>
+                        </>
+                      })() : <>
+                        <Stack gap={4} style={{ flex: 1 }}>
+                          <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Distance</div>
+                          <Mono size={13}>{booking.pricing.distanceKm} km</Mono>
+                        </Stack>
+                        <Stack gap={4} style={{ flex: 1 }}>
+                          <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Pax</div>
+                          <Mono size={13}>{booking.passengers}</Mono>
+                        </Stack>
+                        <Stack gap={4} style={{ flex: 1 }}>
+                          <div style={{ fontSize: 10.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>Bags</div>
+                          <Mono size={13}>{booking.luggage} check-in{booking.cabinBags > 0 ? ` · ${booking.cabinBags} cabin` : ''}</Mono>
+                        </Stack>
+                      </>}
+                    </div>
+                  )}
+                </Stack>
+              </div>
+            )}
           </div>
 
           {/* Driver */}
@@ -665,9 +1057,17 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
                   const toll = p.toll ?? (p.fareBeforeTax == null ? Math.max(0, (p.totalPrice ?? 0) - fareBeforeTax - gst) : 0)
                   return (
                     <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>Fare ({p.distanceKm} km)</span><Mono size={12.5}>{fmtINR(fareBeforeTax)}</Mono></div>
+                      {(() => {
+                        const bkHrs = (p as any)?.breakdown?.hours ?? ''
+                        const parsedHrs = bkHrs ? parseFloat(bkHrs) : 0
+                        const durationMins = p.durationMinutes || (parsedHrs * 60) || 0
+                        const fareLabel = booking.tripType === 'hourly'
+                          ? `Fare (${durationMins ? (durationMins/60 % 1 === 0 ? durationMins/60 : (durationMins/60).toFixed(1)) : '—'} hrs)`
+                          : `Fare (${p.distanceKm} km)`
+                        return <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>{fareLabel}</span><Mono size={12.5}>{fmtINR(fareBeforeTax)}</Mono></div>
+                      })()}
                       {gst > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>GST (5%)</span><Mono size={12.5}>{fmtINR(gst)}</Mono></div>}
-                      {toll > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>Airport toll</span><Mono size={12.5}>{fmtINR(toll)}</Mono></div>}
+                      {toll > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>Tolls</span><Mono size={12.5}>{fmtINR(toll)}</Mono></div>}
                     </>
                   )
                 })()}
@@ -676,42 +1076,57 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
                   <span style={{ fontSize: 14, color: YL.ink, fontWeight: 600 }}>Total</span>
                   <Mono size={18} weight={600}>{fmtINR(booking.pricing.totalPrice)}</Mono>
                 </div>
-                <div>
+                {/* Payment status row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', background: booking.paymentStatus === 'paid' ? YL.greenSoft : YL.yellowSoft, color: booking.paymentStatus === 'paid' ? YL.greenInk : YL.ink, padding: '3px 7px', borderRadius: 4 }}>
-                    {booking.paymentStatus || 'paid'}
+                    {booking.paymentStatus === 'paid' ? (booking.paymentMethod === 'cash' ? 'Paid · Cash' : booking.paymentMethod === 'upi' ? 'Paid · UPI' : 'Paid') : (booking.paymentStatus || 'pending')}
                   </span>
                   {booking.razorpayPaymentId && (
-                    <div style={{ marginTop: 5, fontSize: 10.5, color: YL.ink3, fontFamily: '"JetBrains Mono", monospace' }}>
+                    <div style={{ width: '100%', marginTop: 2, fontSize: 10.5, color: YL.ink3, fontFamily: '"JetBrains Mono", monospace' }}>
                       Ref: {booking.razorpayPaymentId}
                     </div>
                   )}
                 </div>
 
-                {/* UPI payment link — show when no confirmed Razorpay payment ID (covers legacy "paid" admin bookings) */}
-                {!booking.razorpayPaymentId && (
-                  <div style={{ paddingTop: 4 }}>
-                    {linkUrl ? (
-                      <div>
-                        <div style={{ fontSize: 11, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>UPI Payment Link</div>
+                {/* Payment actions — only when unpaid */}
+                {booking.paymentStatus !== 'paid' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* Cash payment */}
+                    <button
+                      onClick={handleMarkPaid}
+                      disabled={markingPaid}
+                      style={{ width: '100%', padding: '9px 14px', background: YL.greenSoft, color: YL.greenInk, border: `1.5px solid ${YL.leaf}`, borderRadius: 8, cursor: markingPaid ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                    >
+                      {markingPaid ? 'Saving…' : '💵 Mark as paid (Cash)'}
+                    </button>
+
+                    {/* Payment link */}
+                    <div>
+                      <div style={{ fontSize: 10, color: YL.ink3, textAlign: 'center', marginBottom: 8, letterSpacing: 0.3 }}>— or collect online —</div>
+                      {linkUrl ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: YL.bg, border: `1px solid ${YL.line}`, borderRadius: 8 }}>
                           <span style={{ flex: 1, fontSize: 11.5, color: YL.blueInk, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: '"JetBrains Mono", monospace' }}>{linkUrl}</span>
                           <button onClick={handleCopy} style={{ flexShrink: 0, padding: '4px 10px', background: copied ? YL.greenSoft : YL.yellow, color: copied ? YL.greenInk : YL.ink, border: `1px solid ${copied ? YL.leaf : YL.yellowDeep}`, borderRadius: 6, cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit' }}>
                             {copied ? 'Copied!' : 'Copy'}
                           </button>
                         </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <button
-                          onClick={handleGenerateLink}
-                          disabled={generatingLink}
-                          style={{ width: '100%', padding: '9px 14px', background: generatingLink ? YL.bg : YL.ink, color: generatingLink ? YL.ink2 : YL.yellow, border: `1px solid ${YL.line}`, borderRadius: 8, cursor: generatingLink ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                        >
-                          {generatingLink ? 'Generating…' : 'Generate UPI payment link'}
-                        </button>
-                        {linkError && <div style={{ marginTop: 6, fontSize: 11.5, color: YL.redInk }}>{linkError}</div>}
-                      </div>
-                    )}
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {/* Type selector */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                            {([['upi', 'UPI only'], ['standard', 'Cards / UPI / Wallets']] as const).map(([val, label]) => (
+                              <button key={val} onClick={() => setLinkType(val)} style={{ padding: '7px 10px', background: linkType === val ? YL.ink : YL.bg, color: linkType === val ? YL.yellow : YL.ink2, border: `1.5px solid ${linkType === val ? YL.ink : YL.line}`, borderRadius: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', transition: 'all 120ms' }}>
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <button onClick={handleGenerateLink} disabled={generatingLink} style={{ width: '100%', padding: '9px 14px', background: generatingLink ? YL.bg : YL.ink, color: generatingLink ? YL.ink2 : YL.yellow, border: `1px solid ${YL.line}`, borderRadius: 8, cursor: generatingLink ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            {generatingLink ? 'Generating…' : 'Generate link'}
+                          </button>
+                        </div>
+                      )}
+                      {linkError && <div style={{ fontSize: 11.5, color: YL.redInk, marginTop: 6 }}>{linkError}</div>}
+                    </div>
                   </div>
                 )}
               </Stack>
@@ -719,6 +1134,92 @@ export function BookingDrawer({ booking, drivers, vehicles, onClose, onUpdate }:
           )}
         </div>
         {saving && <div style={{ padding: '10px 24px', background: YL.yellowSoft, fontSize: 12, color: YL.ink, textAlign: 'center' }}>Saving…</div>}
+        <div style={{ padding: '10px 24px', borderTop: `1px solid ${YL.line}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {booking.status === 'completed' && (() => {
+            const custEmail = customers.find(c => c.id === booking.userId)?.email ?? ''
+            const handleSendEmail = async () => {
+              const addrs = [emailTo.trim(), custEmail].filter(Boolean)
+              if (!addrs.length) return
+              setEmailSending(true); setEmailResult(null)
+              try {
+                await emailInvoice(booking.tripCode, [...new Set(addrs)])
+                setEmailResult({ ok: true, msg: `Sent to ${[...new Set(addrs)].join(', ')}` })
+                setEmailTo('')
+              } catch (e: any) {
+                setEmailResult({ ok: false, msg: e.message })
+              } finally { setEmailSending(false) }
+            }
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    onClick={() => openInvoice(booking.tripCode)}
+                    style={{ flex: 1, padding: '9px 14px', background: YL.ink, color: YL.yellow, border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+                  >
+                    🧾 {booking.invoiceNo ? `Invoice ${booking.invoiceNo}` : 'View Invoice'}
+                  </button>
+                  <button
+                    onClick={() => { setShowEmailPanel(v => !v); setEmailResult(null) }}
+                    style={{ padding: '9px 14px', background: showEmailPanel ? YL.yellowSoft : YL.bg, color: YL.ink, border: `1.5px solid ${YL.line}`, borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui' }}
+                    title="Email invoice"
+                  >
+                    ✉️
+                  </button>
+                </div>
+                {showEmailPanel && (
+                  <div style={{ background: YL.bg, borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {custEmail && (
+                      <div style={{ fontSize: 12, color: YL.ink2 }}>
+                        Customer email: <span style={{ fontWeight: 600, color: YL.ink }}>{custEmail}</span>
+                      </div>
+                    )}
+                    <input
+                      value={emailTo}
+                      onChange={e => setEmailTo(e.target.value)}
+                      placeholder={custEmail ? 'Additional email (optional)' : 'Enter email address'}
+                      type="email"
+                      style={{ height: 36, padding: '0 10px', borderRadius: 8, border: `1.5px solid ${YL.line}`, fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 13, color: YL.ink, background: '#fff', outline: 'none', width: '100%', boxSizing: 'border-box' }}
+                      onKeyDown={e => e.key === 'Enter' && handleSendEmail()}
+                    />
+                    <button
+                      onClick={handleSendEmail}
+                      disabled={emailSending || (!emailTo.trim() && !custEmail)}
+                      style={{ padding: '8px 14px', background: YL.ink, color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', opacity: emailSending ? 0.6 : 1 }}
+                    >
+                      {emailSending ? 'Sending…' : custEmail && emailTo.trim() ? `Send to both` : 'Send Invoice'}
+                    </button>
+                    {emailResult && (
+                      <div style={{ fontSize: 12, padding: '6px 10px', borderRadius: 7, background: emailResult.ok ? YL.greenSoft : YL.redSoft, color: emailResult.ok ? YL.greenInk : YL.redInk }}>
+                        {emailResult.ok ? '✓ ' : '✗ '}{emailResult.msg}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+          <button
+            onClick={handleCopyWhatsApp}
+            style={{ width: '100%', padding: '10px 14px', background: copiedWA ? YL.greenSoft : '#25D366', color: copiedWA ? YL.greenInk : '#fff', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
+            {copiedWA ? '✓ Copied to clipboard' : '📋 Copy for WhatsApp'}
+          </button>
+        </div>
+        {confirmDelete ? (
+          <div style={{ padding: '14px 24px', background: YL.redSoft, borderTop: `1px solid ${YL.line}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ flex: 1, fontSize: 12.5, color: YL.redInk }}>Delete this booking permanently?</span>
+            <button onClick={handleDelete} disabled={deleting} style={{ padding: '6px 14px', background: YL.gulmohar, color: '#fff', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit' }}>
+              {deleting ? 'Deleting…' : 'Confirm'}
+            </button>
+            <button onClick={() => setConfirmDelete(false)} style={{ padding: '6px 12px', background: 'transparent', color: YL.ink2, border: `1px solid ${YL.line}`, borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontFamily: 'inherit' }}>Cancel</button>
+          </div>
+        ) : (
+          <div style={{ padding: '10px 24px', borderTop: `1px solid ${YL.line}`, display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={() => setConfirmDelete(true)} style={{ padding: '6px 12px', background: 'transparent', color: YL.ink3, border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', textDecoration: 'underline' }}>
+              Delete booking
+            </button>
+          </div>
+        )}
       </div>
     </>
   )

@@ -67,6 +67,8 @@ export const Icons: Record<string, React.ReactNode> = {
   star:      <Icon d="m12 2 3 7 7 .8-5 5 1.5 7L12 17.8 5.5 21.8 7 14.8l-5-5L9 9z" fill="currentColor"/>,
   whatsapp:  <Icon d="M3 21l1.6-5A8 8 0 1 1 12 20a8 8 0 0 1-3.6-.9L3 21zM9 8.5c0 4 3 7 7 7M9 8.5c0-.7-.5-1.5-1.5-1.5h-.7L6 8.7c0 0 .3 1.6 1.5 3M16.5 15.5c.7 0 1.5-.5 1.5-1.5v-.7l-1.7-.8s-.6.5-1.3.5"/>,
   funnel:    <Icon d="M3 5h18l-7 8v6l-4-2v-4L3 5"/>,
+  invoice:   <Icon d={<><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/><path d="M12 19v-4l-2 2 2-4 2 4-2-2v4"/></>}/>,
+  settings:  <Icon d={<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>}/>,
   support:   <Icon d={<><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 1 1 4.5 2.6c-1 .6-1.5 1.2-1.5 2.4M12 17h.01"/></>}/>,
   trending:  <Icon d="m3 17 6-6 4 4 8-9M14 5h7v7"/>,
   alert:     <Icon d={<><path d="m12 3 10 18H2L12 3z"/><path d="M12 9v5M12 17.5h.01"/></>}/>,
@@ -198,7 +200,7 @@ export function useIsMobile(breakpoint = 768): boolean {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────
 
-export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'team'
+export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'team' | 'invoices' | 'settings'
 
 interface SidebarProps {
   active: Page
@@ -221,7 +223,9 @@ export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, onSi
     { id: 'customers', label: 'Customers', icon: Icons.customers },
     { id: 'leads',     label: 'Leads',     icon: Icons.funnel },
     { id: 'pricing',   label: 'Pricing',   icon: Icons.pricing },
+    { id: 'invoices',  label: 'Invoices',  icon: Icons.invoice },
     { id: 'team',      label: 'Admin users', icon: Icons.drivers },
+    { id: 'settings',  label: 'Settings',  icon: Icons.settings },
   ]
 
   const initials = adminName
@@ -355,7 +359,9 @@ export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, on
     { id: 'vehicles',  label: 'Vehicles',    icon: Icons.vehicles },
     { id: 'customers', label: 'Customers',   icon: Icons.customers },
     { id: 'pricing',   label: 'Pricing',     icon: Icons.pricing },
+    { id: 'invoices',  label: 'Invoices',    icon: Icons.invoice },
     { id: 'team',      label: 'Admin users', icon: Icons.drivers },
+    { id: 'settings',  label: 'Settings',    icon: Icons.settings },
   ]
 
   const initials = adminName
@@ -540,176 +546,372 @@ export const FormInput = ({ label, required, hint, placeholder, value, onChange,
 const MONTHS_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const DOW_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa']
 
-function toLocalISO(d: Date) {
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000 // UTC+5:30
+
+// All datetimes are stored/displayed in IST.
+// Naive ISO strings ("YYYY-MM-DDTHH:MM") are always interpreted as IST.
+// UTC ISO strings (ending in Z or +offset) are converted to IST for display.
+
+// Parse any ISO string → IST components. Handles both UTC (with Z) and naive (treat as IST).
+function getISTComponents(iso: string): { y: number; mo: number; d: number; h: number; mi: number } | null {
+  if (!iso) return null
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+  if (iso.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(iso)) {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return null
+    const ist = new Date(d.getTime() + IST_OFFSET_MS)
+    return { y: ist.getUTCFullYear(), mo: ist.getUTCMonth(), d: ist.getUTCDate(), h: ist.getUTCHours(), mi: ist.getUTCMinutes() }
+  }
+  // Naive string — treat as IST
+  const [datePart, timePart = '00:00'] = iso.split('T')
+  const [y, mo, day] = datePart.split('-').map(Number)
+  const [h, mi] = timePart.split(':').map(Number)
+  if (!y || !mo || !day) return null
+  return { y, mo: mo - 1, d: day, h: h || 0, mi: mi || 0 }
+  void p // suppress unused warning
+}
+
+// Format naive IST components → "YYYY-MM-DDTHH:MM" (for picker values)
+function fmtISTISO(y: number, mo: number, d: number, h: number, mi: number): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${y}-${p(mo+1)}-${p(d)}T${p(h)}:${p(mi)}`
+}
+
+// Format date-only naive ISO → "YYYY-MM-DD"
+function fmtDateISO(y: number, mo: number, d: number): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${y}-${p(mo+1)}-${p(d)}`
+}
+
+// Convert UTC Date → IST naive ISO "YYYY-MM-DDTHH:MM" (use when receiving UTC dates from server)
+export function toISTISO(d: Date): string {
+  const ist = new Date(d.getTime() + IST_OFFSET_MS)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${ist.getUTCFullYear()}-${p(ist.getUTCMonth()+1)}-${p(ist.getUTCDate())}T${p(ist.getUTCHours())}:${p(ist.getUTCMinutes())}`
+}
+
+// Keep old name as alias so existing callers compile
+export const toLocalISO = toISTISO
+
+// Convert IST naive ISO → UTC Date (use when sending to server)
+export function fromISTISO(iso: string): Date {
+  return new Date(iso.length === 16 ? iso + ':00+05:30' : iso + '+05:30')
 }
 
 function fmtDT(iso: string) {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  const h = d.getHours(), m = d.getMinutes(), ap = h >= 12 ? 'PM' : 'AM'
-  return `${d.getDate()} ${MONTHS_LONG[d.getMonth()].slice(0,3)} ${d.getFullYear()} · ${h%12||12}:${String(m).padStart(2,'0')} ${ap}`
+  const c = getISTComponents(iso)
+  if (!c) return ''
+  const ap = c.h >= 12 ? 'PM' : 'AM'
+  return `${c.d} ${MONTHS_LONG[c.mo].slice(0,3)} ${c.y} · ${c.h%12||12}:${String(c.mi).padStart(2,'0')} ${ap}`
 }
 
-const spinBtnStyle: React.CSSProperties = {
-  background: '#F6F3EB', border: '1px solid #E8E4DC', borderRadius: 5,
-  width: 28, height: 22, cursor: 'pointer', fontSize: 9, color: '#8C7E6E',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-  fontFamily: '"Bricolage Grotesque", system-ui',
+function fmtDateOnly(iso: string) {
+  const c = getISTComponents(iso)
+  if (!c) return ''
+  return `${c.d} ${MONTHS_LONG[c.mo].slice(0,3)} ${c.y}`
 }
 
-export const DateTimePicker = ({ label, required, value, onChange }: { label?: string; required?: boolean; value: string; onChange: (v: string) => void }) => {
-  const [open, setOpen] = React.useState(false)
-  const [anchor, setAnchor] = React.useState<{ top: number; left: number; width: number } | null>(null)
-  const triggerRef = React.useRef<HTMLDivElement>(null)
+const CalIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="3" y="4" width="18" height="18" rx="2"/>
+    <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
+    <line x1="3" y1="10" x2="21" y2="10"/>
+  </svg>
+)
 
-  const parsed = value ? new Date(value) : null
-  const isValid = !!parsed && !isNaN(parsed.getTime())
+interface PickerPopupProps {
+  anchor: { top: number; left: number; above: boolean; width: number }
+  viewYear: number; viewMonth: number
+  selY: number | null; selM: number | null; selD: number | null
+  selH: number; selMin: number
+  showTime: boolean
+  onPrevMonth: () => void; onNextMonth: () => void
+  onPickDay: (d: number) => void
+  onAdjH: (delta: number) => void; onAdjM: (delta: number) => void
+  onToggleAP: (pm: boolean) => void
+  onPickTime: (h: number, m: number) => void
+  onDone: () => void
+}
 
-  const [viewYear, setViewYear] = React.useState(() => isValid ? parsed!.getFullYear() : new Date().getFullYear())
-  const [viewMonth, setViewMonth] = React.useState(() => isValid ? parsed!.getMonth() : new Date().getMonth())
-
-  const selY = isValid ? parsed!.getFullYear() : null
-  const selM = isValid ? parsed!.getMonth() : null
-  const selD = isValid ? parsed!.getDate() : null
-  const selH = isValid ? parsed!.getHours() : 12
-  const selMin = isValid ? parsed!.getMinutes() : 0
-
-  const openPicker = () => {
-    if (!triggerRef.current) return
-    const r = triggerRef.current.getBoundingClientRect()
-    setAnchor({ top: r.bottom + window.scrollY + 4, left: r.left + window.scrollX, width: Math.max(r.width, 300) })
-    if (isValid) { setViewYear(parsed!.getFullYear()); setViewMonth(parsed!.getMonth()) }
-    setOpen(true)
-  }
-
-  const emit = (y: number, mo: number, d: number, h: number, mi: number) =>
-    onChange(toLocalISO(new Date(y, mo, d, h, mi)))
-
-  const pickDay = (day: number) => emit(viewYear, viewMonth, day, selH, selMin)
-  const adjH = (delta: number) => emit(selY??viewYear, selM??viewMonth, selD??1, (selH+delta+24)%24, selMin)
-  const adjM = (delta: number) => emit(selY??viewYear, selM??viewMonth, selD??1, selH, (selMin+delta+60)%60)
-  const toggleAP = (pm: boolean) => emit(selY??viewYear, selM??viewMonth, selD??1, pm?(selH%12)+12:selH%12, selMin)
-
+function CalendarPopup({ anchor, viewYear, viewMonth, selY, selM, selD, selH, selMin, showTime, onPrevMonth, onNextMonth, onPickDay, onAdjH, onAdjM, onToggleAP, onPickTime, onDone }: PickerPopupProps) {
+  const today = new Date()
   const firstDow = new Date(viewYear, viewMonth, 1).getDay()
   const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate()
-  const today = new Date()
   const cells: (number|null)[] = []
   for (let i = 0; i < firstDow; i++) cells.push(null)
   for (let d = 1; d <= daysInMonth; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
 
-  const prevMonth = () => { const d = new Date(viewYear, viewMonth-1, 1); setViewYear(d.getFullYear()); setViewMonth(d.getMonth()) }
-  const nextMonth = () => { const d = new Date(viewYear, viewMonth+1, 1); setViewYear(d.getFullYear()); setViewMonth(d.getMonth()) }
-
-  const navBtn: React.CSSProperties = {
-    background: 'none', border: '1px solid #E8E4DC', borderRadius: 6,
-    width: 28, height: 28, cursor: 'pointer', fontSize: 16, color: '#8C7E6E',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+  const POPUP_W = 304
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    width: POPUP_W,
+    background: '#FFFFFF',
+    border: '1.5px solid #E2DDD7',
+    borderRadius: 16,
+    boxShadow: '0 12px 48px rgba(43,39,32,0.22)',
+    zIndex: 9991,
+    fontFamily: '"Bricolage Grotesque", system-ui',
+    overflowY: 'auto',
+  }
+  if (anchor.above) {
+    style.bottom = window.innerHeight - anchor.top + 4
+    style.left = Math.min(anchor.left, window.innerWidth - POPUP_W - 12)
+    style.maxHeight = anchor.top - 16
+  } else {
+    style.top = anchor.top + 4
+    style.left = Math.min(anchor.left, window.innerWidth - POPUP_W - 12)
+    style.maxHeight = window.innerHeight - (anchor.top + 4) - 12
   }
 
-  const popup = open && anchor ? ReactDOM.createPortal(
+  const navBtn: React.CSSProperties = {
+    background: '#F6F3EB', border: 'none', borderRadius: 8,
+    width: 32, height: 32, cursor: 'pointer', fontSize: 17, color: '#2B2720',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+    fontFamily: 'inherit', lineHeight: 1,
+  }
+  const spinBtn = (onClick: () => void, label: string) => (
+    <button onClick={onClick} style={{
+      background: '#F6F3EB', border: 'none', borderRadius: 8,
+      width: 44, height: 34, cursor: 'pointer', fontSize: 14, color: '#2B2720',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+      fontFamily: 'inherit',
+    }}>{label}</button>
+  )
+
+  return ReactDOM.createPortal(
     <>
-      <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9990 }}/>
-      <div style={{
-        position: 'absolute', top: anchor.top, left: anchor.left, width: anchor.width,
-        background: '#FFFFFF', border: '1.5px solid #E8E4DC', borderRadius: 14,
-        boxShadow: '0 8px 40px rgba(43,39,32,0.18)', zIndex: 9991, padding: 18,
-        fontFamily: '"Bricolage Grotesque", system-ui',
-      }}>
-        {/* Month nav */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <button onClick={prevMonth} style={navBtn}>‹</button>
-          <span style={{ fontWeight: 700, fontSize: 14.5, color: '#2B2720' }}>{MONTHS_LONG[viewMonth]} {viewYear}</span>
-          <button onClick={nextMonth} style={navBtn}>›</button>
+      <div onClick={onDone} style={{ position: 'fixed', inset: 0, zIndex: 9990 }}/>
+      <div style={style}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px 10px', borderBottom: '1px solid #F0ECE4' }}>
+          <button onClick={onPrevMonth} style={navBtn}>‹</button>
+          <span style={{ fontWeight: 700, fontSize: 14, color: '#2B2720', letterSpacing: 0.2 }}>{MONTHS_LONG[viewMonth]} {viewYear}</span>
+          <button onClick={onNextMonth} style={navBtn}>›</button>
         </div>
 
-        {/* DOW headers */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2, marginBottom: 4 }}>
-          {DOW_SHORT.map(d => <div key={d} style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 600, color: '#B0A898', padding: '2px 0' }}>{d}</div>)}
-        </div>
-
-        {/* Calendar grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2 }}>
-          {cells.map((day, i) => {
-            if (!day) return <div key={i}/>
-            const isToday = day === today.getDate() && viewMonth === today.getMonth() && viewYear === today.getFullYear()
-            const isSel = day === selD && viewMonth === selM && viewYear === selY
-            return (
-              <button key={i} onClick={() => pickDay(day)} style={{
-                border: 'none', borderRadius: 8, height: 34, cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 13, fontWeight: isSel ? 700 : 400,
-                background: isSel ? '#FFD84A' : isToday ? '#F6F3EB' : 'transparent',
-                color: isSel ? '#2B2720' : isToday ? '#4E8E41' : '#2B2720',
-                outline: isToday && !isSel ? '1.5px solid #4E8E41' : 'none',
-                outlineOffset: -1,
-              }}>{day}</button>
-            )
-          })}
-        </div>
-
-        {/* Time picker */}
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #E8E4DC', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          {/* Hour */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-            <button onClick={() => adjH(1)} style={spinBtnStyle}>▲</button>
-            <div style={{ width: 40, textAlign: 'center', fontWeight: 700, fontSize: 22, color: '#2B2720', lineHeight: 1 }}>
-              {String(selH%12||12).padStart(2,'0')}
-            </div>
-            <button onClick={() => adjH(-1)} style={spinBtnStyle}>▼</button>
+        <div style={{ padding: '10px 12px 0' }}>
+          {/* DOW headers */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', marginBottom: 4 }}>
+            {DOW_SHORT.map(d => <div key={d} style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 700, color: '#B0A898', padding: '2px 0', letterSpacing: 0.3 }}>{d}</div>)}
           </div>
-          <span style={{ fontSize: 22, fontWeight: 700, color: '#2B2720', marginTop: -4 }}>:</span>
-          {/* Minute */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-            <button onClick={() => adjM(5)} style={spinBtnStyle}>▲</button>
-            <div style={{ width: 40, textAlign: 'center', fontWeight: 700, fontSize: 22, color: '#2B2720', lineHeight: 1 }}>
-              {String(selMin).padStart(2,'0')}
-            </div>
-            <button onClick={() => adjM(-5)} style={spinBtnStyle}>▼</button>
-          </div>
-          {/* AM/PM */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginLeft: 6 }}>
-            {(['AM','PM'] as const).map(ap => {
-              const active = ap === 'AM' ? selH < 12 : selH >= 12
+
+          {/* Calendar grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2 }}>
+            {cells.map((day, i) => {
+              if (!day) return <div key={i} style={{ height: 36 }}/>
+              const isToday = day === today.getDate() && viewMonth === today.getMonth() && viewYear === today.getFullYear()
+              const isSel = day === selD && viewMonth === selM && viewYear === selY
               return (
-                <button key={ap} onClick={() => toggleAP(ap === 'PM')} style={{
-                  border: `1.5px solid ${active ? '#2B2720' : '#E8E4DC'}`,
-                  borderRadius: 7, padding: '3px 10px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700,
-                  background: active ? '#2B2720' : 'transparent', color: active ? '#FFFFFF' : '#8C7E6E',
-                  fontFamily: 'inherit',
-                }}>{ap}</button>
+                <button key={i} onClick={() => onPickDay(day)} style={{
+                  border: 'none', borderRadius: 9, height: 36, cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: 13.5, fontWeight: isSel ? 700 : isToday ? 600 : 400,
+                  background: isSel ? '#FFD84A' : isToday ? '#FFF5C2' : 'transparent',
+                  color: '#2B2720',
+                  boxShadow: isToday && !isSel ? 'inset 0 0 0 1.5px #D4A800' : 'none',
+                }}>{day}</button>
               )
             })}
           </div>
         </div>
 
-        <button onClick={() => setOpen(false)} style={{
-          marginTop: 14, width: '100%', background: '#FFD84A', border: 'none', borderRadius: 9,
-          padding: '9px 0', fontWeight: 700, fontSize: 13.5, color: '#2B2720', cursor: 'pointer', fontFamily: 'inherit',
-        }}>Done</button>
+        {showTime && (
+          <>
+            {/* Time row */}
+            <div style={{ margin: '10px 12px 0', paddingTop: 12, borderTop: '1px solid #F0ECE4' }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: '#B0A898', letterSpacing: 0.5, marginBottom: 8, textTransform: 'uppercase' }}>Time</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* Hour column */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  {spinBtn(() => onAdjH(1), '▲')}
+                  <div style={{ width: 44, textAlign: 'center', fontWeight: 700, fontSize: 26, color: '#2B2720', lineHeight: 1, fontFamily: '"JetBrains Mono", monospace' }}>
+                    {String(selH%12||12).padStart(2,'0')}
+                  </div>
+                  {spinBtn(() => onAdjH(-1), '▼')}
+                </div>
+                <span style={{ fontSize: 26, fontWeight: 700, color: '#2B2720', lineHeight: 1, fontFamily: '"JetBrains Mono", monospace', marginBottom: 2 }}>:</span>
+                {/* Minute column */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  {spinBtn(() => onAdjM(15), '▲')}
+                  <div style={{ width: 44, textAlign: 'center', fontWeight: 700, fontSize: 26, color: '#2B2720', lineHeight: 1, fontFamily: '"JetBrains Mono", monospace' }}>
+                    {String(selMin).padStart(2,'0')}
+                  </div>
+                  {spinBtn(() => onAdjM(-15), '▼')}
+                </div>
+                {/* AM/PM */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 4 }}>
+                  {(['AM','PM'] as const).map(ap => {
+                    const active = ap === 'AM' ? selH < 12 : selH >= 12
+                    return (
+                      <button key={ap} onClick={() => onToggleAP(ap === 'PM')} style={{
+                        border: `1.5px solid ${active ? '#2B2720' : '#E2DDD7'}`,
+                        borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                        background: active ? '#2B2720' : '#F6F3EB', color: active ? '#FFD84A' : '#9E9A91',
+                        fontFamily: 'inherit', letterSpacing: 0.3,
+                      }}>{ap}</button>
+                    )
+                  })}
+                </div>
+                {/* Quick-pick common times */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                  {[[6,0],[12,0],[18,0],[21,0]].map(([h,m]) => {
+                    const ap = h >= 12 ? 'PM' : 'AM'; const hh = h%12||12
+                    const active = selH === h && selMin === m
+                    return (
+                      <button key={h} onClick={() => onPickTime(h, m)} style={{
+                        padding: '3px 8px', border: `1px solid ${active ? '#2B2720' : '#E2DDD7'}`,
+                        borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: active ? 700 : 400,
+                        background: active ? '#2B2720' : 'transparent', color: active ? '#FFD84A' : '#736E65',
+                        fontFamily: '"JetBrains Mono", monospace',
+                      }}>{hh}:00 {ap}</button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Done button */}
+        <div style={{ padding: '12px 12px 14px' }}>
+          <button onClick={onDone} style={{
+            width: '100%', background: '#FFD84A', border: 'none', borderRadius: 10,
+            padding: '10px 0', fontWeight: 700, fontSize: 13.5, color: '#2B2720', cursor: 'pointer', fontFamily: 'inherit',
+          }}>Done</button>
+        </div>
       </div>
     </>,
     document.body
-  ) : null
+  )
+}
+
+function usePickerState(value: string, _hasTime: boolean) {
+  const parts = value ? getISTComponents(value) : null
+  const isValid = !!parts
+  const nowIST = getISTComponents(new Date().toISOString())!
+  const [viewYear, setViewYear] = React.useState(() => isValid ? parts!.y : nowIST.y)
+  const [viewMonth, setViewMonth] = React.useState(() => isValid ? parts!.mo : nowIST.mo)
+  React.useEffect(() => {
+    if (isValid) { setViewYear(parts!.y); setViewMonth(parts!.mo) }
+  }, [value])
+  return { isValid, parts, viewYear, viewMonth, setViewYear, setViewMonth }
+}
+
+export const DateTimePicker = ({ label, required, value, onChange }: { label?: string; required?: boolean; value: string; onChange: (v: string) => void }) => {
+  const [open, setOpen] = React.useState(false)
+  const [anchor, setAnchor] = React.useState<{ top: number; left: number; above: boolean; width: number } | null>(null)
+  const triggerRef = React.useRef<HTMLDivElement>(null)
+  const { isValid, parts, viewYear, viewMonth, setViewYear, setViewMonth } = usePickerState(value, true)
+
+  const selY = isValid ? parts!.y : null
+  const selM = isValid ? parts!.mo : null
+  const selD = isValid ? parts!.d : null
+  const selH = isValid ? parts!.h : 8
+  const selMin = isValid ? parts!.mi : 0
+
+  const openPicker = () => {
+    if (!triggerRef.current) return
+    const r = triggerRef.current.getBoundingClientRect()
+    const POPUP_H = 480
+    const above = r.bottom + POPUP_H + 8 > window.innerHeight && r.top > POPUP_H
+    setAnchor({ top: above ? r.top : r.bottom, left: r.left, above, width: r.width })
+    setOpen(true)
+  }
+
+  // Emit IST naive ISO directly from IST components — no browser timezone involved
+  const emit = (y: number, mo: number, d: number, h: number, mi: number) =>
+    onChange(fmtISTISO(y, mo, d, h, mi))
+
+  const pickDay = (day: number) => emit(viewYear, viewMonth, day, selH, selMin)
+  const adjH = (delta: number) => emit(selY??viewYear, selM??viewMonth, selD??1, (selH+delta+24)%24, selMin)
+  const adjM = (delta: number) => {
+    const newMin = ((selMin + delta) % 60 + 60) % 60
+    emit(selY??viewYear, selM??viewMonth, selD??1, selH, newMin)
+  }
+  const pickTime = (h: number, m: number) => emit(selY??viewYear, selM??viewMonth, selD??1, h, m)
+  const toggleAP = (pm: boolean) => emit(selY??viewYear, selM??viewMonth, selD??1, pm?(selH%12)+12:selH%12, selMin)
+  const prevMonth = () => { const d = new Date(viewYear, viewMonth > 0 ? viewMonth-1 : 11, 1); setViewYear(d.getFullYear()); setViewMonth(viewMonth > 0 ? viewMonth-1 : 11); if (viewMonth === 0) setViewYear(viewYear-1) }
+  const nextMonth = () => { const d = new Date(viewYear, viewMonth < 11 ? viewMonth+1 : 0, 1); setViewYear(d.getFullYear()); setViewMonth(viewMonth < 11 ? viewMonth+1 : 0); if (viewMonth === 11) setViewYear(viewYear+1) }
 
   return (
     <Stack gap={6}>
       {label && <FieldLabel required={required}>{label}</FieldLabel>}
       <div ref={triggerRef} onClick={openPicker} style={{
-        display: 'flex', alignItems: 'center', height: 36, padding: '0 12px',
-        background: '#FFFFFF', border: '1px solid #E8E4DC', borderRadius: 8,
-        cursor: 'pointer', userSelect: 'none',
+        display: 'flex', alignItems: 'center', height: 40, padding: '0 12px',
+        background: '#FFFFFF', border: `1.5px solid ${open ? '#2B2720' : '#E2DDD7'}`, borderRadius: 10,
+        cursor: 'pointer', userSelect: 'none', transition: 'border-color 120ms',
       }}>
-        <span style={{ color: '#B0A898', marginRight: 8, fontSize: 14, display: 'flex' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        </span>
+        <span style={{ color: '#B0A898', marginRight: 8, display: 'flex' }}><CalIcon/></span>
         <span style={{ flex: 1, fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 13, color: isValid ? '#2B2720' : '#B0A898' }}>
           {isValid ? fmtDT(value) : 'Pick date & time'}
         </span>
-        <span style={{ fontSize: 9, color: '#B0A898' }}>▼</span>
+        <span style={{ fontSize: 10, color: '#B0A898', marginLeft: 4 }}>▾</span>
       </div>
-      {popup}
+      {open && anchor && (
+        <CalendarPopup
+          anchor={anchor} viewYear={viewYear} viewMonth={viewMonth}
+          selY={selY} selM={selM} selD={selD} selH={selH} selMin={selMin}
+          showTime={true}
+          onPrevMonth={prevMonth} onNextMonth={nextMonth}
+          onPickDay={pickDay} onAdjH={adjH} onAdjM={adjM} onToggleAP={toggleAP}
+          onPickTime={pickTime}
+          onDone={() => setOpen(false)}
+        />
+      )}
+    </Stack>
+  )
+}
+
+export const DatePicker = ({ label, required, value, onChange, placeholder }: { label?: string; required?: boolean; value: string; onChange: (v: string) => void; placeholder?: string }) => {
+  const [open, setOpen] = React.useState(false)
+  const [anchor, setAnchor] = React.useState<{ top: number; left: number; above: boolean; width: number } | null>(null)
+  const triggerRef = React.useRef<HTMLDivElement>(null)
+  const { isValid, parts, viewYear, viewMonth, setViewYear, setViewMonth } = usePickerState(value, false)
+
+  const selY = isValid ? parts!.y : null
+  const selM = isValid ? parts!.mo : null
+  const selD = isValid ? parts!.d : null
+
+  const openPicker = () => {
+    if (!triggerRef.current) return
+    const r = triggerRef.current.getBoundingClientRect()
+    const POPUP_H = 310
+    const above = r.bottom + POPUP_H + 8 > window.innerHeight && r.top > POPUP_H
+    setAnchor({ top: above ? r.top : r.bottom, left: r.left, above, width: r.width })
+    setOpen(true)
+  }
+
+  const pickDay = (day: number) => {
+    onChange(fmtDateISO(viewYear, viewMonth, day))
+    setOpen(false)
+  }
+  const prevMonth = () => { setViewMonth(m => { if (m > 0) return m-1; setViewYear(y => y-1); return 11 }) }
+  const nextMonth = () => { setViewMonth(m => { if (m < 11) return m+1; setViewYear(y => y+1); return 0 }) }
+
+  return (
+    <Stack gap={6}>
+      {label && <FieldLabel required={required}>{label}</FieldLabel>}
+      <div ref={triggerRef} onClick={openPicker} style={{
+        display: 'flex', alignItems: 'center', height: 40, padding: '0 12px',
+        background: '#FFFFFF', border: `1.5px solid ${open ? '#2B2720' : '#E2DDD7'}`, borderRadius: 10,
+        cursor: 'pointer', userSelect: 'none', transition: 'border-color 120ms',
+      }}>
+        <span style={{ color: '#B0A898', marginRight: 8, display: 'flex' }}><CalIcon/></span>
+        <span style={{ flex: 1, fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 13, color: isValid ? '#2B2720' : '#B0A898' }}>
+          {isValid ? fmtDateOnly(value) : (placeholder || 'Pick a date')}
+        </span>
+        <span style={{ fontSize: 10, color: '#B0A898', marginLeft: 4 }}>▾</span>
+      </div>
+      {open && anchor && (
+        <CalendarPopup
+          anchor={anchor} viewYear={viewYear} viewMonth={viewMonth}
+          selY={selY} selM={selM} selD={selD} selH={0} selMin={0}
+          showTime={false}
+          onPrevMonth={prevMonth} onNextMonth={nextMonth}
+          onPickDay={pickDay} onAdjH={() => {}} onAdjM={() => {}} onToggleAP={() => {}} onPickTime={() => {}}
+          onDone={() => setOpen(false)}
+        />
+      )}
     </Stack>
   )
 }
@@ -718,25 +920,25 @@ export const DateTimePicker = ({ label, required, value, onChange }: { label?: s
 
 export const fmtTime = (iso: string | null | undefined) => {
   if (!iso) return '—'
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
-  const h = d.getHours(), m = d.getMinutes()
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const hh = h % 12 || 12
-  return `${hh}:${String(m).padStart(2, '0')} ${ampm}`
+  const c = getISTComponents(iso)
+  if (!c) return '—'
+  const ampm = c.h >= 12 ? 'PM' : 'AM'
+  return `${c.h % 12 || 12}:${String(c.mi).padStart(2, '0')} ${ampm}`
 }
 
 export const fmtDate = (iso: string | null | undefined) => {
   if (!iso) return '—'
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const target = new Date(d); target.setHours(0, 0, 0, 0)
-  const diff = (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+  const c = getISTComponents(iso)
+  if (!c) return '—'
+  const nowIST = getISTComponents(new Date().toISOString())!
+  const diff = Math.round((new Date(c.y, c.mo, c.d).getTime() - new Date(nowIST.y, nowIST.mo, nowIST.d).getTime()) / 86400000)
   if (diff === 0) return 'Today'
   if (diff === 1) return 'Tomorrow'
   if (diff === -1) return 'Yesterday'
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+  const dd = String(c.d).padStart(2, '0')
+  const mm = String(c.mo + 1).padStart(2, '0')
+  const yyyy = c.y
+  return `${dd}/${mm}/${yyyy}`
 }
 
 export const fmtINR = (n: number | null | undefined) =>

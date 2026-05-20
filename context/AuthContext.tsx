@@ -1,90 +1,74 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from "react";
-import { restoreAuthToken, restoreUserFromStorage, saveUserToStorage, setAuthToken } from "../lib/api";
+import { createContext, ReactNode, useContext, useEffect, useState } from 'react'
+import { restoreAuthToken, restoreUserFromStorage, saveUserToStorage, setAuthToken } from '../lib/api'
 
 type User = {
-  phone: string;
-  name?: string;
-  role?: string;
-  isTestUser?: boolean; // Flag for users who logged in with test OTP 0000
-};
+  phone: string
+  email?: string
+  name?: string
+  role?: string
+  referralCode?: string
+  referralCredits?: number
+}
 
 type AuthContextType = {
-  user: User | null;
-  isLoggedIn: boolean;
-  isLoading: boolean;
-  isTestUser: boolean; // Convenience getter
-  login: (user: User) => void;
-  logout: () => void;
-  updateUser: (updates: Partial<User>) => void; // Update user data in context and storage
-};
+  user: User | null
+  isLoggedIn: boolean
+  isLoading: boolean
+  login: (user: User) => void
+  logout: () => void
+  updateUser: (updates: Partial<User>) => void
+}
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  // Restore session on app launch
   useEffect(() => {
     async function restoreSession() {
       try {
-        const token = await restoreAuthToken();
+        const token = await restoreAuthToken()
         if (token) {
-          const savedUser = await restoreUserFromStorage();
-          if (savedUser) {
-            setUser(savedUser);
-          }
+          const savedUser = await restoreUserFromStorage()
+          if (savedUser) setUser(savedUser)
         }
       } catch (error) {
-        console.error("Failed to restore session:", error);
+        console.error('Failed to restore session:', error)
       } finally {
-        setIsLoading(false);
+        setIsLoading(false)
       }
     }
-
-    restoreSession();
-  }, []);
+    restoreSession()
+  }, [])
 
   function login(userData: User) {
-    setUser(userData);
-    saveUserToStorage(userData);
+    setUser(userData)
+    saveUserToStorage(userData)
   }
 
   function updateUser(updates: Partial<User>) {
     if (user) {
-      const updatedUser = { ...user, ...updates };
-      setUser(updatedUser);
-      saveUserToStorage(updatedUser);
+      const updated = { ...user, ...updates }
+      setUser(updated)
+      saveUserToStorage(updated)
     }
   }
 
   function logout() {
-    setUser(null);
-    // Clear the API auth token and storage
-    setAuthToken(null);
+    setUser(null)
+    setAuthToken(null)
   }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoggedIn: !!user,
-        isLoading,
-        isTestUser: user?.isTestUser || false,
-        login,
-        logout,
-        updateUser,
-      }}
-    >
+    <AuthContext.Provider value={{ user, isLoggedIn: !!user, isLoading, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
-  );
+  )
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used inside AuthProvider");
-  }
-  return ctx;
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
+  return ctx
 }

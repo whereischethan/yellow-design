@@ -3,7 +3,7 @@ import type { Booking, CreateBookingRequest, PricingResponse } from '../types/bo
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE
 
-function getApiBase(): string {
+export function getApiBase(): string {
   if (typeof window !== 'undefined') {
     const host = window.location?.hostname || ''
     if (host.endsWith('.web.app') || host.endsWith('.ridewithyellow.com')) {
@@ -378,7 +378,7 @@ export async function verifyPaymentAndCreateBooking(payload: {
 
 // ─── User Profile ─────────────────────────────────────────────────────────────
 
-export async function getUserProfile(): Promise<{ id: string; phone: string; name?: string; email?: string }> {
+export async function getUserProfile(): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number }> {
   const res = await authenticatedFetch(`${getApiBase()}/user/profile`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Failed to fetch profile' }))
@@ -388,7 +388,7 @@ export async function getUserProfile(): Promise<{ id: string; phone: string; nam
   return data.user
 }
 
-export async function updateProfile(updates: { name?: string; email?: string }): Promise<{ id: string; phone: string; name?: string; email?: string }> {
+export async function updateProfile(updates: { name?: string; email?: string; appliedReferralCode?: string }): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number }> {
   const res = await authenticatedFetch(`${getApiBase()}/user/profile`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -515,5 +515,16 @@ export async function updateSavedPlace(id: string, body: Partial<{ label: string
 
 export async function deleteSavedPlace(id: string): Promise<void> {
   await authenticatedFetch(`${getApiBase()}/user/places/${id}`, { method: 'DELETE' })
+}
+
+export interface ReferralData {
+  earned: number
+  invited: { name: string; date: string }[]
+}
+
+export async function fetchReferrals(): Promise<ReferralData> {
+  const res = await authenticatedFetch(`${getApiBase()}/user/referrals`)
+  if (!res.ok) throw new Error('Failed to fetch referrals')
+  return res.json()
 }
 

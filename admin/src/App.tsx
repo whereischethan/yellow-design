@@ -31,6 +31,8 @@ import VehiclesPage from './pages/Vehicles'
 import CustomersPage from './pages/Customers'
 import LeadsPage from './pages/Leads'
 import PricingPage from './pages/Pricing'
+import InvoicesPage from './pages/Invoices'
+import SettingsPage from './pages/Settings'
 import TeamPage from './pages/Team'
 import { CreateBookingModal, AddDriverModal, AddVehicleModal } from './pages/Modals'
 import Login from './pages/Login'
@@ -126,15 +128,31 @@ export default function App() {
     if (isInitial) setError(null)
     setNetworkError(null)
     try {
-      const [b, d, v, c, s, l] = await Promise.all([
-        getBookings(), getDrivers(), getVehicles(), getCustomers(), getStats(), getLeads(),
-      ])
-      setBookings(b.bookings)
-      setDrivers(d.drivers)
-      setVehicles(v.vehicles)
-      setCustomers(c.customers)
-      setStats(s)
-      setLeads(l.leads)
+      if (isInitial) {
+        // Critical path: only what the dashboard needs — show UI immediately
+        const [b, d, s] = await Promise.all([getBookings(), getDrivers(), getStats()])
+        setBookings(b.bookings)
+        setDrivers(d.drivers)
+        setStats(s)
+        // Deferred: load the rest in background without blocking render
+        Promise.all([getVehicles(), getCustomers(), getLeads()]).then(([v, c, l]) => {
+          setVehicles(v.vehicles)
+          setCustomers(c.customers)
+          setLeads(l.leads)
+        }).catch((e) => {
+          if (e.message?.includes('UNAUTHORIZED')) { clearAdminKey(); setAuthed(false) }
+        })
+      } else {
+        const [b, d, v, c, s, l] = await Promise.all([
+          getBookings(), getDrivers(), getVehicles(), getCustomers(), getStats(), getLeads(),
+        ])
+        setBookings(b.bookings)
+        setDrivers(d.drivers)
+        setVehicles(v.vehicles)
+        setCustomers(c.customers)
+        setStats(s)
+        setLeads(l.leads)
+      }
     } catch (e: any) {
       if (e.message?.includes('UNAUTHORIZED')) { clearAdminKey(); setAuthed(false); return }
       // Initial load failure → full-page error; subsequent → inline banner only
@@ -169,8 +187,18 @@ export default function App() {
   if (!authed) return <Login onLogin={(a?: AdminProfile) => { setAuthed(true); if (a) setAdmin(a); refresh() }} />
 
   if (loading) return (
-    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: YL.bg, fontFamily: '"Bricolage Grotesque", system-ui', color: YL.ink2, fontSize: 14 }}>
-      Loading Yellow admin…
+    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: YL.bg, fontFamily: '"Bricolage Grotesque", system-ui', flexDirection: 'column', gap: 28 }}>
+      <style>{`
+        @keyframes yl-spin { to { transform: rotate(360deg) } }
+        @keyframes yl-fade-in { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
+        .yl-loader-wrap { animation: yl-fade-in 320ms ease both }
+        .yl-spinner { width: 36px; height: 36px; border: 3px solid rgba(43,39,32,0.10); border-top-color: #2B2720; border-radius: 50%; animation: yl-spin 700ms linear infinite }
+      `}</style>
+      <div className="yl-loader-wrap" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
+        <img src="/logo.png" alt="Yellow" style={{ width: 160, height: 64, objectFit: 'contain', opacity: 0.95 }} />
+        <div className="yl-spinner" />
+        <div style={{ fontSize: 13, color: YL.ink3, letterSpacing: 0.2 }}>Loading ops dashboard…</div>
+      </div>
     </div>
   )
 
@@ -207,16 +235,18 @@ export default function App() {
         {page === 'dashboard'  && <Dashboard bookings={bookings} drivers={drivers} stats={stats} adminName={admin?.name} onOpen={setOpenBooking} onAssignRequest={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} />}
         {page === 'bookings'   && <BookingsList bookings={bookings} onOpen={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} />}
         {page === 'drivers'    && <DriversPage drivers={drivers} onUpdate={d => setDrivers(prev => prev.map(x => x.id === d.id ? d : x))} onAddDriver={() => setShowAddDriver(true)} onAddVehicle={() => setShowAddVehicle(true)} />}
-        {page === 'vehicles'   && <VehiclesPage vehicles={vehicles} onUpdate={v => setVehicles(prev => prev.map(x => x.id === v.id ? v : x))} onAddVehicle={() => setShowAddVehicle(true)} />}
+        {page === 'vehicles'   && <VehiclesPage vehicles={vehicles} drivers={drivers} onUpdate={v => setVehicles(prev => prev.map(x => x.id === v.id ? v : x))} onAddVehicle={() => setShowAddVehicle(true)} onVehiclesRefresh={() => getVehicles().then(r => setVehicles(r.vehicles)).catch(() => {})} />}
         {page === 'customers'  && <CustomersPage customers={customers} onUpdate={c => setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...c } : x))} />}
-        {page === 'leads'      && <LeadsPage leads={leads} bookings={bookings} onUpdate={l => setLeads(prev => prev.map(x => x.id === l.id ? { ...x, ...l } : x))} />}
+        {page === 'leads'      && <LeadsPage leads={leads} bookings={bookings} onUpdate={l => setLeads(prev => prev.map(x => x.id === l.id ? { ...x, ...l } : x))} onBookingCreated={b => { setBookings(prev => [b, ...prev]); setPage('bookings') }} />}
         {page === 'pricing'    && <PricingPage />}
+        {page === 'invoices'   && <InvoicesPage />}
+        {page === 'settings'   && <SettingsPage />}
         {page === 'team'       && <TeamPage selfPhone={admin?.phone ?? ''} />}
 
-        <BookingDrawer booking={openBooking} drivers={drivers} vehicles={vehicles} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate} />
+        <BookingDrawer booking={openBooking} drivers={drivers} vehicles={vehicles} customers={customers} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate} onDelete={id => setBookings(prev => prev.filter(b => b.id !== id))} />
 
         <CreateBookingModal open={showNewBooking} onClose={() => setShowNewBooking(false)} drivers={drivers} customers={customers} onCreated={() => { refresh(); setPage('bookings') }} />
-        <AddDriverModal open={showAddDriver} onClose={() => setShowAddDriver(false)} onCreated={() => { getDrivers().then(r => setDrivers(r.drivers)); getVehicles().then(r => setVehicles(r.vehicles)) }} />
+        <AddDriverModal open={showAddDriver} onClose={() => setShowAddDriver(false)} vehicles={vehicles} onCreated={() => { getDrivers().then(r => setDrivers(r.drivers)); getVehicles().then(r => setVehicles(r.vehicles)) }} />
         <AddVehicleModal open={showAddVehicle} onClose={() => setShowAddVehicle(false)} drivers={drivers} onCreated={() => { getVehicles().then(r => setVehicles(r.vehicles)); getDrivers().then(r => setDrivers(r.drivers)) }} />
         <ProfileModal open={showProfile} admin={admin} onClose={() => setShowProfile(false)} onSaved={a => setAdmin(a)} />
       </div>

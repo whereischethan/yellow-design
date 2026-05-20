@@ -14,11 +14,6 @@ import type { Booking } from '../../types/booking'
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function formatElapsed(secs: number): string {
-  const m = Math.floor(secs / 60)
-  const s = secs % 60
-  return `${String(m).padStart(2, '0')} : ${String(s).padStart(2, '0')}`
-}
 
 function formatPickupLabel(iso: string): string {
   try {
@@ -41,13 +36,7 @@ export default function ScreenAwaitingPartner() {
   const [booking, setBooking] = useState<Booking | null>(() => {
     try { return params.booking ? JSON.parse(params.booking) : null } catch { return null }
   })
-  const [elapsed, setElapsed] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    const interval = setInterval(() => setElapsed((e) => e + 1), 1000)
-    return () => clearInterval(interval)
-  }, [])
 
   useEffect(() => {
     if (!booking?.id) return
@@ -146,16 +135,6 @@ export default function ScreenAwaitingPartner() {
           </View>
         </View>
 
-        <View style={{
-          marginTop: 14, paddingHorizontal: 14, paddingVertical: 12,
-          backgroundColor: YL.bg, borderRadius: 12,
-          flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink2 }}>Waiting</Text>
-          <Text style={{ fontFamily: FONTS.mono, fontSize: 15, fontWeight: '500', color: YL.ink, letterSpacing: 0.5 }}>
-            {formatElapsed(elapsed)}
-          </Text>
-        </View>
       </View>
 
       {/* Your ride card */}
@@ -178,13 +157,8 @@ export default function ScreenAwaitingPartner() {
       <View style={{ flex: 1 }} />
 
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 20, zIndex: 1 }}>
-        <YButton variant="outline" full={false} style={{ flex: 1 }} onPress={async () => {
-          if (booking?.id) {
-            try { await updateBookingStatus(booking.id, 'cancelled') } catch {}
-          }
-          router.replace('/(app)/home')
-        }}>
-          Cancel booking
+        <YButton variant="outline" full={false} style={{ flex: 1 }} onPress={() => router.replace('/(app)/home')}>
+          Home
         </YButton>
         <YButton variant="ink" full={false} style={{ flex: 1.3 }} onPress={() => Linking.openURL('https://wa.me/918628062808')}>
           WhatsApp support

@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Linking } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import Svg, { Path, Circle } from 'react-native-svg'
 import { YL, FONTS } from '../../constants/theme'
 import YAppChrome from '../../components/YAppChrome'
 import BottomNav from '../../components/BottomNav'
-import { getBookings } from '../../lib/api'
+import { getBookings, getApiBase, getAuthToken } from '../../lib/api'
 import type { Booking } from '../../types/booking'
 
 type Tab = 'upcoming' | 'past'
@@ -130,6 +130,21 @@ function BookingRow({ booking, onPress }: { booking: Booking; onPress: () => voi
         <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: YL.ink3, marginTop: 2 }}>
           {booking.tripCode ? `#${booking.tripCode} · ` : ''}{time}
         </Text>
+        {booking.status === 'completed' && booking.tripCode && (
+          <Pressable
+            onPress={e => {
+              e.stopPropagation?.()
+              const token = getAuthToken()
+              const url = `${getApiBase()}/invoices/${booking.tripCode}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+              Linking.openURL(url)
+            }}
+            style={{ alignSelf: 'flex-start', marginTop: 3 }}
+          >
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: YL.ink2, textDecorationLine: 'underline' }}>
+              Download invoice
+            </Text>
+          </Pressable>
+        )}
       </View>
       <Text
         style={{
@@ -306,6 +321,8 @@ export default function ScreenRideHistory() {
                   onPress={() => {
                     if (UPCOMING_STATUSES.has(booking.status)) {
                       router.push({ pathname: '/(app)/awaiting', params: { booking: JSON.stringify(booking) } })
+                    } else {
+                      router.push({ pathname: '/(app)/complete', params: { bookingId: booking.id } })
                     }
                   }}
                 />

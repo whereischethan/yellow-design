@@ -55,10 +55,9 @@ export default function ScreenReview() {
   const router = useRouter()
   const params = useLocalSearchParams<{
     passengers: string
-    bags: string
-    meetAndGreet: string
-    petFriendly: string
-    tripType: string
+    checkInBags: string
+    cabinBags: string
+tripType: string
     terminal: string
     pickup: string
     drop: string
@@ -70,10 +69,9 @@ export default function ScreenReview() {
   }>()
 
   const passengers = parseInt(params.passengers ?? '1', 10)
-  const bags = parseInt(params.bags ?? '0', 10)
-  const meetAndGreet = params.meetAndGreet === '1'
-  const petFriendly = params.petFriendly === '1'
-  const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
+  const checkInBags = parseInt(params.checkInBags ?? '0', 10)
+  const cabinBags = parseInt(params.cabinBags ?? '0', 10)
+const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
 
   const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup) : null
   const drop: BookingLocation | null = params.drop ? JSON.parse(params.drop) : null
@@ -81,9 +79,7 @@ export default function ScreenReview() {
   const flight: FlightInfo | null = params.flight ? JSON.parse(params.flight) : null
   const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
-  const meetAndGreetFee = meetAndGreet ? (pricing?.optionalMeetGreet ?? 100) : 0
-  // Total comes entirely from server-calculated pricing — no client-side arithmetic
-  const total = (pricing?.totalPrice ?? 0) + meetAndGreetFee
+  const total = pricing?.totalPrice ?? 0
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -119,7 +115,8 @@ export default function ScreenReview() {
     tripType: params.tripType as 'pickup' | 'drop',
     vehicleType,
     passengers,
-    luggage: bags,
+    luggage: checkInBags,
+    cabinBags,
     pickup: pickup!,
     drop: drop!,
     stops: stops.length ? stops : undefined,
@@ -291,10 +288,8 @@ export default function ScreenReview() {
             <View style={{ flex: 1 }}>
               <Text style={styles.vehicleName}>Kia Carens Clavis EV</Text>
               <Text style={styles.vehicleDetail}>
-                {passengers} passenger{passengers !== 1 ? 's' : ''} · {bags} bag{bags !== 1 ? 's' : ''}
-                {meetAndGreet ? ' · Meet & greet' : ''}
-                {petFriendly ? ' · Pet-friendly' : ''}
-              </Text>
+                {passengers} pax · {checkInBags} check-in{cabinBags > 0 ? ` · ${cabinBags} cabin` : ''}
+</Text>
             </View>
           </View>
         </View>
@@ -344,27 +339,14 @@ export default function ScreenReview() {
         </View>
 
         {/* Fare card */}
-        <View style={styles.card}>
-          {pricing?.fareBeforeTax != null ? (
-            <>
-              <FareLine
-                label={`Fare (${pricing.distanceKm} km)`}
-                value={`₹${pricing.fareBeforeTax.toLocaleString('en-IN')}`}
-              />
-              <FareLine label={`GST (5%)`} value={`₹${pricing.gst.toLocaleString('en-IN')}`} muted />
-              <FareLine label="Airport toll" value={`₹${pricing.toll.toLocaleString('en-IN')}`} muted />
-            </>
-          ) : (
-            <FareLine label="Fare" value={`₹${(pricing?.basePrice ?? 0).toLocaleString('en-IN')}`} />
-          )}
-          {meetAndGreet && <FareLine label="Meet & greet" value={`₹${meetAndGreetFee}`} />}
-          <View style={{ height: 1, backgroundColor: YL.lineSoft, marginVertical: 10 }} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontFamily: FONTS.display, fontSize: 15, fontWeight: '600', color: YL.ink }}>
-              Total
-            </Text>
-            <Text style={styles.totalAmount}>₹{total.toLocaleString('en-IN')}</Text>
-          </View>
+        <View style={[styles.card, { alignItems: 'center', paddingVertical: 22 }]}>
+          <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: YL.ink3, marginBottom: 6 }}>
+            Fastest route{pricing?.distanceKm ? ` · ${pricing.distanceKm} km` : ''}
+          </Text>
+          <Text style={styles.totalAmount}>₹{total.toLocaleString('en-IN')}</Text>
+          <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3, marginTop: 6 }}>
+            All inclusive
+          </Text>
         </View>
 
         {/* Zero-cancel promise */}

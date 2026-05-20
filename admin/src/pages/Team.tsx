@@ -28,11 +28,12 @@ function AddMemberModal({ open, onClose, onAdded }: { open: boolean; onClose: ()
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!phone.trim()) return
+    const digits = phone.replace(/\D/g, '').slice(-10)
+    if (digits.length !== 10) { setError('Enter a valid 10-digit number'); return }
     setLoading(true)
     setError('')
     try {
-      const r: any = await addTeamMember({ phone: phone.trim(), name: name.trim() || null, role })
+      const r: any = await addTeamMember({ phone: digits, name: name.trim() || null, role })
       onAdded(r.user)
       onClose()
     } catch (err: any) {
@@ -56,11 +57,14 @@ function AddMemberModal({ open, onClose, onAdded }: { open: boolean; onClose: ()
         <Stack gap={18}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: YL.ink2, marginBottom: 6 }}>PHONE <span style={{ color: YL.gulmohar }}>*</span></div>
-            <input
-              value={phone} onChange={e => setPhone(e.target.value)}
-              placeholder="10-digit Indian number" maxLength={10} type="tel"
-              style={{ ...inp, fontFamily: '"JetBrains Mono", monospace' }} autoFocus
-            />
+            <div style={{ display: 'flex', alignItems: 'center', border: `1.5px solid ${YL.line}`, borderRadius: 10, overflow: 'hidden', background: YL.card }}>
+              <span style={{ padding: '0 10px', fontSize: 13, color: YL.ink2, fontFamily: '"JetBrains Mono", monospace', borderRight: `1px solid ${YL.line}`, height: 40, display: 'flex', alignItems: 'center', background: YL.bg, flexShrink: 0 }}>+91</span>
+              <input
+                value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                placeholder="10-digit number" maxLength={10} type="tel"
+                style={{ ...inp, border: 'none', borderRadius: 0, flex: 1, fontFamily: '"JetBrains Mono", monospace' }} autoFocus
+              />
+            </div>
           </div>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: YL.ink2, marginBottom: 6 }}>NAME</div>
@@ -89,7 +93,7 @@ function AddMemberModal({ open, onClose, onAdded }: { open: boolean; onClose: ()
           )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
-            <Button variant="primary" disabled={loading || !phone.trim()} type="submit">
+            <Button variant="primary" disabled={loading || phone.replace(/\D/g, '').length < 10} type="submit">
               {loading ? 'Adding…' : 'Add user'}
             </Button>
           </div>
@@ -147,7 +151,8 @@ export default function TeamPage({ selfPhone }: { selfPhone: string }) {
         {loading ? (
           <div style={{ padding: '48px 28px', textAlign: 'center', color: YL.ink3, fontSize: 13 }}>Loading…</div>
         ) : users.map(u => {
-          const isSelf = u.phone === selfPhone
+          const normalize = (p: string) => p.replace(/\D/g, '').slice(-10)
+          const isSelf = normalize(u.phone) === normalize(selfPhone)
           const rs = ROLE_STYLES[u.role] || ROLE_STYLES.ops
           return (
             <div key={u.id} style={{
@@ -164,7 +169,7 @@ export default function TeamPage({ selfPhone }: { selfPhone: string }) {
                   </div>
                 </div>
               </div>
-              <Mono size={12}>{u.phone}</Mono>
+              <Mono size={12}>{u.phone.replace(/\D/g, '').slice(-10)}</Mono>
               <div>
                 <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: rs.bg, color: rs.fg }}>
                   {u.role === 'superadmin' ? 'Super Admin' : 'Ops'}

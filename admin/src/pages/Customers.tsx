@@ -2,9 +2,9 @@ import React from 'react'
 import type { Customer, Booking } from '../types'
 import {
   YL, Icons, Mono, Input, Button, PageHeader, Avatar, fmtDate, Stack,
-  ModalShell, ModalHeader, STATUS_STYLE,
+  ModalShell, ModalHeader, STATUS_STYLE, formatPhone, useIsMobile,
 } from '../components/ui'
-import { patchCustomer, getCustomerBookings } from '../api'
+import { patchCustomer, getCustomerBookings, generateReferralCodes } from '../api'
 
 interface Props {
   customers: Customer[]
@@ -67,7 +67,6 @@ function CustomerDrawer({
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '9px 16px', cursor: 'pointer', fontFamily: '"Bricolage Grotesque", system-ui',
     fontSize: 13, fontWeight: active ? 600 : 400, color: active ? YL.ink : YL.ink3,
-    borderBottom: active ? `2.5px solid ${YL.ink}` : '2.5px solid transparent',
     background: 'transparent', border: 'none', borderBottom: active ? `2.5px solid ${YL.ink}` : '2.5px solid transparent',
   })
 
@@ -95,7 +94,7 @@ function CustomerDrawer({
               <div style={{ fontSize: 12, fontWeight: 600, color: YL.ink2, marginBottom: 6 }}>PHONE</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}` }}>
                 <span style={{ width: 14, height: 14, display: 'flex', color: YL.ink3 }}>{Icons.phone}</span>
-                <Mono size={13}>{customer.phone}</Mono>
+                <Mono size={13}>{formatPhone(customer.phone)}</Mono>
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: YL.ink3, fontFamily: 'inherit' }}>read-only</span>
               </div>
             </div>
@@ -121,6 +120,38 @@ function CustomerDrawer({
                 type="email"
                 style={{ width: '100%', boxSizing: 'border-box', height: 40, padding: '0 12px', border: `1.5px solid ${YL.line}`, borderRadius: 10, fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 14, color: YL.ink, background: YL.card, outline: 'none' }}
               />
+            </div>
+
+            {/* Referral info (read-only) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 4, letterSpacing: 0.5 }}>REFERRAL CODE</div>
+                <div style={{ padding: '10px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}`, fontSize: 13, fontFamily: 'monospace', color: YL.ink }}>
+                  {customer.referral_code || <span style={{ color: YL.ink3, fontStyle: 'italic' }}>Not set yet</span>}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 4, letterSpacing: 0.5 }}>REFERRED BY</div>
+                <div style={{ padding: '10px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}`, fontSize: 13, color: YL.ink }}>
+                  {customer.referred_by
+                    ? `${customer.referred_by.name || 'Unknown'} · ${customer.referred_by.phone}`
+                    : <span style={{ color: YL.ink3, fontStyle: 'italic' }}>Organic signup</span>}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 4, letterSpacing: 0.5 }}>REFERRALS MADE</div>
+                  <div style={{ padding: '10px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}`, fontSize: 13, color: YL.ink }}>
+                    {customer.referral_count ?? 0}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 4, letterSpacing: 0.5 }}>REFERRAL CREDITS</div>
+                  <div style={{ padding: '10px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}`, fontSize: 13, color: YL.ink }}>
+                    {customer.referral_credits != null ? `₹${customer.referral_credits}` : '—'}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {error && (
@@ -176,8 +207,22 @@ function CustomerDrawer({
 }
 
 export default function Customers({ customers, onUpdate }: Props) {
+  const isMobile = useIsMobile()
   const [search, setSearch] = React.useState('')
   const [selected, setSelected] = React.useState<Customer | null>(null)
+  const [generatingCodes, setGeneratingCodes] = React.useState(false)
+
+  const handleGenerateCodes = async () => {
+    setGeneratingCodes(true)
+    try {
+      const r: any = await generateReferralCodes()
+      alert(`Generated ${r.generated} referral code${r.generated !== 1 ? 's' : ''}.`)
+    } catch (e: any) {
+      alert(`Failed: ${e.message}`)
+    } finally {
+      setGeneratingCodes(false)
+    }
+  }
 
   const filtered = customers.filter(c => {
     if (!search) return true
@@ -191,59 +236,111 @@ export default function Customers({ customers, onUpdate }: Props) {
         title="Customers"
         subtitle={`${customers.length} registered`}
         actions={
+          !isMobile ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Button variant="secondary" onClick={handleGenerateCodes} disabled={generatingCodes}>
+                {generatingCodes ? 'Generating…' : 'Generate referral codes'}
+              </Button>
+              <Input
+                value={search}
+                onChange={(e: any) => setSearch(e.target.value)}
+                placeholder="Search name, phone or email"
+                icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.search}</span>}
+                style={{ width: 280 }}
+              />
+            </div>
+          ) : undefined
+        }
+      />
+
+      {isMobile && (
+        <div style={{ padding: '10px 16px', borderBottom: `1px solid ${YL.line}`, background: YL.bg }}>
           <Input
             value={search}
             onChange={(e: any) => setSearch(e.target.value)}
             placeholder="Search name, phone or email"
             icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.search}</span>}
-            style={{ width: 280 }}
+            style={{ width: '100%' }}
           />
-        }
-      />
+        </div>
+      )}
 
-      {/* Column headers */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 120px 120px 36px',
-        gap: 12, padding: '10px 28px',
-        borderBottom: `1px solid ${YL.line}`, fontSize: 11, color: YL.ink2,
-        fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0,
-        background: YL.bg,
-      }}>
-        <div>Customer</div><div>Phone</div><div>Rides</div><div>Joined</div><div>Email</div><div/>
-      </div>
+      {!isMobile && (
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 120px 120px 36px',
+          gap: 12, padding: '10px 28px',
+          borderBottom: `1px solid ${YL.line}`, fontSize: 11, color: YL.ink2,
+          fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0,
+          background: YL.bg,
+        }}>
+          <div>Customer</div><div>Phone</div><div>Rides</div><div>Joined</div><div>Email</div><div/>
+        </div>
+      )}
 
-      {/* Rows */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {filtered.map(c => (
-          <div
-            key={c.id}
-            onClick={() => setSelected(c)}
-            style={{
-              display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 120px 120px 36px',
-              gap: 12, padding: '13px 28px', alignItems: 'center',
-              borderBottom: `1px solid ${YL.line}`, background: YL.card,
-              cursor: 'pointer', transition: 'background 100ms',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.background = YL.bg)}
-            onMouseLeave={e => (e.currentTarget.style.background = YL.card)}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Avatar name={c.name || c.phone} size={30} />
-              <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{c.name || <span style={{ color: YL.ink3, fontStyle: 'italic' }}>No name</span>}</div>
-            </div>
-            <Mono size={12}>{c.phone}</Mono>
-            <Mono size={13} weight={600}>{c.trip_count}</Mono>
-            <Mono size={11.5} color={YL.ink2}>{fmtDate(c.created_at)}</Mono>
-            <span style={{ fontSize: 12, color: YL.ink2 }}>{c.email || '—'}</span>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <span style={{ width: 16, height: 16, display: 'flex', color: YL.ink3 }}>{Icons.edit}</span>
-            </div>
+        {isMobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {filtered.map(c => (
+              <div
+                key={c.id}
+                onClick={() => setSelected(c)}
+                style={{ padding: '14px 16px', borderBottom: `1px solid ${YL.line}`, background: YL.card, cursor: 'pointer' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 8 }}>
+                  <Avatar name={c.name || c.phone} size={36} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, color: YL.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {c.name || <span style={{ color: YL.ink3, fontStyle: 'italic' }}>No name</span>}
+                    </div>
+                    <Mono size={11.5} color={YL.ink2}>{c.phone}</Mono>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <Mono size={14} weight={700}>{c.trip_count}</Mono>
+                    <div style={{ fontSize: 10, color: YL.ink3 }}>rides</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16, fontSize: 11.5, color: YL.ink2 }}>
+                  <span>Joined {fmtDate(c.created_at)}</span>
+                  {c.email && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.email}</span>}
+                </div>
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div style={{ padding: '48px 28px', textAlign: 'center', color: YL.ink3, fontSize: 13 }}>No customers found.</div>
+            )}
           </div>
-        ))}
-        {filtered.length === 0 && (
-          <div style={{ padding: '48px 28px', textAlign: 'center', color: YL.ink3, fontSize: 13 }}>
-            No customers found.
-          </div>
+        ) : (
+          <>
+            {filtered.map(c => (
+              <div
+                key={c.id}
+                onClick={() => setSelected(c)}
+                style={{
+                  display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 120px 120px 36px',
+                  gap: 12, padding: '13px 28px', alignItems: 'center',
+                  borderBottom: `1px solid ${YL.line}`, background: YL.card,
+                  cursor: 'pointer', transition: 'background 100ms',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = YL.bg)}
+                onMouseLeave={e => (e.currentTarget.style.background = YL.card)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Avatar name={c.name || c.phone} size={30} />
+                  <div style={{ fontSize: 13.5, color: YL.ink, fontWeight: 500 }}>{c.name || <span style={{ color: YL.ink3, fontStyle: 'italic' }}>No name</span>}</div>
+                </div>
+                <Mono size={12}>{c.phone}</Mono>
+                <Mono size={13} weight={600}>{c.trip_count}</Mono>
+                <Mono size={11.5} color={YL.ink2}>{fmtDate(c.created_at)}</Mono>
+                <span style={{ fontSize: 12, color: YL.ink2 }}>{c.email || '—'}</span>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <span style={{ width: 16, height: 16, display: 'flex', color: YL.ink3 }}>{Icons.edit}</span>
+                </div>
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div style={{ padding: '48px 28px', textAlign: 'center', color: YL.ink3, fontSize: 13 }}>No customers found.</div>
+            )}
+          </>
         )}
       </div>
 

@@ -1,203 +1,376 @@
-import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator, Platform, Pressable,
-  StyleSheet, Text, TextInput, View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useAuth } from "../../context/AuthContext";
-import { YL } from "../../constants/theme";
-import { resendOtp, verifyOtp } from "../../lib/api";
+import React, { useEffect, useRef, useState } from 'react'
+import { View, Text, Pressable, StyleSheet, Animated, TextInput, Platform } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter, useLocalSearchParams } from 'expo-router'
+import Svg, { Path, Circle } from 'react-native-svg'
+import { YL, FONTS } from '../../constants/theme'
+import YButton from '../../components/YButton'
+import { verifyOtp, resendOtp, updateProfile } from '../../lib/api'
+import { useAuth } from '../../context/AuthContext'
 
-const OTP_LENGTH = 6;
+function AppChrome({ right }: { right?: React.ReactNode }) {
+  const router = useRouter()
+  return (
+    <View style={styles.chrome}>
+      <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Svg width={20} height={20} viewBox="0 0 20 20">
+          <Path
+            d="M12 4L6 10L12 16"
+            stroke={YL.ink}
+            strokeWidth={1.8}
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </Svg>
+      </Pressable>
+      <View style={{ flex: 1 }} />
+      {right}
+    </View>
+  )
+}
 
-export default function OtpScreen() {
-  const { phone } = useLocalSearchParams<{ phone: string }>();
-  const { login } = useAuth();
-
-  const [digits, setDigits] = useState(Array(OTP_LENGTH).fill(""));
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(59);
-  const inputRef = useRef<TextInput>(null);
+function BlinkingCaret() {
+  const opacity = useRef(new Animated.Value(1)).current
 
   useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
-
-  const otp = digits.join("");
-  const canVerify = otp.length === OTP_LENGTH;
-
-  const handleInput = useCallback((text: string) => {
-    const clean = text.replace(/\D/g, "").slice(0, OTP_LENGTH);
-    setDigits(clean.split("").concat(Array(OTP_LENGTH - clean.length).fill("")));
-    setError(null);
-  }, []);
-
-  async function handleVerify() {
-    if (!canVerify || loading) return;
-    setError(null);
-    setLoading(true);
-    try {
-      const data = await verifyOtp(phone!, otp, "+91");
-      login({
-        phone: data.user.phone,
-        name: data.user.name,
-        role: data.user.role,
-        isTestUser: otp === "000000",
-      });
-      router.replace("/(app)/home");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid OTP");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleResend() {
-    if (countdown > 0) return;
-    try {
-      await resendOtp(phone!, "+91");
-      setCountdown(59);
-      setDigits(Array(OTP_LENGTH).fill(""));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to resend");
-    }
-  }
-
-  const activeIndex = digits.findIndex((d) => d === "");
+    const blink = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 100, useNativeDriver: true }),
+        Animated.delay(400),
+      ])
+    )
+    blink.start()
+    return () => blink.stop()
+  }, [opacity])
 
   return (
-    <SafeAreaView style={styles.root}>
-      {/* Back / step */}
-      <View style={styles.chrome}>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backIcon}>‹</Text>
-        </Pressable>
-        <Text style={styles.stepText}>2 / 2</Text>
-      </View>
+    <Animated.View
+      style={{
+        width: 2,
+        height: 28,
+        backgroundColor: YL.ink,
+        borderRadius: 1,
+        opacity,
+      }}
+    />
+  )
+}
 
-      <View style={styles.content}>
+function OtpBox({ digit, isActive }: { digit: string; isActive: boolean }) {
+  const hasFill = digit !== ''
+  const borderColor = hasFill || isActive ? YL.ink : YL.line
+
+  return (
+    <View style={[styles.otpBox, { borderColor }]}>
+      {digit ? (
+        <Text style={styles.otpDigit}>{digit}</Text>
+      ) : isActive ? (
+        <BlinkingCaret />
+      ) : null}
+    </View>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <Svg width={16} height={16} viewBox="0 0 16 16">
+      <Circle cx={8} cy={8} r={6} stroke={YL.ink3} strokeWidth={1.2} fill="none" />
+      <Path
+        d="M8 5V8L10 10"
+        stroke={YL.ink3}
+        strokeWidth={1.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  )
+}
+
+export default function ScreenOTP() {
+  const router = useRouter()
+  const { phone, name: formName, email: formEmail, next } = useLocalSearchParams<{ phone: string; name?: string; email?: string; next?: string }>()
+  const { login, updateUser } = useAuth()
+  const inputRef = useRef<TextInput>(null)
+  const [otp, setOtp] = useState('')
+  const [timer, setTimer] = useState(30)
+  const [canResend, setCanResend] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (timer <= 0) {
+      setCanResend(true)
+      return
+    }
+    const id = setInterval(() => setTimer(t => t - 1), 1000)
+    return () => clearInterval(id)
+  }, [timer])
+
+  // Web OTP API — works on Android Chrome
+  useEffect(() => {
+    if (Platform.OS !== 'web') return
+    if (!('OTPCredential' in window)) return
+    const controller = new AbortController()
+    ;(navigator.credentials as any)
+      .get({ otp: { transport: ['sms'] }, signal: controller.signal })
+      .then((cred: any) => {
+        if (cred?.code) {
+          const cleaned = cred.code.replace(/\D/g, '').slice(0, 4)
+          setOtp(cleaned)
+          if (cleaned.length === 4) handleVerify(cleaned)
+        }
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
+
+  const handleVerify = async (code: string) => {
+    if (code.length !== 4 || loading) return
+    setLoading(true)
+    setError('')
+    try {
+      const data = await verifyOtp(phone, code)
+      login(data.user)
+      // Persist name/email to server if not already on the account
+      const updates: { name?: string; email?: string } = {}
+      if (formName && !data.user?.name) updates.name = formName
+      if (formEmail) updates.email = formEmail
+      if (Object.keys(updates).length) {
+        updateUser(updates)
+        updateProfile(updates).catch(() => {})
+      }
+      // If a pending destination was passed (e.g. from booking flow), go there
+      if (next) {
+        try {
+          const { pathname, params: nextParams } = JSON.parse(next)
+          router.replace({ pathname, params: nextParams })
+          return
+        } catch {}
+      }
+      router.replace('/(app)/home')
+    } catch (e: any) {
+      setError(e.message || 'Invalid OTP')
+      setLoading(false)
+    }
+  }
+
+  const handleOtpChange = (text: string) => {
+    const cleaned = text.replace(/\D/g, '').slice(0, 4)
+    setOtp(cleaned)
+    if (error) setError('')
+    if (cleaned.length === 4) handleVerify(cleaned)
+  }
+
+  const handleResend = async () => {
+    if (!canResend) return
+    setOtp('')
+    setTimer(60)
+    setCanResend(false)
+    setError('')
+    inputRef.current?.focus()
+    try {
+      await resendOtp(phone)
+    } catch {
+      // silent — timer already reset
+    }
+  }
+
+  const formatTimer = (s: number) => `0:${s.toString().padStart(2, '0')}`
+
+  const displayPhone = phone ? `+${phone.slice(0, 2)} ${phone.slice(2, 7)} ${phone.slice(7)}` : '+91 ••••• •••••'
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <AppChrome right={<Text style={styles.stepIndicator}>2 / 2</Text>} />
+
+      {/* Hidden TextInput captures keyboard input */}
+      <TextInput
+        ref={inputRef}
+        value={otp}
+        onChangeText={handleOtpChange}
+        keyboardType="number-pad"
+        maxLength={4}
+        style={styles.hiddenInput}
+        autoFocus
+        autoComplete="one-time-code"
+        textContentType="oneTimeCode"
+        {...(Platform.OS === 'web' ? { dataSet: { clarityMask: 'True' } } as any : {})}
+      />
+
+      <Pressable style={styles.content} onPress={() => inputRef.current?.focus()}>
+        {/* Headline */}
         <Text style={styles.headline}>Enter the code</Text>
-        <Text style={styles.headlineKn}>ಕೋಡ್ ಅನ್ನು ನಮೂದಿಸಿ</Text>
-        <Text style={styles.sub}>
-          Sent to <Text style={styles.phoneText}>+91 {phone}</Text>{"  "}
-          <Text style={styles.changeText} onPress={() => router.back()}>Change</Text>
+
+        {/* Sent to row */}
+        <Text style={styles.sentTo}>
+          Sent to {displayPhone}{'  '}
+          <Text style={styles.changeLink} onPress={() => router.back()}>Change</Text>
         </Text>
 
         {/* OTP boxes */}
         <View style={styles.otpRow}>
-          {digits.map((d, i) => (
-            <Pressable
+          {Array.from({ length: 4 }).map((_, i) => (
+            <OtpBox
               key={i}
-              style={[
-                styles.otpBox,
-                (d || i === activeIndex) && styles.otpBoxActive,
-              ]}
-              onPress={() => inputRef.current?.focus()}
-            >
-              {d ? (
-                <Text style={styles.otpDigit}>{d}</Text>
-              ) : i === activeIndex ? (
-                <View style={styles.caret} />
-              ) : null}
-            </Pressable>
+              digit={otp[i] ?? ''}
+              isActive={i === otp.length && otp.length < 4}
+            />
           ))}
         </View>
 
-        {/* Hidden input */}
-        <TextInput
-          ref={inputRef}
-          style={styles.hidden}
-          value={otp}
-          onChangeText={handleInput}
-          keyboardType="number-pad"
-          maxLength={OTP_LENGTH}
-          autoFocus
-          onSubmitEditing={handleVerify}
-          caretHidden
-        />
+        {/* Error */}
+        {!!error && (
+          <Text style={{ color: '#C0392B', fontSize: 13, marginBottom: 12 }}>{error}</Text>
+        )}
 
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
+        {/* Resend row */}
         <View style={styles.resendRow}>
-          <Text style={styles.resendHint}>Didn't receive the OTP?</Text>
-          {countdown > 0 ? (
-            <Text style={styles.timer}>0:{countdown.toString().padStart(2, "0")}</Text>
-          ) : (
+          <Text style={styles.resendText}>Didn't receive the OTP?</Text>
+          {canResend ? (
             <Pressable onPress={handleResend}>
-              <Text style={styles.resendLink}>Resend</Text>
+              <Text style={[styles.timerText, { textDecorationLine: 'underline', color: YL.ink }]}>
+                Resend
+              </Text>
             </Pressable>
+          ) : (
+            <Text style={styles.timerText}>{formatTimer(timer)}</Text>
           )}
         </View>
 
-        <View style={styles.autoReadCard}>
-          <Text style={styles.autoReadText}>Reading SMS automatically…</Text>
-        </View>
+        {/* Auto-read SMS notice — native only */}
+        {Platform.OS !== 'web' && (
+          <View style={styles.autoReadBox}>
+            <ClockIcon />
+            <Text style={styles.autoReadText}>Reading SMS automatically…</Text>
+          </View>
+        )}
 
+        {/* Spacer */}
         <View style={{ flex: 1 }} />
 
-        <Pressable
-          style={[styles.cta, (!canVerify || loading) && styles.ctaDisabled]}
-          onPress={handleVerify}
-          disabled={!canVerify || loading}
+        {/* CTA */}
+        <YButton
+          variant="ink"
+          size="lg"
+          disabled={otp.length !== 4 || loading}
+          onPress={() => handleVerify(otp)}
         >
-          {loading
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.ctaText}>Verify & continue</Text>
-          }
-        </Pressable>
-      </View>
+          {loading ? 'Verifying…' : 'Verify & continue'}
+        </YButton>
+      </Pressable>
     </SafeAreaView>
-  );
+  )
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: YL.bg },
+  safeArea: {
+    flex: 1,
+    backgroundColor: YL.bg,
+  },
   chrome: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 16, paddingVertical: 8, minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
-  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: YL.bg2, justifyContent: "center", alignItems: "center" },
-  backIcon: { fontSize: 24, color: YL.ink, marginTop: -2 },
-  stepText: { fontSize: 11, color: YL.ink3, fontWeight: "600", letterSpacing: 0.3 },
-
-  content: { flex: 1, paddingHorizontal: 20, paddingBottom: 20 },
-  headline: { fontSize: 34, fontWeight: "600", color: YL.ink, letterSpacing: -1, lineHeight: 38, marginBottom: 6 },
-  headlineKn: { fontSize: 14, color: YL.ink3, marginBottom: 10 },
-  sub: { fontSize: 14.5, color: YL.ink2, lineHeight: 21, marginBottom: 28 },
-  phoneText: { color: YL.ink, fontWeight: "500" },
-  changeText: { color: YL.ink, fontWeight: "600", textDecorationLine: "underline" },
-
-  otpRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
+  backBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepIndicator: {
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    color: YL.ink3,
+    paddingRight: 8,
+  },
+  hiddenInput: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  headline: {
+    fontFamily: FONTS.display,
+    fontSize: 34,
+    letterSpacing: -1,
+    fontWeight: '500',
+    color: YL.ink,
+    marginBottom: 6,
+  },
+  kannadaSub: {
+    fontFamily: FONTS.kannada,
+    fontSize: 14,
+    color: YL.ink3,
+    marginBottom: 18,
+  },
+  sentTo: {
+    fontSize: 14.5,
+    color: YL.ink2,
+    marginBottom: 28,
+  },
+  changeLink: {
+    textDecorationLine: 'underline',
+    fontWeight: '500',
+    color: YL.ink,
+  },
+  otpRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+  },
   otpBox: {
-    flex: 1, height: 64, borderRadius: 14,
-    borderWidth: 1.5, borderColor: YL.line,
+    flex: 1,
+    height: 64,
+    borderRadius: 14,
+    borderWidth: 1.5,
     backgroundColor: YL.card,
-    justifyContent: "center", alignItems: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  otpBoxActive: { borderColor: YL.ink },
-  otpDigit: { fontSize: 28, fontWeight: "600", color: YL.ink },
-  caret: { width: 2, height: 28, backgroundColor: YL.ink },
-
-  hidden: { position: "absolute", opacity: 0, height: 0, width: 0 },
-
-  errorText: { fontSize: 12.5, color: "#EF4444", fontWeight: "500", marginBottom: 12 },
-
-  resendRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  resendHint: { fontSize: 13.5, color: YL.ink3 },
-  timer: { fontSize: 13, color: YL.ink3, fontVariant: ["tabular-nums"] },
-  resendLink: { fontSize: 13.5, color: YL.ink, fontWeight: "600" },
-
-  autoReadCard: {
-    padding: 12, borderWidth: 1, borderStyle: "dashed", borderColor: YL.line,
-    borderRadius: 12, flexDirection: "row", alignItems: "center", gap: 8,
+  otpDigit: {
+    fontFamily: FONTS.display,
+    fontSize: 28,
+    fontWeight: '500',
+    color: YL.ink,
   },
-  autoReadText: { fontSize: 12.5, color: YL.ink2 },
-
-  cta: { height: 56, backgroundColor: YL.ink, borderRadius: 16, justifyContent: "center", alignItems: "center" },
-  ctaDisabled: { backgroundColor: YL.line },
-  ctaText: { color: "#fff", fontSize: 16, fontWeight: "600", letterSpacing: -0.2 },
-});
+  resendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  resendText: {
+    fontSize: 13,
+    color: YL.ink3,
+  },
+  timerText: {
+    fontFamily: FONTS.mono,
+    fontSize: 13,
+    color: YL.ink3,
+  },
+  autoReadBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: YL.line,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+  },
+  autoReadText: {
+    fontSize: 12.5,
+    color: YL.ink2,
+  },
+})

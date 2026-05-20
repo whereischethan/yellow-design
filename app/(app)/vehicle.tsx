@@ -46,10 +46,9 @@ export default function ScreenVehicle() {
   const router = useRouter()
   const params = useLocalSearchParams<{
     passengers: string
-    bags: string
-    meetAndGreet: string
-    petFriendly: string
-    tripType: string
+    checkInBags: string
+    cabinBags: string
+tripType: string
     terminal: string
     pickup: string
     drop: string
@@ -59,11 +58,10 @@ export default function ScreenVehicle() {
   }>()
 
   const passengers = parseInt(params.passengers ?? '1', 10)
-  const bags = parseInt(params.bags ?? '0', 10)
-  const meetAndGreet = params.meetAndGreet === '1'
-  const petFriendly = params.petFriendly === '1'
-
-  const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup) : null
+  const checkInBags = parseInt(params.checkInBags ?? '0', 10)
+  const cabinBags = parseInt(params.cabinBags ?? '0', 10)
+  const bags = checkInBags + cabinBags
+const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup) : null
   const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
   const yellowSkyPrice = pricing?.vehicleOptions?.yellowSky?.totalPrice
@@ -114,10 +112,9 @@ export default function ScreenVehicle() {
       pathname: '/(app)/review',
       params: {
         passengers: String(passengers),
-        bags: String(bags),
-        meetAndGreet: meetAndGreet ? '1' : '0',
-        petFriendly: petFriendly ? '1' : '0',
-        tripType: params.tripType,
+        checkInBags: String(checkInBags),
+        cabinBags: String(cabinBags),
+tripType: params.tripType,
         terminal: params.terminal,
         pickup: params.pickup,
         drop: params.drop,

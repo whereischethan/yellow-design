@@ -1,0 +1,13 @@
+{
+  "projects": {
+    "default": "yellow-design"
+  },
+  "targets": {
+    "yellow-design": {
+      "hosting": {
+        "app": ["yellow-design-app"],
+        "admin": ["yellow-design-admin"]
+      }
+    }
+  }
+}

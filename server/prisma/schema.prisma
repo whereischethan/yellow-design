@@ -79,11 +79,34 @@ model Booking {
   paymentStatus       String  @default("paid") @map("payment_status")
   paymentMethod       String? @map("payment_method")
   stopsJson           String? @map("stops_json")
+  customerGstin       String? @map("customer_gstin")
+  customerGstName     String? @map("customer_gst_name")
   createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
-  user User? @relation(fields: [userId], references: [id])
+  user    User?    @relation(fields: [userId], references: [id])
+  invoice Invoice?
 
   @@map("bookings")
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  invoiceNo   String   @unique  @map("invoice_no")
+  bookingId   String   @unique  @map("booking_id")
+  generatedAt DateTime @default(now()) @map("generated_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("invoices")
+}
+
+model InvoiceCounter {
+  fy       String
+  quarter  Int
+  lastSeq  Int    @default(0) @map("last_seq")
+
+  @@id([fy, quarter])
+  @@map("invoice_counters")
 }
 
 model Driver {
@@ -103,6 +126,10 @@ model Driver {
   licenseNo   String? @map("license_no")
   licenseExp  String? @map("license_exp")
   photoUrl    String? @map("photo_url")
+  bankHolder  String? @map("bank_holder")
+  bankIfsc    String? @map("bank_ifsc")
+  bankAccount String? @map("bank_account")
+  bankUpi     String? @map("bank_upi")
 
   vehicles Vehicle[]
 

@@ -1,0 +1,43 @@
+{
+  "hosting": [
+    {
+      "site": "yellow-design-app",
+      "public": "dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "headers": [
+        { "source": "**", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
+        { "source": "**/*.@(js|css|png|jpg|ico|svg|woff|woff2)", "headers": [{ "key": "Cache-Control", "value": "max-age=31536000, immutable" }] }
+      ],
+      "rewrites": [
+        { "source": "/auth/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/flights/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/pricing", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/pricing/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/bookings", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/bookings/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/user/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/invoices/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/health", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "**", "destination": "/index.html" }
+      ]
+    },
+    {
+      "site": "yellow-design-admin",
+      "public": "admin/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "headers": [
+        { "source": "**", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
+        { "source": "**/*.@(js|css|png|jpg|ico|svg|woff|woff2)", "headers": [{ "key": "Cache-Control", "value": "max-age=31536000, immutable" }] }
+      ],
+      "rewrites": [
+        { "source": "/admin/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/invoices/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/pricing", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/pricing/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/auth/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/health", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "**", "destination": "/index.html" }
+      ]
+    }
+  ]
+}

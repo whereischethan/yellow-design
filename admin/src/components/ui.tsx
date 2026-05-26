@@ -208,33 +208,38 @@ export function useIsMobile(breakpoint = 768): boolean {
 
 export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'empty-leg' | 'team' | 'invoices' | 'finance' | 'settings'
 
+/** Pages only super admins can access */
+export const SUPERADMIN_PAGES: Page[] = ['pricing', 'empty-leg', 'team', 'settings']
+
 interface SidebarProps {
   active: Page
   setActive: (p: Page) => void
   counts: { bookings: number; drivers: number }
   adminName: string | null
   adminPhone: string
+  isSuperAdmin?: boolean
   onSignOut: () => void
   onEditProfile: () => void
 }
 
-export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, onSignOut, onEditProfile }: SidebarProps) => {
+export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, isSuperAdmin, onSignOut, onEditProfile }: SidebarProps) => {
   const [profileOpen, setProfileOpen] = React.useState(false)
 
-  const items: { id: Page; label: string; icon: React.ReactNode; badge?: number }[] = [
+  const allItems: { id: Page; label: string; icon: React.ReactNode; badge?: number; superAdminOnly?: boolean }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Icons.dashboard },
     { id: 'bookings',  label: 'Bookings',  icon: Icons.bookings,  badge: counts.bookings },
     { id: 'drivers',   label: 'Drivers',   icon: Icons.drivers,   badge: counts.drivers },
     { id: 'vehicles',  label: 'Vehicles',  icon: Icons.vehicles },
     { id: 'customers', label: 'Customers', icon: Icons.customers },
     { id: 'leads',     label: 'Leads',     icon: Icons.funnel },
-    { id: 'pricing',    label: 'Pricing',    icon: Icons.pricing },
-    { id: 'empty-leg', label: 'Empty Leg',  icon: Icons.pricing },
-    { id: 'invoices',  label: 'Invoices',   icon: Icons.invoice },
-    { id: 'finance',   label: 'Finance',    icon: Icons.trending },
-    { id: 'team',      label: 'Admin users', icon: Icons.drivers },
-    { id: 'settings',  label: 'Settings',  icon: Icons.settings },
+    { id: 'pricing',   label: 'Pricing',   icon: Icons.pricing,   superAdminOnly: true },
+    { id: 'empty-leg', label: 'Empty Leg', icon: Icons.pricing,   superAdminOnly: true },
+    { id: 'invoices',  label: 'Invoices',  icon: Icons.invoice },
+    { id: 'finance',   label: 'Finance',   icon: Icons.trending },
+    { id: 'team',      label: 'Admin users', icon: Icons.drivers, superAdminOnly: true },
+    { id: 'settings',  label: 'Settings',  icon: Icons.settings,  superAdminOnly: true },
   ]
+  const items = allItems.filter(it => !it.superAdminOnly || isSuperAdmin)
 
   const initials = adminName
     ? adminName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
@@ -298,7 +303,7 @@ export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, onSi
           <span style={{ fontSize: 12.5, color: YL.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {adminName || adminPhone}
           </span>
-          <span style={{ fontSize: 10.5, color: YL.ink2 }}>Admin</span>
+          <span style={{ fontSize: 10.5, color: YL.ink2 }}>{isSuperAdmin ? 'Super Admin' : 'Ops'}</span>
         </Stack>
         <span style={{ display: 'flex', width: 14, height: 14, color: YL.ink2, transform: profileOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms', flexShrink: 0 }}>{Icons.chevRight}</span>
       </div>
@@ -349,11 +354,12 @@ interface MobileNavProps {
   counts: { bookings: number; drivers: number }
   adminName: string | null
   adminPhone: string
+  isSuperAdmin?: boolean
   onSignOut: () => void
   onEditProfile: () => void
 }
 
-export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, onSignOut, onEditProfile }: MobileNavProps) => {
+export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, isSuperAdmin, onSignOut, onEditProfile }: MobileNavProps) => {
   const [moreOpen, setMoreOpen] = React.useState(false)
 
   const primary: { id: Page; label: string; icon: React.ReactNode; badge?: number }[] = [
@@ -363,15 +369,16 @@ export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, on
     { id: 'leads',     label: 'Leads',    icon: Icons.funnel },
   ]
 
-  const secondary: { id: Page; label: string; icon: React.ReactNode }[] = [
+  const allSecondary: { id: Page; label: string; icon: React.ReactNode; superAdminOnly?: boolean }[] = [
     { id: 'vehicles',  label: 'Vehicles',    icon: Icons.vehicles },
     { id: 'customers', label: 'Customers',   icon: Icons.customers },
-    { id: 'pricing',   label: 'Pricing',     icon: Icons.pricing },
+    { id: 'pricing',   label: 'Pricing',     icon: Icons.pricing,   superAdminOnly: true },
     { id: 'invoices',  label: 'Invoices',    icon: Icons.invoice },
     { id: 'finance',   label: 'Finance',     icon: Icons.trending },
-    { id: 'team',      label: 'Admin users', icon: Icons.drivers },
-    { id: 'settings',  label: 'Settings',    icon: Icons.settings },
+    { id: 'team',      label: 'Admin users', icon: Icons.drivers,   superAdminOnly: true },
+    { id: 'settings',  label: 'Settings',    icon: Icons.settings,  superAdminOnly: true },
   ]
+  const secondary = allSecondary.filter(it => !it.superAdminOnly || isSuperAdmin)
 
   const initials = adminName
     ? adminName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
@@ -400,7 +407,7 @@ export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, on
               <div style={{ width: 32, height: 32, borderRadius: 999, background: YL.ink, color: YL.yellow, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{initials}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: YL.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{adminName || adminPhone}</div>
-                <div style={{ fontSize: 11, color: YL.ink3 }}>Admin</div>
+                <div style={{ fontSize: 11, color: YL.ink3 }}>{isSuperAdmin ? 'Super Admin' : 'Ops'}</div>
               </div>
             </div>
             <button onClick={() => { setMoreOpen(false); onEditProfile() }} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', fontFamily: '"Bricolage Grotesque", system-ui', fontSize: 15, color: YL.ink, textAlign: 'left' }}>
@@ -583,7 +590,7 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000 // UTC+5:30
 // UTC ISO strings (ending in Z or +offset) are converted to IST for display.
 
 // Parse any ISO string → IST components. Handles both UTC (with Z) and naive (treat as IST).
-function getISTComponents(iso: string): { y: number; mo: number; d: number; h: number; mi: number } | null {
+export function getISTComponents(iso: string): { y: number; mo: number; d: number; h: number; mi: number } | null {
   if (!iso) return null
   const p = (n: number) => String(n).padStart(2, '0')
   if (iso.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(iso)) {
@@ -833,9 +840,10 @@ export const DateTimePicker = ({ label, required, value, onChange }: { label?: s
   const triggerRef = React.useRef<HTMLDivElement>(null)
   const { isValid, parts, viewYear, viewMonth, setViewYear, setViewMonth } = usePickerState(value, true)
 
-  const selY = isValid ? parts!.y : null
-  const selM = isValid ? parts!.mo : null
-  const selD = isValid ? parts!.d : null
+  const todayIST = getISTComponents(new Date().toISOString())!
+  const selY = isValid ? parts!.y : todayIST.y
+  const selM = isValid ? parts!.mo : todayIST.mo
+  const selD = isValid ? parts!.d : todayIST.d
   const selH = isValid ? parts!.h : 8
   const selMin = isValid ? parts!.mi : 0
 
@@ -898,9 +906,10 @@ export const DatePicker = ({ label, required, value, onChange, placeholder }: { 
   const triggerRef = React.useRef<HTMLDivElement>(null)
   const { isValid, parts, viewYear, viewMonth, setViewYear, setViewMonth } = usePickerState(value, false)
 
-  const selY = isValid ? parts!.y : null
-  const selM = isValid ? parts!.mo : null
-  const selD = isValid ? parts!.d : null
+  const todayIST2 = getISTComponents(new Date().toISOString())!
+  const selY = isValid ? parts!.y : todayIST2.y
+  const selM = isValid ? parts!.mo : todayIST2.mo
+  const selD = isValid ? parts!.d : todayIST2.d
 
   const openPicker = () => {
     if (!triggerRef.current) return

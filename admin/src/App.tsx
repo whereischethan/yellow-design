@@ -216,9 +216,12 @@ export default function App() {
     </div>
   )
 
+  const isSuperAdmin = admin?.role === 'superadmin'
+
   const navProps = {
     active: page, setActive: setPage, counts,
     adminName: admin?.name ?? null, adminPhone: admin?.phone ?? '',
+    isSuperAdmin,
     onSignOut: handleSignOut, onEditProfile: () => setShowProfile(true),
   }
 
@@ -247,7 +250,7 @@ export default function App() {
         {page === 'settings'   && <SettingsPage />}
         {page === 'team'       && <TeamPage selfPhone={admin?.phone ?? ''} />}
 
-        <BookingDrawer booking={openBooking} drivers={drivers} vehicles={vehicles} customers={customers} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate} onDelete={id => setBookings(prev => prev.filter(b => b.id !== id))} />
+        <BookingDrawer booking={openBooking} drivers={drivers} vehicles={vehicles} customers={customers} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate} onDelete={id => setBookings(prev => prev.filter(b => b.id !== id))} isSuperAdmin={isSuperAdmin} />
 
         <CreateBookingModal open={showNewBooking} onClose={() => setShowNewBooking(false)} drivers={drivers} customers={customers} onCreated={() => { refresh(); setPage('bookings') }} />
         <AddDriverModal open={showAddDriver} onClose={() => setShowAddDriver(false)} vehicles={vehicles} onCreated={() => { getDrivers().then(r => setDrivers(r.drivers)); getVehicles().then(r => setVehicles(r.vehicles)) }} />

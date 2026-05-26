@@ -19,24 +19,38 @@ const JWT_SECRET = process.env.JWT_SECRET || (() => {
 })()
 const ADMIN_KEY = process.env.ADMIN_KEY || 'yellow-ops-dev'
 
-function signAdminToken(phone: string): string {
-  return jwt.sign({ adminPhone: phone, role: 'admin' }, JWT_SECRET, { expiresIn: '12h' })
+function signAdminToken(phone: string, adminRole = 'ops'): string {
+  return jwt.sign({ adminPhone: phone, role: 'admin', adminRole }, JWT_SECRET, { expiresIn: '12h' })
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  // Accept legacy key header
-  if (req.headers['x-admin-key'] === ADMIN_KEY) return next()
+  // Accept legacy key header — treated as superadmin (dev fallback)
+  if (req.headers['x-admin-key'] === ADMIN_KEY) {
+    ;(req as any).adminRole = 'superadmin'
+    return next()
+  }
 
   // Accept admin JWT via Bearer token
   const auth = req.headers.authorization
   if (auth?.startsWith('Bearer ')) {
     try {
       const payload = jwt.verify(auth.slice(7), JWT_SECRET) as any
-      if (payload?.role === 'admin') return next()
+      if (payload?.role === 'admin') {
+        ;(req as any).adminRole = payload.adminRole || 'ops'
+        return next()
+      }
     } catch {}
   }
 
   return res.status(401).json({ error: 'Unauthorized' })
+}
+
+/** Only superadmin may call this route. Must be used after requireAdmin (or router.use(requireAdmin)). */
+function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
+  if ((req as any).adminRole !== 'superadmin') {
+    return res.status(403).json({ error: 'Super admin access required' })
+  }
+  next()
 }
 
 // ─── Admin OTP login (public — no auth) ──────────────────────────────────────
@@ -126,7 +140,7 @@ router.post('/login/verify-otp', async (req: Request, res: Response) => {
       adminName = adminUser.name ?? null
       adminRole = adminUser.role
     } catch {}
-    const token = signAdminToken(normalizedPhone)
+    const token = signAdminToken(normalizedPhone, adminRole)
     return res.json({
       token,
       admin: { phone: mobile, name: adminName, role: adminRole },
@@ -542,7 +556,7 @@ router.patch('/bookings/:id', async (req, res) => {
 
 // ─── Delete booking ───────────────────────────────────────────────────────────
 
-router.delete('/bookings/:id', async (req, res) => {
+router.delete('/bookings/:id', requireSuperAdmin, async (req, res) => {
   try {
     await prisma.booking.delete({ where: { id: String(req.params.id) } })
     res.json({ ok: true })
@@ -961,7 +975,7 @@ router.patch('/customers/:id', async (req, res) => {
   }
 })
 
-router.post('/customers/generate-referral-codes', async (req, res) => {
+router.post('/customers/generate-referral-codes', requireSuperAdmin, async (req, res) => {
   try {
     const users = await prisma.user.findMany({ where: { referralCode: null } })
     let generated = 0
@@ -1092,7 +1106,7 @@ router.get('/pricing', async (_req, res) => {
   }
 })
 
-router.put('/pricing', async (req, res) => {
+router.put('/pricing', requireSuperAdmin, async (req, res) => {
   try {
     const { config } = req.body
     if (!config || typeof config !== 'object') return res.status(400).json({ error: 'config object required' })
@@ -1387,7 +1401,7 @@ router.get('/team', async (_req, res) => {
   }
 })
 
-router.post('/team', async (req, res) => {
+router.post('/team', requireSuperAdmin, async (req, res) => {
   try {
     const { phone: rawPhone, name, role = 'ops' } = req.body
     if (!rawPhone) return res.status(400).json({ error: 'phone required' })
@@ -1428,7 +1442,7 @@ router.patch('/team/me', async (req: Request, res: Response) => {
   }
 })
 
-router.delete('/team/:id', async (req, res) => {
+router.delete('/team/:id', requireSuperAdmin, async (req, res) => {
   try {
     const user = await prisma.adminUser.findUnique({ where: { id: String(req.params.id) } })
     if (!user) return res.status(404).json({ error: 'Admin user not found' })
@@ -1547,7 +1561,7 @@ router.get('/settings', async (_req, res) => {
   }
 })
 
-router.put('/settings', async (req, res) => {
+router.put('/settings', requireSuperAdmin, async (req, res) => {
   try {
     const { config } = req.body
     if (!config || typeof config !== 'object') return res.status(400).json({ error: 'config object required' })
@@ -1586,7 +1600,7 @@ router.get('/empty-leg/status', async (_req, res) => {
   }
 })
 
-router.patch('/empty-leg/toggle', async (req, res) => {
+router.patch('/empty-leg/toggle', requireSuperAdmin, async (req, res) => {
   try {
     const { key, value } = req.body
     const allowed = ['empty_leg_drops_active', 'empty_leg_pickups_active']
@@ -1602,7 +1616,7 @@ router.patch('/empty-leg/toggle', async (req, res) => {
   }
 })
 
-router.patch('/empty-leg/config', async (req, res) => {
+router.patch('/empty-leg/config', requireSuperAdmin, async (req, res) => {
   try {
     const allowed = [
       'empty_leg_discount_pct',
@@ -1657,7 +1671,7 @@ router.get('/gstin-lookup', async (req, res) => {
 // One-time migration: recalculate GST on all open airport bookings to include toll in taxable base
 // Restate open airport bookings: keep total unchanged, fold toll into fareBeforeTax,
 // recalculate gst backwards so (fareBeforeTax + gst = total, toll = 0).
-router.post('/migrate/gst-on-toll-restate', requireAdmin, async (req, res) => {
+router.post('/migrate/gst-on-toll-restate', requireSuperAdmin, async (req, res) => {
   try {
     const openBookings = await prisma.booking.findMany({
       where: {

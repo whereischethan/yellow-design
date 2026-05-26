@@ -6,7 +6,7 @@ import { PlacesInput } from './Modals'
 import {
   YL, STATUS_STYLE, Icons, Mono, Stack, Button, Input, Chip, Card,
   PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, formatPhone, useIsMobile,
-  DateTimePicker, toISTISO, fromISTISO,
+  DateTimePicker, toISTISO, fromISTISO, getISTComponents,
 } from '../components/ui'
 
 function FilterBar({ statusFilter, setStatusFilter, search, setSearch, tripType, setTripType, counts }: any) {
@@ -387,9 +387,10 @@ interface DrawerProps {
   onClose: () => void
   onUpdate: (b: Booking) => void
   onDelete?: (id: string) => void
+  isSuperAdmin?: boolean
 }
 
-export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, onUpdate, onDelete }: DrawerProps) {
+export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, onUpdate, onDelete, isSuperAdmin }: DrawerProps) {
   const isMobile = useIsMobile()
   const [editMode, setEditMode] = React.useState(false)
   const [editError, setEditError] = React.useState('')
@@ -624,8 +625,10 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     if (!booking) return
     const d = booking.assignedDriver
     const v = booking.assignedVehicle
-    const pickupDt = booking.pickup?.dateTime
-      ? `${fmtDate(booking.pickup.dateTime)} · ${fmtTime(booking.pickup.dateTime)}`
+    // Prefer eDateTime (the live-edited value) so copy reflects unsaved or just-saved edits
+    const effectiveDt = eDateTime ? fromISTISO(eDateTime).toISOString() : booking.pickup?.dateTime
+    const pickupDt = effectiveDt
+      ? `${fmtDate(effectiveDt)} · ${fmtTime(effectiveDt)}`
       : '—'
     const route = booking.tripType === 'pickup'
       ? `BLR ${booking.pickup?.terminal ?? ''} → ${booking.drop?.placeName ?? ''}`
@@ -665,7 +668,8 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
       const elapsedHours = startMs ? Math.max(0, (now.getTime() - startMs) / 3_600_000) : 0
       const actualHours = Math.max(0.5, Math.ceil(elapsedHours * 2) / 2)
       const pad = (n: number) => String(n).padStart(2, '0')
-      setHourlyEndTimeStr(`${pad(now.getHours())}:${pad(now.getMinutes())}`)
+      const nowIST = getISTComponents(now.toISOString())!
+      setHourlyEndTimeStr(`${pad(nowIST.h)}:${pad(nowIST.mi)}`)
       try {
         const result: any = await calcPricing({ tripType: 'hourly', durationHours: actualHours })
         setHourlyCompletePreview({ actualHours, newTotal: result.totalPrice, endTime: now })
@@ -702,11 +706,13 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     setHourlyEndTimeStr(timeStr)
     if (!timeStr || !booking.pickup?.dateTime) return
     const [hh, mm] = timeStr.split(':').map(Number)
-    const endTime = new Date(booking.pickup.dateTime)
-    endTime.setHours(hh, mm, 0, 0)
+    // Build end time in IST: use IST date of pickup + user-entered IST time
+    const pickupIST = getISTComponents(booking.pickup.dateTime)!
+    const p2 = (n: number) => String(n).padStart(2, '0')
+    let endTime = fromISTISO(`${pickupIST.y}-${p2(pickupIST.mo+1)}-${p2(pickupIST.d)}T${p2(hh)}:${p2(mm)}`)
     // If end time is before start (e.g. next-day trip), add a day
     if (endTime.getTime() < new Date(booking.pickup.dateTime).getTime()) {
-      endTime.setDate(endTime.getDate() + 1)
+      endTime = fromISTISO(`${pickupIST.y}-${p2(pickupIST.mo+1)}-${p2(pickupIST.d+1)}T${p2(hh)}:${p2(mm)}`)
     }
     const elapsedHours = Math.max(0, (endTime.getTime() - new Date(booking.pickup.dateTime).getTime()) / 3_600_000)
     const actualHours = Math.max(0.5, Math.ceil(elapsedHours * 2) / 2)
@@ -1100,13 +1106,15 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                 const f = flightData || booking.flight
                 const dep = f.departure ? new Date(f.departure) : null
                 const arr = f.arrival ? new Date(f.arrival) : null
-                const fmtHM = (d: Date) => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours() >= 12 ? 'PM' : 'AM'}`
+                const MONS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                const fmtHM = (iso: string) => { const c = getISTComponents(iso)!; return `${c.h%12||12}:${String(c.mi).padStart(2,'0')} ${c.h>=12?'PM':'AM'}` }
+                const fmtMD = (iso: string) => { const c = getISTComponents(iso)!; return `${c.d} ${MONS[c.mo]}` }
                 return (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 10, alignItems: 'center', padding: '12px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}` }}>
                     <Stack gap={3}>
-                      <Mono size={18} weight={700}>{dep ? fmtHM(dep) : '—'}</Mono>
+                      <Mono size={18} weight={700}>{dep ? fmtHM(f.departure!) : '—'}</Mono>
                       <span style={{ fontSize: 11, color: YL.ink2 }}>Departure</span>
-                      {dep && <span style={{ fontSize: 10.5, color: YL.ink3 }}>{dep.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+                      {dep && <span style={{ fontSize: 10.5, color: YL.ink3 }}>{fmtMD(f.departure!)}</span>}
                     </Stack>
                     <Stack gap={4} style={{ alignItems: 'center' }}>
                       <span style={{ width: 16, height: 16, color: YL.ink2, display: 'flex' }}>{Icons.flight}</span>
@@ -1114,9 +1122,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                       {f.airline && <span style={{ fontSize: 10, color: YL.ink3 }}>{f.airline}</span>}
                     </Stack>
                     <Stack gap={3} style={{ textAlign: 'right' }}>
-                      <Mono size={18} weight={700} style={{ display: 'block' }}>{arr ? fmtHM(arr) : '—'}</Mono>
+                      <Mono size={18} weight={700} style={{ display: 'block' }}>{arr ? fmtHM(f.arrival!) : '—'}</Mono>
                       <span style={{ fontSize: 11, color: YL.ink2 }}>Arrival</span>
-                      {arr && <span style={{ fontSize: 10.5, color: YL.ink3 }}>{arr.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+                      {arr && <span style={{ fontSize: 10.5, color: YL.ink3 }}>{fmtMD(f.arrival!)}</span>}
                     </Stack>
                     {f.status && (
                       <div style={{ gridColumn: '1 / -1', borderTop: `1px dashed ${YL.line}`, paddingTop: 8, fontSize: 11.5, color: YL.ink2 }}>
@@ -1479,8 +1487,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
         {saving && <div style={{ padding: '10px 24px', background: YL.yellowSoft, fontSize: 12, color: YL.ink, textAlign: 'center' }}>Saving…</div>}
         {confirmHourlyComplete && hourlyCompletePreview && (() => {
           const { actualHours, newTotal } = hourlyCompletePreview
-          const startMs = booking.pickup?.dateTime ? new Date(booking.pickup.dateTime).getTime() : null
-          const startLabel = startMs ? new Date(startMs).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—'
+          const startLabel = booking.pickup?.dateTime ? fmtTime(booking.pickup.dateTime) : '—'
           return (
             <div style={{ padding: '14px 24px', background: YL.yellowSoft, borderTop: `1px solid ${YL.line}` }}>
               <div style={{ fontSize: 12.5, color: YL.ink, fontWeight: 600, marginBottom: 10 }}>Complete hourly booking?</div>
@@ -1515,7 +1522,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
             </div>
           )
         })()}
-        {confirmDelete ? (
+        {isSuperAdmin && (confirmDelete ? (
           <div style={{ padding: '14px 24px', background: YL.redSoft, borderTop: `1px solid ${YL.line}`, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ flex: 1, fontSize: 12.5, color: YL.redInk }}>Delete this booking permanently?</span>
             <button onClick={handleDelete} disabled={deleting} style={{ padding: '6px 14px', background: YL.gulmohar, color: '#fff', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit' }}>
@@ -1529,7 +1536,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
               Delete booking
             </button>
           </div>
-        )}
+        ))}
       </div>
     </>
   )

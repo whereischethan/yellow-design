@@ -680,9 +680,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     const mapsLink = (() => {
       const loc = isPickup ? booking.drop : booking.pickup
       if (!loc) return null
-      if (loc.placeId) return `https://maps.google.com/?place_id=${loc.placeId}`
+      if (loc.placeId) return `https://www.google.com/maps/place/?q=place_id:${loc.placeId}`
       const addr = loc.placeName ?? loc.location
-      if (addr) return `https://maps.google.com/?q=${encodeURIComponent(addr)}`
+      if (addr) return `https://www.google.com/maps/search/?q=${encodeURIComponent(addr)}`
       return null
     })()
 

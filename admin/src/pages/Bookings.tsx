@@ -427,6 +427,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const [linkError, setLinkError] = React.useState('')
   const [copied, setCopied] = React.useState(false)
   const [copiedWA, setCopiedWA] = React.useState(false)
+  const [copiedWADriver, setCopiedWADriver] = React.useState(false)
   const [showEmailPanel, setShowEmailPanel] = React.useState(false)
   const [emailTo, setEmailTo] = React.useState('')
   const [emailSending, setEmailSending] = React.useState(false)
@@ -620,8 +621,6 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     if (!linkUrl) return
     navigator.clipboard.writeText(linkUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
-
-  const [copiedWADriver, setCopiedWADriver] = React.useState(false)
 
   const buildWhatsAppCustomer = () => {
     if (!booking) return ''

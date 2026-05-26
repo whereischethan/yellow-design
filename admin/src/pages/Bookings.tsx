@@ -621,15 +621,14 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     navigator.clipboard.writeText(linkUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
 
-  const handleCopyWhatsApp = () => {
-    if (!booking) return
+  const [copiedWADriver, setCopiedWADriver] = React.useState(false)
+
+  const buildWhatsAppCustomer = () => {
+    if (!booking) return ''
     const d = booking.assignedDriver
     const v = booking.assignedVehicle
-    // Prefer eDateTime (the live-edited value) so copy reflects unsaved or just-saved edits
     const effectiveDt = eDateTime ? fromISTISO(eDateTime).toISOString() : booking.pickup?.dateTime
-    const pickupDt = effectiveDt
-      ? `${fmtDate(effectiveDt)} · ${fmtTime(effectiveDt)}`
-      : '—'
+    const pickupDt = effectiveDt ? `${fmtDate(effectiveDt)} · ${fmtTime(effectiveDt)}` : '—'
     const route = booking.tripType === 'pickup'
       ? `BLR ${booking.pickup?.terminal ?? ''} → ${booking.drop?.placeName ?? ''}`
       : `${booking.pickup?.placeName ?? ''} → BLR ${booking.drop?.terminal ?? ''}`
@@ -641,22 +640,60 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
       `${pickupDt}`,
       `${route}`,
     ]
-    if (booking.flight?.flightNumber) {
-      lines.push(`Flight: ${booking.flight.flightNumber}`)
-    }
-    if (d) {
-      lines.push(``, `🚗 *Your Driver*`, `${d.name}`, `${formatPhone(d.phone)}`)
-    }
+    if (booking.flight?.flightNumber) lines.push(`Flight: ${booking.flight.flightNumber}`)
+    if (d) lines.push(``, `🚗 *Your Driver*`, `${d.name}`, `${formatPhone(d.phone)}`)
     if (v) {
-      const vehicleLabel = [v.make, v.model].filter(Boolean).join(' ') || v.model || 'Yellow Sky'
+      const vehicleLabel = [v.make, v.model].filter(Boolean).join(' ') || 'Yellow Sky'
       lines.push(``, `🚙 *Vehicle*`, vehicleLabel, `${v.color ? v.color + ' · ' : ''}${v.licensePlate}`)
     }
-    if (booking.pricing?.totalPrice) {
-      lines.push(``, `💰 *Fare: ${fmtINR(booking.pricing.totalPrice)}* (all inclusive)`)
+    if (booking.pricing?.totalPrice) lines.push(``, `💰 *Fare: ${fmtINR(booking.pricing.totalPrice)}* (all inclusive)`)
+    return lines.join('\n')
+  }
+
+  const buildWhatsAppDriver = () => {
+    if (!booking) return ''
+    const effectiveDt = eDateTime ? fromISTISO(eDateTime).toISOString() : booking.pickup?.dateTime
+    const pickupDt = effectiveDt ? `${fmtDate(effectiveDt)} · ${fmtTime(effectiveDt)}` : '—'
+    const customerName = booking.userName || booking.guestName || '—'
+    const customerPhone = booking.userPhone || booking.guestPhone || '—'
+
+    const pickupPlace = booking.tripType === 'pickup'
+      ? `BLR ${booking.pickup?.terminal ?? ''} (Airport)`
+      : (booking.pickup?.placeName ?? '—')
+    const dropPlace = booking.tripType === 'pickup'
+      ? (booking.drop?.placeName ?? '—')
+      : `BLR ${booking.drop?.terminal ?? ''} (Airport)`
+
+    const lines: string[] = [
+      `🚖 *New Trip — Yellow*`,
+      ``,
+      `*${booking.tripCode}*`,
+      `${pickupDt}`,
+      ``,
+      `📍 *Pickup:* ${pickupPlace}`,
+      `📍 *Drop:* ${dropPlace}`,
+    ]
+    if (booking.flight?.flightNumber) lines.push(`✈️ Flight: ${booking.flight.flightNumber}`)
+    if ((booking.stops ?? []).length > 0) {
+      lines.push(``, `🛑 *Stops:*`)
+      ;(booking.stops ?? []).forEach((s: any, i: number) => lines.push(`  ${i + 1}. ${s.placeName ?? s.location ?? s}`))
     }
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    lines.push(``, `👤 *Customer*`, `${customerName}`, `${formatPhone(customerPhone)}`)
+    if (booking.pricing?.totalPrice) lines.push(``, `💰 *Fare: ${fmtINR(booking.pricing.totalPrice)}*`)
+    return lines.join('\n')
+  }
+
+  const handleCopyWhatsApp = () => {
+    navigator.clipboard.writeText(buildWhatsAppCustomer()).then(() => {
       setCopiedWA(true)
       setTimeout(() => setCopiedWA(false), 2500)
+    })
+  }
+
+  const handleCopyWhatsAppDriver = () => {
+    navigator.clipboard.writeText(buildWhatsAppDriver()).then(() => {
+      setCopiedWADriver(true)
+      setTimeout(() => setCopiedWADriver(false), 2500)
     })
   }
 
@@ -1476,12 +1513,20 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
             )
           })()}
 
-          <button
-            onClick={handleCopyWhatsApp}
-            style={{ width: '100%', padding: '10px 14px', background: copiedWA ? YL.greenSoft : '#25D366', color: copiedWA ? YL.greenInk : '#fff', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-          >
-            {copiedWA ? '✓ Copied to clipboard' : '📋 Copy for WhatsApp'}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleCopyWhatsApp}
+              style={{ flex: 1, padding: '10px 10px', background: copiedWA ? YL.greenSoft : '#25D366', color: copiedWA ? YL.greenInk : '#fff', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              {copiedWA ? '✓ Copied' : '📋 Customer copy'}
+            </button>
+            <button
+              onClick={handleCopyWhatsAppDriver}
+              style={{ flex: 1, padding: '10px 10px', background: copiedWADriver ? YL.greenSoft : '#128C7E', color: copiedWADriver ? YL.greenInk : '#fff', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              {copiedWADriver ? '✓ Copied' : '📋 Driver copy'}
+            </button>
+          </div>
           </div>
         </div>
         {saving && <div style={{ padding: '10px 24px', background: YL.yellowSoft, fontSize: 12, color: YL.ink, textAlign: 'center' }}>Saving…</div>}

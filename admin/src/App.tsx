@@ -243,7 +243,7 @@ export default function App() {
         {page === 'vehicles'   && <VehiclesPage vehicles={vehicles} drivers={drivers} onUpdate={v => setVehicles(prev => prev.map(x => x.id === v.id ? v : x))} onAddVehicle={() => setShowAddVehicle(true)} onVehiclesRefresh={() => getVehicles().then(r => setVehicles(r.vehicles)).catch(() => {})} />}
         {page === 'customers'  && <CustomersPage customers={customers} onUpdate={c => setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...c } : x))} onRefresh={() => getCustomers().then(r => setCustomers(r.customers)).catch(() => {})} />}
         {page === 'leads'      && <LeadsPage leads={leads} bookings={bookings} onUpdate={l => setLeads(prev => prev.map(x => x.id === l.id ? { ...x, ...l } : x))} onBookingCreated={b => { setBookings(prev => [b, ...prev]); setPage('bookings') }} />}
-        {page === 'pricing'    && <PricingPage />}
+        {page === 'pricing'    && <PricingPage isSuperAdmin={isSuperAdmin} />}
         {page === 'empty-leg'  && <EmptyLegPage />}
         {page === 'invoices'   && <InvoicesPage />}
         {page === 'finance'    && <FinancePage />}

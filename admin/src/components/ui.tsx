@@ -209,7 +209,7 @@ export function useIsMobile(breakpoint = 768): boolean {
 export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'empty-leg' | 'team' | 'invoices' | 'finance' | 'settings'
 
 /** Pages only super admins can access */
-export const SUPERADMIN_PAGES: Page[] = ['pricing', 'empty-leg', 'team', 'settings']
+export const SUPERADMIN_PAGES: Page[] = ['empty-leg', 'team', 'settings']
 
 interface SidebarProps {
   active: Page
@@ -232,7 +232,7 @@ export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, isSu
     { id: 'vehicles',  label: 'Vehicles',  icon: Icons.vehicles },
     { id: 'customers', label: 'Customers', icon: Icons.customers },
     { id: 'leads',     label: 'Leads',     icon: Icons.funnel },
-    { id: 'pricing',   label: 'Pricing',   icon: Icons.pricing,   superAdminOnly: true },
+    { id: 'pricing',   label: 'Pricing',   icon: Icons.pricing },
     { id: 'empty-leg', label: 'Empty Leg', icon: Icons.pricing,   superAdminOnly: true },
     { id: 'invoices',  label: 'Invoices',  icon: Icons.invoice },
     { id: 'finance',   label: 'Finance',   icon: Icons.trending },
@@ -372,7 +372,7 @@ export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, is
   const allSecondary: { id: Page; label: string; icon: React.ReactNode; superAdminOnly?: boolean }[] = [
     { id: 'vehicles',  label: 'Vehicles',    icon: Icons.vehicles },
     { id: 'customers', label: 'Customers',   icon: Icons.customers },
-    { id: 'pricing',   label: 'Pricing',     icon: Icons.pricing,   superAdminOnly: true },
+    { id: 'pricing',   label: 'Pricing',     icon: Icons.pricing },
     { id: 'invoices',  label: 'Invoices',    icon: Icons.invoice },
     { id: 'finance',   label: 'Finance',     icon: Icons.trending },
     { id: 'team',      label: 'Admin users', icon: Icons.drivers,   superAdminOnly: true },

@@ -41,10 +41,11 @@ const SECTIONS: { title: string; color: string; fields: Field[] }[] = [
   },
 ]
 
-function PriceCard({ field, config, onChange }: {
+function PriceCard({ field, config, onChange, readOnly }: {
   field: Field
   config: PricingConfig
   onChange: (key: string, val: string) => void
+  readOnly?: boolean
 }) {
   return (
     <div style={{ background: YL.card, border: `1.5px solid ${YL.line}`, borderRadius: 14, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -52,12 +53,13 @@ function PriceCard({ field, config, onChange }: {
         <div style={{ fontSize: 13, fontWeight: 600, color: YL.ink, marginBottom: 2 }}>{field.label}</div>
         <div style={{ fontSize: 11.5, color: YL.ink3 }}>{field.hint}</div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', height: 40, padding: '0 12px', background: YL.bg, border: `1.5px solid ${YL.line}`, borderRadius: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: 40, padding: '0 12px', background: readOnly ? YL.bg : YL.bg, border: `1.5px solid ${YL.line}`, borderRadius: 10, opacity: readOnly ? 0.7 : 1 }}>
         {field.prefix && <Mono size={13} color={YL.ink2} style={{ marginRight: 4 }}>{field.prefix}</Mono>}
         <input
           value={config[field.key] ?? ''}
           onChange={e => onChange(field.key, e.target.value)}
-          style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: '"JetBrains Mono", monospace', fontSize: 15, color: YL.ink, fontWeight: 600, minWidth: 0 }}
+          readOnly={readOnly}
+          style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: '"JetBrains Mono", monospace', fontSize: 15, color: YL.ink, fontWeight: 600, minWidth: 0, cursor: readOnly ? 'default' : 'text' }}
         />
         {field.suffix && <Mono size={12} color={YL.ink2}>{field.suffix}</Mono>}
       </div>
@@ -172,7 +174,7 @@ function PricingCalculator({ config }: { config: PricingConfig }) {
   )
 }
 
-export default function PricingPage() {
+export default function PricingPage({ isSuperAdmin }: { isSuperAdmin?: boolean }) {
   const [config, setConfig] = React.useState<PricingConfig>({})
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
@@ -216,13 +218,13 @@ export default function PricingPage() {
     <div style={{ flex: 1, overflow: 'auto', background: YL.bg }}>
       <PageHeader
         title="Pricing"
-        subtitle="Changes apply to the customer app immediately"
-        actions={<>
+        subtitle={isSuperAdmin ? "Changes apply to the customer app immediately" : "View-only — contact a Super Admin to change rates"}
+        actions={isSuperAdmin ? <>
           {dirty && <Button variant="secondary" onClick={handleDiscard}>Discard</Button>}
           <Button variant="primary" onClick={handleSave} disabled={saving || !dirty}>
             {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
           </Button>
-        </>}
+        </> : undefined}
       />
 
       <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -236,7 +238,7 @@ export default function PricingPage() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
               {section.fields.map(f => (
-                <PriceCard key={f.key} field={f} config={config} onChange={handleChange} />
+                <PriceCard key={f.key} field={f} config={config} onChange={handleChange} readOnly={!isSuperAdmin} />
               ))}
             </div>
           </div>

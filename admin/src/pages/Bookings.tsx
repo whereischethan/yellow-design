@@ -652,16 +652,44 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const buildWhatsAppDriver = () => {
     if (!booking) return ''
     const effectiveDt = eDateTime ? fromISTISO(eDateTime).toISOString() : booking.pickup?.dateTime
-    const pickupDt = effectiveDt ? `${fmtDate(effectiveDt)} · ${fmtTime(effectiveDt)}` : '—'
+
+    // Always use absolute date (no "Today"/"Tomorrow") for driver copy
+    const fmtAbsDate = (iso: string) => {
+      const c = getISTComponents(iso)
+      if (!c) return '—'
+      const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      const dow = new Date(c.y, c.mo, c.d).getDay()
+      return `${DAYS[dow]}, ${c.d} ${MONTHS[c.mo]} ${c.y}`
+    }
+    const pickupDt = effectiveDt ? `${fmtAbsDate(effectiveDt)} · ${fmtTime(effectiveDt)}` : '—'
+
     const customerName = booking.userName || booking.guestName || '—'
     const customerPhone = booking.userPhone || booking.guestPhone || '—'
 
-    const pickupPlace = booking.tripType === 'pickup'
+    const isPickup = booking.tripType === 'pickup'
+    const pickupPlace = isPickup
       ? `BLR ${booking.pickup?.terminal ?? ''} (Airport)`
-      : (booking.pickup?.placeName ?? '—')
-    const dropPlace = booking.tripType === 'pickup'
-      ? (booking.drop?.placeName ?? '—')
+      : (booking.pickup?.placeName ?? booking.pickup?.location ?? '—')
+    const dropPlace = isPickup
+      ? (booking.drop?.placeName ?? booking.drop?.location ?? '—')
       : `BLR ${booking.drop?.terminal ?? ''} (Airport)`
+
+    // Google Maps link — use placeId if available, else text search
+    const mapsLink = (() => {
+      if (isPickup) {
+        // Pickup is airport — link to terminal if known
+        const terminal = booking.pickup?.terminal
+        return terminal
+          ? `https://maps.google.com/?q=Kempegowda+International+Airport+${encodeURIComponent(terminal)}`
+          : `https://maps.google.com/?q=Kempegowda+International+Airport+Bengaluru`
+      }
+      const placeId = booking.pickup?.placeId
+      if (placeId) return `https://maps.google.com/?place_id=${placeId}`
+      const addr = booking.pickup?.placeName ?? booking.pickup?.location
+      if (addr) return `https://maps.google.com/?q=${encodeURIComponent(addr)}`
+      return null
+    })()
 
     const lines: string[] = [
       `🚖 *New Trip — Yellow*`,
@@ -670,8 +698,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
       `${pickupDt}`,
       ``,
       `📍 *Pickup:* ${pickupPlace}`,
-      `📍 *Drop:* ${dropPlace}`,
     ]
+    if (mapsLink) lines.push(mapsLink)
+    lines.push(`📍 *Drop:* ${dropPlace}`)
     if (booking.flight?.flightNumber) lines.push(`✈️ Flight: ${booking.flight.flightNumber}`)
     if ((booking.stops ?? []).length > 0) {
       lines.push(``, `🛑 *Stops:*`)

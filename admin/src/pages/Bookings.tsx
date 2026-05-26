@@ -694,8 +694,14 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
       ``,
       `📍 *Pickup:* ${pickupPlace}`,
     ]
-    if (mapsLink) lines.push(mapsLink)
-    lines.push(`📍 *Drop:* ${dropPlace}`)
+    // For airport pickup: map goes after Drop; for airport drop: map goes after Pickup
+    if (isPickup) {
+      lines.push(`📍 *Drop:* ${dropPlace}`)
+      if (mapsLink) lines.push(mapsLink)
+    } else {
+      if (mapsLink) lines.push(mapsLink)
+      lines.push(`📍 *Drop:* ${dropPlace}`)
+    }
     if (booking.flight?.flightNumber) lines.push(`✈️ Flight: ${booking.flight.flightNumber}`)
     if ((booking.stops ?? []).length > 0) {
       lines.push(``, `🛑 *Stops:*`)

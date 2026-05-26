@@ -39,7 +39,10 @@ async function adminFetch(path: string, init?: RequestInit) {
 
   const res = await fetch(`/admin${path}`, { ...init, headers })
   if (res.status === 401) throw new Error('UNAUTHORIZED')
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) {
+    const body = await res.text()
+    try { throw new Error(JSON.parse(body).error || body) } catch (e: any) { throw e.message === body ? new Error(body) : e }
+  }
   return res.json()
 }
 

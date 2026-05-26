@@ -675,18 +675,13 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
       ? (booking.drop?.placeName ?? booking.drop?.location ?? '—')
       : `BLR ${booking.drop?.terminal ?? ''} (Airport)`
 
-    // Google Maps link — use placeId if available, else text search
+    // Google Maps link — always for the non-airport location
+    // airport pickup → driver goes to DROP first;  airport drop → driver picks up from PICKUP
     const mapsLink = (() => {
-      if (isPickup) {
-        // Pickup is airport — link to terminal if known
-        const terminal = booking.pickup?.terminal
-        return terminal
-          ? `https://maps.google.com/?q=Kempegowda+International+Airport+${encodeURIComponent(terminal)}`
-          : `https://maps.google.com/?q=Kempegowda+International+Airport+Bengaluru`
-      }
-      const placeId = booking.pickup?.placeId
-      if (placeId) return `https://maps.google.com/?place_id=${placeId}`
-      const addr = booking.pickup?.placeName ?? booking.pickup?.location
+      const loc = isPickup ? booking.drop : booking.pickup
+      if (!loc) return null
+      if (loc.placeId) return `https://maps.google.com/?place_id=${loc.placeId}`
+      const addr = loc.placeName ?? loc.location
       if (addr) return `https://maps.google.com/?q=${encodeURIComponent(addr)}`
       return null
     })()

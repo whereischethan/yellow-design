@@ -23,14 +23,11 @@ function addDays(d: Date, n: number): Date {
   return r
 }
 
+import { fmtDateTimeIST } from '../../lib/ist'
+
 function fmtDate(d: Date): string {
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  const h = d.getHours()
-  const m = d.getMinutes().toString().padStart(2, '0')
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const h12 = h % 12 || 12
-  return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} at ${h12}:${m} ${ampm}`
+  // Replace "·" separator with "at" for outstation display style
+  return fmtDateTimeIST(d.toISOString()).replace(' · ', ' at ')
 }
 
 function WhatsAppIcon() {

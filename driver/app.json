@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Yellow Driver",
+    "slug": "yellow-driver",
+    "version": "1.0.0",
+    "scheme": "yellowdriver",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F6F3EB",
+    "splash": {
+      "backgroundColor": "#FFD84A"
+    },
+    "ios": {
+      "bundleIdentifier": "com.yellowcabs.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Yellow Driver needs your location to confirm you've arrived at pickup and drop-off points.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Yellow Driver uses your location to track arrival at pickup and drop-off points."
+      }
+    },
+    "android": {
+      "package": "com.yellowcabs.driver",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Yellow Driver uses your location to unlock arrival confirmations."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

@@ -15,6 +15,7 @@ import bookingsRouter from './routes/bookings'
 import flightsRouter from './routes/flights'
 import adminRouter from './routes/admin'
 import invoicesRouter from './routes/invoices'
+import driverRouter from './routes/driver'
 import { seedPricingDefaults } from './db'
 
 const app = express()
@@ -33,6 +34,7 @@ app.use('/bookings', bookingsRouter)
 app.use('/flights', flightsRouter)
 app.use('/admin', adminRouter)
 app.use('/invoices', invoicesRouter)
+app.use('/driver', driverRouter)
 
 // Serve built admin SPA in production
 app.use('/ops', express.static(path.join(__dirname, '../../admin/dist')))

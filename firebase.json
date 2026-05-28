@@ -17,6 +17,7 @@
         { "source": "/bookings/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "/user/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "/invoices/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/driver/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "/health", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "**", "destination": "/index.html" }
       ]
@@ -35,7 +36,24 @@
         { "source": "/pricing", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "/pricing/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "/auth/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "/driver/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "/health", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
+        { "source": "**", "destination": "/index.html" }
+      ]
+    }
+  ,
+    {
+      "site": "yellow-design-driver",
+      "public": "driver/dist",
+      "ignore": ["firebase.json", "**/.*"],
+      "headers": [
+        { "source": "**", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
+        { "source": "**/*.@(js|css|png|jpg|ico|svg|woff|woff2|ttf|otf)", "headers": [{ "key": "Cache-Control", "value": "max-age=31536000, immutable" }] },
+        { "source": "**/*.ttf", "headers": [{ "key": "Content-Type", "value": "font/ttf" }] },
+        { "source": "**/*.otf", "headers": [{ "key": "Content-Type", "value": "font/otf" }] }
+      ],
+      "rewrites": [
+        { "source": "/driver/**", "run": { "serviceId": "yellow-design-backend", "region": "asia-south1" } },
         { "source": "**", "destination": "/index.html" }
       ]
     }

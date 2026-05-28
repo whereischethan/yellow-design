@@ -270,7 +270,7 @@ export default function EmptyLegPage() {
     setCfgSaving(false)
   }
 
-  const discountPct     = parseFloat(localCfg.empty_leg_discount_pct ?? '') || status?.config?.empty_leg_discount_pct ?? 40
+  const discountPct     = parseFloat(localCfg.empty_leg_discount_pct ?? '') || (status?.config?.empty_leg_discount_pct ?? 40)
   const activeWindows   = status?.activeWindows   ?? []
   const upcomingWindows = status?.upcomingWindows ?? []
   const allWindows      = [...activeWindows, ...upcomingWindows]

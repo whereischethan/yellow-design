@@ -1,11 +1,14 @@
 import React from 'react'
 import type { Invoice } from '../types'
 import { getInvoices, openInvoice } from '../api'
-import { YL, Mono, Button, PageHeader, Icons, Input, useIsMobile, formatPhone } from '../components/ui'
+import { YL, Mono, Button, PageHeader, Icons, Input, useIsMobile, formatPhone, getISTComponents } from '../components/ui'
 
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 function fmtDate(dt: string): string {
   try {
-    return new Date(dt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    const c = getISTComponents(dt)
+    if (!c) return dt
+    return `${c.d} ${MONTHS_SHORT[c.mo]} ${c.y}`
   } catch { return dt }
 }
 

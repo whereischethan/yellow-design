@@ -9,22 +9,10 @@ import RouteVisualizer from '../../components/RouteVisualizer'
 import { getBooking, getApiBase, getAuthToken } from '../../lib/api'
 import type { Booking } from '../../types/booking'
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+import { fmtDateTimeIST } from '../../lib/ist'
 
 function formatDateTime(iso: string): string {
-  try {
-    const d = new Date(iso)
-    const day = DAYS[d.getDay()]
-    const date = d.getDate()
-    const mon = MONTHS[d.getMonth()]
-    const h = d.getHours()
-    const m = d.getMinutes().toString().padStart(2, '0')
-    const ampm = h >= 12 ? 'PM' : 'AM'
-    return `${day}, ${date} ${mon} · ${h % 12 || 12}:${m} ${ampm}`
-  } catch {
-    return ''
-  }
+  return fmtDateTimeIST(iso)
 }
 
 function fmtINR(n: number) {

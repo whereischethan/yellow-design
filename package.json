@@ -11,6 +11,9 @@
     "server:dev": "ts-node --project server/tsconfig.json server/index.ts",
     "admin": "cd admin && npm run dev",
     "admin:build": "cd admin && npm run build",
+    "driver": "cd driver && EXPO_ROOT_DIR=. npx expo start --web --port 8083",
+    "driver:ios": "cd driver && npx expo start --ios",
+    "driver:android": "cd driver && npx expo start --android",
     "web:build": "expo export --platform web --output-dir dist && node scripts/inject-web-hints.mjs",
     "web:deploy": "npm run web:build && firebase deploy --only hosting:yellow-design-app"
   },

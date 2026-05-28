@@ -38,19 +38,10 @@ function FareLine({ label, value, muted = false }: { label: string; value: strin
   )
 }
 
+import { fmtDateTimeIST } from '../../lib/ist'
+
 function formatDateTime(iso: string): string {
-  try {
-    const d = new Date(iso)
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    const h = d.getHours()
-    const m = d.getMinutes().toString().padStart(2, '0')
-    const ampm = h >= 12 ? 'PM' : 'AM'
-    const h12 = h % 12 || 12
-    return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} · ${h12}:${m} ${ampm}`
-  } catch {
-    return iso
-  }
+  return fmtDateTimeIST(iso) || iso
 }
 
 export default function ScreenReview() {
@@ -84,12 +75,21 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
   const hasReferralPromo = !!(user?.referredById && availableCredits === 0)
   const showDiscount = availableCredits > 0 || hasReferralPromo
 
+  // New user discount: 20% off fares ≥ ₹1,000 (floored so final ≥ ₹1,000), 10% off fares < ₹1,000
+  const isNewUser = (user?.bookingCount ?? 0) === 0
+  function calcNewUserDiscount(fare: number): number {
+    if (fare >= 1000) return Math.min(Math.round(fare * 0.20), fare - 1000)
+    return Math.round(fare * 0.10)
+  }
+  const newUserDiscount = isNewUser ? calcNewUserDiscount(baseTotal) : 0
+  const newUserPct = baseTotal >= 1000 ? 20 : 10
+
   const [applyCredits, setApplyCredits] = useState(false)
   const discountAmount = Math.round(baseTotal * 0.1)
   const creditsToApply = applyCredits
     ? hasReferralPromo ? discountAmount : Math.min(discountAmount, availableCredits)
     : 0
-  const total = baseTotal - creditsToApply
+  const total = baseTotal - newUserDiscount - creditsToApply
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -144,6 +144,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
       extraKmCharge: 0,
       ...(creditsToApply > 0 ? { creditsApplied: creditsToApply } : {}),
       ...(pricing?.emptyLeg ? { emptyLegDiscount: pricing.emptyLeg.savedAmount } : {}),
+      ...(newUserDiscount > 0 ? { newUserDiscount } : {}),
     },
     ...(forGuest && guestName.trim() ? { guestName: guestName.trim(), guestPhone: guestPhone.trim() } : {}),
   })
@@ -359,6 +360,35 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
             Fastest route{pricing?.distanceKm ? ` · ${pricing.distanceKm} km` : ''}
           </Text>
 
+          {/* New user first-ride discount banner — always applied, no toggle */}
+          {newUserDiscount > 0 && (
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              paddingVertical: 10, paddingHorizontal: 14, marginBottom: 10,
+              backgroundColor: YL.yellowSoft,
+              borderRadius: 12, borderWidth: 1, borderColor: YL.yellow,
+            }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: FONTS.display, fontSize: 13.5, fontWeight: '600', color: YL.ink }}>
+                  🎉 First ride — {newUserPct}% off
+                </Text>
+                <Text style={{ fontFamily: FONTS.display, fontSize: 11.5, color: YL.ink3, marginTop: 1 }}>
+                  Save ₹{newUserDiscount.toLocaleString('en-IN')} on this ride
+                </Text>
+              </View>
+              <View style={{
+                width: 22, height: 22, borderRadius: 11,
+                backgroundColor: YL.ink,
+                borderWidth: 1.5, borderColor: YL.ink,
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Svg width={12} height={12} viewBox="0 0 12 12" fill="none">
+                  <Path d="M2 6L4.5 8.5L10 3" stroke={YL.yellow} strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </View>
+            </View>
+          )}
+
           {showDiscount && (
             <Pressable
               onPress={() => setApplyCredits(v => !v)}
@@ -400,17 +430,26 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
             />
           )}
 
-          {creditsToApply > 0 && (
+          {(newUserDiscount > 0 || creditsToApply > 0) && (
             <FareLine label="Ride fare" value={`₹${baseTotal.toLocaleString('en-IN')}`} muted />
+          )}
+          {newUserDiscount > 0 && (
+            <FareLine label={`First ride ${newUserPct}% off`} value={`−₹${newUserDiscount.toLocaleString('en-IN')}`} />
           )}
           {creditsToApply > 0 && (
             <FareLine label="10% referral discount" value={`−₹${creditsToApply.toLocaleString('en-IN')}`} />
           )}
 
-          <View style={{ alignItems: 'center', marginTop: (creditsToApply > 0 || pricing?.emptyLeg) ? 10 : 0 }}>
+          <View style={{ alignItems: 'center', marginTop: (newUserDiscount > 0 || creditsToApply > 0 || pricing?.emptyLeg) ? 10 : 0 }}>
             <Text style={styles.totalAmount}>₹{total.toLocaleString('en-IN')}</Text>
             <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3, marginTop: 6 }}>
-              {creditsToApply > 0 ? '10% off applied · all inclusive' : 'All inclusive'}
+              {newUserDiscount > 0 && creditsToApply > 0
+                ? `First ride ${newUserPct}% off + referral · all inclusive`
+                : newUserDiscount > 0
+                ? `First ride · ${newUserPct}% off · all inclusive`
+                : creditsToApply > 0
+                ? '10% off applied · all inclusive'
+                : 'All inclusive'}
             </Text>
           </View>
         </View>

@@ -930,7 +930,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                     <Avatar name={d.name} size={26}/>
                     <Stack gap={2} style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{d.name}</div>
-                      <Mono size={10.5} color={YL.ink2}>{d.plate} · {d.rating.toFixed(1)}★</Mono>
+                      <Mono size={10.5} color={YL.ink2}>{d.plate}</Mono>
                     </Stack>
                     <span style={{ fontSize: 11, color: YL.greenInk }}>● Available</span>
                   </button>

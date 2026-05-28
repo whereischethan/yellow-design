@@ -1,6 +1,6 @@
 import React from 'react'
 import { getFinanceSummary } from '../api'
-import { YL, Icons, Mono, Stack, Card, PageHeader, Button, fmtINR, useIsMobile } from '../components/ui'
+import { YL, Icons, Mono, Stack, Card, PageHeader, Button, fmtINR, useIsMobile, getISTComponents, fromISTISO } from '../components/ui'
 
 interface MonthRow  { month: string; revenue: number; collected: number; upcoming: number; gst: number; rides: number }
 interface TypeRow   { type: string;  revenue: number; gst: number; rides: number }
@@ -11,10 +11,10 @@ interface Summary {
   from: string; to: string
 }
 
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 function fmtMonth(m: string) {
-  const [y, mo] = m.split('-')
-  const d = new Date(Number(y), Number(mo) - 1, 1)
-  return d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
+  const [y, mo] = m.split('-').map(Number)
+  return `${MONTHS_SHORT[mo - 1]} '${String(y).slice(2)}`
 }
 
 const TYPE_COLOR: Record<string, string> = {
@@ -200,14 +200,17 @@ export default function FinancePage() {
     setLoading(true)
     setError(null)
     try {
-      const now = new Date()
+      const istNow = getISTComponents(new Date().toISOString())!
+      const p2 = (n: number) => String(n).padStart(2, '0')
       let from: Date
       if (months === 0) {
-        from = new Date(now.getFullYear(), now.getMonth(), 1)
+        from = fromISTISO(`${istNow.y}-${p2(istNow.mo+1)}-01T00:00`)
       } else {
-        from = new Date(now.getFullYear(), now.getMonth() - months + 1, 1)
+        const fromDate = new Date(istNow.y, istNow.mo - months + 1, 1)
+        from = fromISTISO(`${fromDate.getFullYear()}-${p2(fromDate.getMonth()+1)}-01T00:00`)
       }
-      const to = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+      const toDate = new Date(istNow.y, istNow.mo + 1, 1)
+      const to = fromISTISO(`${toDate.getFullYear()}-${p2(toDate.getMonth()+1)}-01T00:00`)
       const data = await getFinanceSummary(from.toISOString(), to.toISOString())
       setSummary(data)
     } catch (e: any) {

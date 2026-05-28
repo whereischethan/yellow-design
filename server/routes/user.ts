@@ -25,12 +25,17 @@ async function generateUniqueReferralCode(name: string, phone: string): Promise<
 
 router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
-    let user = await prisma.user.findUnique({
-      where: { id: req.userId! },
-      select: { id: true, phone: true, name: true, email: true, role: true,
-                referralCode: true, referralCredits: true, referredById: true },
-    })
-    if (!user) return res.status(404).json({ error: 'User not found' })
+    const [userRow, bookingCount] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: req.userId! },
+        select: { id: true, phone: true, name: true, email: true, role: true,
+                  referralCode: true, referralCredits: true, referredById: true },
+      }),
+      prisma.booking.count({ where: { userId: req.userId! } }),
+    ])
+    if (!userRow) return res.status(404).json({ error: 'User not found' })
+
+    let user = userRow
 
     // Backfill referral code for users who registered before the referral system
     if (!user.referralCode && user.name) {
@@ -43,7 +48,7 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
       })
     }
 
-    return res.json({ user })
+    return res.json({ user: { ...user, bookingCount } })
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Failed to fetch profile' })
   }

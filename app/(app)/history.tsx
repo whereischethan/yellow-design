@@ -14,20 +14,10 @@ type Tab = 'upcoming' | 'past'
 const UPCOMING_STATUSES = new Set(['pending', 'confirmed', 'assigned', 'arrived', 'in_progress'])
 const PAST_STATUSES = new Set(['completed', 'cancelled'])
 
+import { fmtRelativeDateTimeIST } from '../../lib/ist'
+
 function formatDateTime(dt: string): string {
-  try {
-    const date = new Date(dt)
-    const today = new Date()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(today.getDate() + 1)
-    const timeStr = date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })
-    if (date.toDateString() === today.toDateString()) return `Today · ${timeStr}`
-    if (date.toDateString() === tomorrow.toDateString()) return `Tomorrow · ${timeStr}`
-    const dateStr = date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-    return `${dateStr} · ${timeStr}`
-  } catch {
-    return dt
-  }
+  return fmtRelativeDateTimeIST(dt) || dt
 }
 
 function StatusBadge({ status }: { status: string }) {

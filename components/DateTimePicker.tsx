@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { View, Text, Pressable, StyleSheet, Platform } from 'react-native'
 import RNDateTimePicker from '@react-native-community/datetimepicker'
 import { YL, FONTS } from '../constants/theme'
+import { fmtDateTimeIST } from '../lib/ist'
 
 interface Props {
   value: Date
@@ -11,24 +12,17 @@ interface Props {
   mode?: 'datetime' | 'date'
 }
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
 function formatDisplay(date: Date): string {
-  const day = DAYS[date.getDay()]
-  const d = date.getDate()
-  const mon = MONTHS[date.getMonth()]
-  const h = date.getHours()
-  const m = date.getMinutes().toString().padStart(2, '0')
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const h12 = h % 12 || 12
-  return `${day}, ${d} ${mon} · ${h12}:${m} ${ampm}`
+  return fmtDateTimeIST(date.toISOString())
 }
 
 export default function DateTimePicker({ value, onChange, minimumDate, label, mode = 'datetime' }: Props) {
   const [showDate, setShowDate] = useState(false)
   const [showTime, setShowTime] = useState(false)
   const [tempDate, setTempDate] = useState(value)
+
+  // Effective minimum: caller's minimumDate or right now
+  const minDate = minimumDate || new Date()
 
   const handleDateChange = (_: any, selected?: Date) => {
     if (Platform.OS === 'android') setShowDate(false)
@@ -42,8 +36,10 @@ export default function DateTimePicker({ value, onChange, minimumDate, label, mo
   const handleTimeChange = (_: any, selected?: Date) => {
     if (Platform.OS === 'android') setShowTime(false)
     if (selected) {
-      onChange(selected)
-      setTempDate(selected)
+      // Clamp: if the resulting datetime is before minDate, snap forward to minDate
+      const clamped = selected < minDate ? minDate : selected
+      onChange(clamped)
+      setTempDate(clamped)
     }
   }
 
@@ -63,7 +59,7 @@ export default function DateTimePicker({ value, onChange, minimumDate, label, mo
         <RNDateTimePicker
           mode="date"
           value={tempDate}
-          minimumDate={minimumDate || new Date()}
+          minimumDate={minDate}
           onChange={handleDateChange}
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
         />
@@ -73,6 +69,7 @@ export default function DateTimePicker({ value, onChange, minimumDate, label, mo
         <RNDateTimePicker
           mode="time"
           value={tempDate}
+          minimumDate={minDate}
           onChange={handleTimeChange}
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           minuteInterval={15}

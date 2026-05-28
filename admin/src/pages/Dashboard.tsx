@@ -1,5 +1,5 @@
 import type { Booking, Driver, Stats } from '../types'
-import { YL, STATUS_STYLE, Icons, Mono, Stack, Button, Card, PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile } from '../components/ui'
+import { YL, STATUS_STYLE, Icons, Mono, Stack, Button, Card, PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile, getISTComponents } from '../components/ui'
 
 function StatCard({ label, value, hint, accent, sparkValues }: any) {
   return (
@@ -211,7 +211,7 @@ export default function Dashboard({ bookings, drivers, stats, adminName, onOpen,
   const isMobile = useIsMobile()
   const todayBookings = bookings.filter(b => b.pickup?.dateTime && fmtDate(b.pickup.dateTime) === 'Today')
 
-  const hour = new Date().getHours()
+  const hour = getISTComponents(new Date().toISOString())!.h
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const firstName = adminName ? adminName.split(' ')[0] : null
 

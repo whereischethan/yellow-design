@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Lead, Booking } from '../types'
 import { patchLead, createBooking, downloadCSV } from '../api'
-import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile, formatPhone, telPhone } from '../components/ui'
+import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile, formatPhone, telPhone, getISTComponents, fromISTISO } from '../components/ui'
 
 const minutesUntil = (iso: string) => Math.round((new Date(iso).getTime() - Date.now()) / 60000)
 const fmtAge = (iso: string) => {
@@ -304,8 +304,9 @@ export default function LeadsPage({ leads, bookings: _bookings, onUpdate, onBook
     }
   }
 
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const todayLeads = leads.filter(l => new Date(l.quoted_at) >= today)
+  const istToday = getISTComponents(new Date().toISOString())!
+  const todayStartIST = fromISTISO(`${istToday.y}-${String(istToday.mo+1).padStart(2,'0')}-${String(istToday.d).padStart(2,'0')}T00:00`)
+  const todayLeads = leads.filter(l => new Date(l.quoted_at) >= todayStartIST)
   const convertedToday = todayLeads.filter(l => l.status === 'converted').length
   const lostToday = todayLeads.filter(l => l.status === 'lost').length
   const convRate = (convertedToday + lostToday) > 0 ? Math.round((convertedToday / (convertedToday + lostToday)) * 100) : 0
@@ -428,7 +429,7 @@ export default function LeadsPage({ leads, bookings: _bookings, onUpdate, onBook
                 <Avatar name={lead.user_name || lead.user_phone || '?'} size={30}/>
                 <Stack gap={2} style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: YL.ink, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.user_name || '—'}</div>
-                  <Mono size={11} color={YL.ink2}>{lead.user_phone}</Mono>
+                  <Mono size={11} color={YL.ink2}>{formatPhone(lead.user_phone)}</Mono>
                 </Stack>
               </div>
               <Stack gap={3}>

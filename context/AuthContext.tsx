@@ -9,6 +9,7 @@ type User = {
   referralCode?: string
   referralCredits?: number
   referredById?: string | null
+  bookingCount?: number
 }
 
 type AuthContextType = {

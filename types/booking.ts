@@ -88,6 +88,7 @@ export interface CreateBookingRequest {
     toll?: number;
     creditsApplied?: number;
     emptyLegDiscount?: number;
+    newUserDiscount?: number;
   };
   guestName?: string;
   guestPhone?: string;

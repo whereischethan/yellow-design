@@ -154,8 +154,22 @@ model Driver {
   bankUpi     String? @map("bank_upi")
 
   vehicles Vehicle[]
+  readings DriverReading[]
 
   @@map("drivers")
+}
+
+model DriverReading {
+  id        String   @id @default(cuid())
+  driverId  String   @map("driver_id")
+  driver    Driver   @relation(fields: [driverId], references: [id])
+  bookingId String?  @map("booking_id")
+  type      String   // handoff | trip_start | trip_end | close_duty
+  odometer  Float?
+  soc       Float?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("driver_readings")
 }
 
 model Vehicle {

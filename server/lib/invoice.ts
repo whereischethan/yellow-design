@@ -174,21 +174,12 @@ export function generateInvoiceHtml(
   const total      = overrides?.amount ?? booking.price ?? 0
   const distanceKm = overrides?.distanceKm ?? pricingParsed?.distanceKm ?? null
 
-  // Use stored gst when present — this preserves old invoices exactly (they used gst on fare only)
-  // and correctly reflects new invoices (gst on fare+toll). Never back-calculate for old bookings.
-  const storedGst = (pricingParsed?.gst ?? null) as number | null
+  // Tolls are included in the base fare — GST is charged on the full amount (fare + toll).
+  // Always reverse-calculate taxable from the final total so toll is included in the GST base.
   let taxable: number, cgst: number, sgst: number
-  if (storedGst != null) {
-    cgst    = Math.round(storedGst / 2)
-    sgst    = storedGst - cgst
-    taxable = pricingParsed?.fareBeforeTax ?? Math.round((total - toll) / 1.05)
-  } else {
-    // Fallback for very old records without explicit gst stored
-    const serviceTotal = total - toll
-    taxable = Math.round(serviceTotal / 1.05)
-    cgst    = Math.round(taxable * 0.025)
-    sgst    = Math.round(taxable * 0.025)
-  }
+  taxable = Math.round(total / 1.05)
+  cgst    = Math.round(taxable * 0.025)
+  sgst    = Math.round(taxable * 0.025)
 
   const sac = company.company_sac_code || '996412'
   const serviceDesc = tripTypeLabel(booking.tripType)
@@ -406,15 +397,6 @@ export function generateInvoiceHtml(
             <td>—</td>
             <td>—</td>
             <td style="color:#C0392B">−${fmt(discount)}</td>
-          </tr>` : ''}
-          ${toll > 0 ? `
-          <tr>
-            <td style="color:#736E65">Tolls</td>
-            <td class="mono">—</td>
-            <td>—</td>
-            <td>—</td>
-            <td>—</td>
-            <td>${fmt(toll)}</td>
           </tr>` : ''}
         </tbody>
       </table>

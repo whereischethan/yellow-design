@@ -21,6 +21,7 @@ import LocationAutocomplete from '../../components/location/LocationAutocomplete
 import SavedPlacesSuggest from '../../components/SavedPlacesSuggest'
 import DateTimePicker from '../../components/DateTimePicker'
 import { fetchFlight, fetchPricing } from '../../lib/api'
+import { fmtDateTimeIST } from '../../lib/ist'
 import { useAuth } from '../../context/AuthContext'
 import type { LocationData } from '../../types/booking'
 
@@ -210,7 +211,7 @@ tripType,
           params: {
             pickup: location?.description,
             drop: activeTab === 'to' ? 'BLR Airport' : location?.description,
-            time: dateTime.toLocaleTimeString(),
+            time: fmtDateTimeIST(dateTime.toISOString()),
             next: JSON.stringify({ pathname: '/(app)/vehicle', params: vehicleParams }),
           },
         })

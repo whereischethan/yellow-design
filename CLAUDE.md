@@ -15,6 +15,11 @@ npm run server:dev    # dev mode (ts-node from project root)
 
 # Admin dashboard (Vite, proxies /admin → localhost:3001)
 npm run admin         # runs: cd admin && npm run dev  → http://localhost:5174
+
+# Driver app (Expo Router, port 8083)
+npm run driver        # web dev server → http://localhost:8083
+npm run driver:ios    # iOS simulator
+npm run driver:android
 ```
 
 No test or lint scripts are configured.

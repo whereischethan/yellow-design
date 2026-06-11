@@ -202,6 +202,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: YL.line,
     padding: 16,
+    overflow: 'hidden',
   },
   readingCardHalf: {
     flex: 1,
@@ -224,6 +225,7 @@ const styles = StyleSheet.create({
     color: YL.ink,
     flex: 1,
     padding: 0,
+    minWidth: 0,
   },
   unitText: {
     fontFamily: FONTS.mono,

@@ -17,7 +17,7 @@ function PayBadge({ status, method, razorpayPaymentId }: { status: string; metho
   const label = paid
     ? razorpayPaymentId ? 'Paid · Razorpay'
     : method === 'upi' ? 'Paid · UPI'
-    : method === 'cash' ? 'Paid · Cash'
+    : (method === 'cash' || method === 'direct') ? 'Paid · Direct'
     : 'Paid'
     : 'Pending'
   return (

@@ -97,8 +97,11 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
       user = await prisma.user.create({ data: { id: userId, phone } })
     }
 
-    const accessToken = signAccessToken(user.id)
-    const refreshToken = signRefreshToken(user.id)
+    const [accessToken, refreshToken, bookingCount] = await Promise.all([
+      Promise.resolve(signAccessToken(user.id)),
+      Promise.resolve(signRefreshToken(user.id)),
+      prisma.booking.count({ where: { userId: user.id } }),
+    ])
     const rtExpiry = BigInt(Math.floor(Date.now() / 1000) + 30 * 24 * 3600)
 
     await prisma.refreshToken.create({
@@ -108,7 +111,7 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
     return res.json({
       token: accessToken,
       refreshToken,
-      user: { id: user.id, phone: user.phone, name: user.name, email: user.email, role: user.role, referralCode: user.referralCode },
+      user: { id: user.id, phone: user.phone, name: user.name, email: user.email, role: user.role, referralCode: user.referralCode, referralCredits: user.referralCredits, referredById: user.referredById, bookingCount },
     })
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Failed to verify OTP' })

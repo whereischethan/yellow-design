@@ -599,8 +599,8 @@ export function getISTComponents(iso: string): { y: number; mo: number; d: numbe
     const ist = new Date(d.getTime() + IST_OFFSET_MS)
     return { y: ist.getUTCFullYear(), mo: ist.getUTCMonth(), d: ist.getUTCDate(), h: ist.getUTCHours(), mi: ist.getUTCMinutes() }
   }
-  // Naive string — treat as IST
-  const [datePart, timePart = '00:00'] = iso.split('T')
+  // Naive string — treat as IST (handles both "T" and space separators)
+  const [datePart, timePart = '00:00'] = iso.split(/[T ]/)
   const [y, mo, day] = datePart.split('-').map(Number)
   const [h, mi] = timePart.split(':').map(Number)
   if (!y || !mo || !day) return null

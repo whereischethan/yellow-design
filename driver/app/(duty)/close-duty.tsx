@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
     gap: 12,
-    paddingBottom: 8,
+    paddingBottom: 100,
   },
   headerTitle: {
     fontFamily: FONTS.displaySemiBold,

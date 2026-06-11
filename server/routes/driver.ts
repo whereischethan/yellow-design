@@ -345,7 +345,7 @@ router.patch('/bookings/:id/status', requireDriver, async (req: DriverRequest, r
 router.post('/readings', requireDriver, async (req: DriverRequest, res: Response) => {
   try {
     const { bookingId, type, odometer, soc } = req.body
-    const validTypes = ['handoff', 'trip_start', 'trip_end', 'close_duty']
+    const validTypes = ['handoff', 'trip_start', 'trip_end', 'close_duty', 'clock_in']
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: `type must be one of: ${validTypes.join(', ')}` })
     }
@@ -502,7 +502,7 @@ router.get('/bookings/:id/payment-status', requireDriver, async (req: DriverRequ
 
 router.post('/bookings/:id/mark-paid', requireDriver, async (req: DriverRequest, res: Response) => {
   try {
-    const { method = 'cash' } = req.body
+    const { method = 'direct' } = req.body
     const b = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
     if (!b) return res.status(404).json({ error: 'Booking not found' })
 

@@ -1,5 +1,5 @@
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react'
-import { restoreAuthToken, restoreUserFromStorage, saveUserToStorage, setAuthToken } from '../lib/api'
+import { restoreAuthToken, restoreUserFromStorage, saveUserToStorage, setAuthToken, getUserProfile } from '../lib/api'
 
 type User = {
   phone: string
@@ -34,6 +34,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (token) {
           const savedUser = await restoreUserFromStorage()
           if (savedUser) setUser(savedUser)
+          // Fetch fresh profile to get live bookingCount (enables milestone discounts)
+          const profile = await getUserProfile().catch(() => null)
+          if (profile) {
+            const updated = { ...savedUser, ...profile }
+            setUser(updated)
+            saveUserToStorage(updated)
+          }
         }
       } catch (error) {
         console.error('Failed to restore session:', error)

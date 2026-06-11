@@ -126,7 +126,7 @@ interface CreateBookingModalProps {
   onClose: () => void
   drivers: Driver[]
   customers?: Customer[]
-  onCreated?: () => void
+  onCreated?: (booking?: Booking) => void
   editBooking?: Booking | null
   onEdited?: () => void
 }
@@ -391,6 +391,8 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
   const [overrideGst, setOverrideGst] = React.useState('')
   const [overrideToll, setOverrideToll] = React.useState('')
   const [overrideDiscount, setOverrideDiscount] = React.useState('')
+  const [overrideTotalDraft, setOverrideTotalDraft] = React.useState<string | null>(null)
+  const [sendSms, setSendSms] = React.useState(true)
 
   const overrideFareNum = parseFloat(overrideFare) || 0
   const overrideGstNum = parseFloat(overrideGst) || 0
@@ -468,6 +470,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
       setOutstationTripKind('round'); setOutstationReturnDate('')
       setHourlyPickup(''); setHourlyPickupPlaceId(''); setHourlyDuration(8)
       setPricingResult(null); setError(''); setFareEditMode(false); setOverrideFare(''); setOverrideGst(''); setOverrideToll(''); setOverrideDiscount('')
+      setSendSms(true)
     }
   }, [open])
 
@@ -612,7 +615,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
         ? stops.filter(s => s.placeId).map(s => ({ location: s.address, placeName: s.address, placeId: s.placeId }))
         : []
 
-      await createBooking({
+      const created = await createBooking({
         tripType: tripTypeStr,
         vehicleType,
         passengers: parseInt(passengers),
@@ -628,8 +631,9 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
         guestPhone: isGuest ? `${guestCountryCode.replace('+', '')}${guestPhone.replace(/\s/g, '')}` : undefined,
         assignedDriver: assignedDriver ? { id: assignedDriver.id, name: assignedDriver.name, phone: assignedDriver.phone, plate: assignedDriver.plate, vehicle: assignedDriver.vehicle } : undefined,
         assignedVehicle: assignedDriver?.plate ? { licensePlate: assignedDriver.plate, make: '', model: assignedDriver.vehicle ?? '' } : undefined,
+        sendSms,
       })
-      onCreated?.()
+      onCreated?.(created?.booking)
       onClose()
     } catch (e: any) {
       setError(e.message)
@@ -1013,31 +1017,78 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                     >{fareEditMode ? 'Use calc' : 'Edit fare'}</button>
                   </div>
                 </div>
-                {fareEditMode && (
-                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
-                    {[
-                      { label: 'Fare (ex-tax)', value: overrideFare, set: (v: string) => { setOverrideFare(v); const t = Math.max(0, (parseFloat(v)||0)+(parseFloat(overrideToll)||0)-(parseFloat(overrideDiscount)||0)); setOverrideGst(String(Math.round(t*0.05))) }, minus: false },
-                      { label: 'GST', value: overrideGst, set: setOverrideGst, minus: false },
-                      { label: 'Toll', value: overrideToll, set: (v: string) => { setOverrideToll(v); const t = Math.max(0, (parseFloat(overrideFare)||0)+(parseFloat(v)||0)-(parseFloat(overrideDiscount)||0)); setOverrideGst(String(Math.round(t*0.05))) }, minus: false },
-                      { label: 'Discount', value: overrideDiscount, set: (v: string) => { setOverrideDiscount(v); const t = Math.max(0, (parseFloat(overrideFare)||0)+(parseFloat(overrideToll)||0)-(parseFloat(v)||0)); setOverrideGst(String(Math.round(t*0.05))) }, minus: true },
-                    ].map(({ label, value, set, minus }) => (
-                      <div key={label}>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: minus ? YL.redInk : YL.ink2, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
-                        <div style={{ position: 'relative' }}>
-                          <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: minus ? YL.redInk : YL.ink2, pointerEvents: 'none' }}>{minus ? '−₹' : '₹'}</span>
+                {fareEditMode && (() => {
+                  const isAirport = bookingCategory === 'airport'
+                  // GST is on (fare + toll); discount only reduces the final total
+                  const recalcFromFare = (fare: string, toll: string) => {
+                    const f = parseFloat(fare) || 0
+                    const t = isAirport ? 0 : (parseFloat(toll) || 0)
+                    return { gst: String(Math.round(Math.max(0, f + t) * 0.05)) }
+                  }
+                  // Back-calculate fare from a typed total (total = fare + gst + toll - discount)
+                  const recalcFromTotal = (total: string, disc: string, toll: string) => {
+                    const tot = parseFloat(total) || 0
+                    const d = parseFloat(disc) || 0
+                    const tl = isAirport ? 0 : (parseFloat(toll) || 0)
+                    const fare = Math.max(0, Math.round((tot + d) / 1.05 - tl))
+                    // Exact remainder so fare + gst + toll - discount = typed total exactly
+                    const gst = Math.max(0, tot + d - fare - tl)
+                    return { fare: String(fare), gst: String(gst) }
+                  }
+                  const fields = [
+                    { label: 'Fare (ex-tax)', value: overrideFare, set: (v: string) => { const r = recalcFromFare(v, overrideToll); setOverrideFare(v); setOverrideGst(r.gst) }, minus: false },
+                    { label: 'GST', value: overrideGst, set: setOverrideGst, minus: false },
+                    ...(isAirport ? [] : [{ label: 'Toll', value: overrideToll, set: (v: string) => { const r = recalcFromFare(overrideFare, v); setOverrideToll(v); setOverrideGst(r.gst) }, minus: false }]),
+                    { label: 'Discount', value: overrideDiscount, set: setOverrideDiscount, minus: true },
+                  ]
+                  return (
+                    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${fields.length}, 1fr)`, gap: 8 }}>
+                        {fields.map(({ label, value, set, minus }) => (
+                          <div key={label}>
+                            <div style={{ fontSize: 10, fontWeight: 600, color: minus ? YL.redInk : YL.ink2, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+                            <div style={{ position: 'relative' }}>
+                              <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: minus ? YL.redInk : YL.ink2, pointerEvents: 'none' }}>{minus ? '−₹' : '₹'}</span>
+                              <input type="number" min={0} value={value} onChange={e => set(e.target.value)}
+                                style={{ width: '100%', height: 34, border: `1.5px solid ${minus && parseFloat(value) > 0 ? 'rgba(200,50,50,0.35)' : 'rgba(0,0,0,0.15)'}`, borderRadius: 7, padding: '0 8px 0 24px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: minus && parseFloat(value) > 0 ? YL.redInk : YL.ink, background: minus && parseFloat(value) > 0 ? 'rgba(255,220,220,0.5)' : 'rgba(255,255,255,0.6)', outline: 'none', boxSizing: 'border-box' }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Editable total — back-calculates fare */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: YL.ink, textTransform: 'uppercase', letterSpacing: 0.4, whiteSpace: 'nowrap' }}>Total</div>
+                        <div style={{ position: 'relative', width: 120 }}>
+                          <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: YL.ink, pointerEvents: 'none' }}>₹</span>
                           <input
-                            type="number"
-                            min={0}
-                            value={value}
-                            onChange={e => set(e.target.value)}
-                            style={{ width: '100%', height: 34, border: `1.5px solid ${minus && parseFloat(value) > 0 ? 'rgba(200,50,50,0.35)' : 'rgba(0,0,0,0.15)'}`, borderRadius: 7, padding: '0 8px 0 24px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: minus && parseFloat(value) > 0 ? YL.redInk : YL.ink, background: minus && parseFloat(value) > 0 ? 'rgba(255,220,220,0.5)' : 'rgba(255,255,255,0.6)', outline: 'none', boxSizing: 'border-box' }}
+                            type="number" min={0}
+                            value={overrideTotalDraft !== null ? overrideTotalDraft : (overrideTotal > 0 ? String(overrideTotal) : '')}
+                            onFocus={() => setOverrideTotalDraft(overrideTotal > 0 ? String(overrideTotal) : '')}
+                            onChange={e => { setOverrideTotalDraft(e.target.value); const r = recalcFromTotal(e.target.value, overrideDiscount, overrideToll); setOverrideFare(r.fare); setOverrideGst(r.gst) }}
+                            onBlur={() => setOverrideTotalDraft(null)}
+                            style={{ width: '100%', height: 34, border: '1.5px solid rgba(0,0,0,0.25)', borderRadius: 7, padding: '0 8px 0 24px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, fontWeight: 600, color: YL.ink, background: 'rgba(255,255,255,0.8)', outline: 'none', boxSizing: 'border-box' }}
                           />
                         </div>
+                        <div style={{ fontSize: 10.5, color: YL.ink2 }}>← type total to back-calculate fare</div>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  )
+                })()}
               </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: YL.bg, borderRadius: 10, border: `1px solid ${YL.line}` }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: YL.ink }}>Send SMS to customer</div>
+                <div style={{ fontSize: 11, color: YL.ink2, marginTop: 2 }}>Confirmation SMS on booking creation</div>
+              </div>
+              <button
+                onClick={() => setSendSms(v => !v)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 11px', borderRadius: 7, border: `1.5px solid ${sendSms ? YL.leaf : YL.line}`, background: sendSms ? YL.greenSoft : YL.bg, cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', color: sendSms ? YL.greenInk : YL.ink3 }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: sendSms ? YL.leaf : YL.ink3 }}/>
+                {sendSms ? 'ON' : 'OFF'}
+              </button>
             </div>
             {error && <div style={{ padding: '10px 14px', background: YL.redSoft, color: YL.redInk, borderRadius: 8, fontSize: 12.5 }}>{error}</div>}
           </Stack>

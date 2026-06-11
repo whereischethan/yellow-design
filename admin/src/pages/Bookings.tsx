@@ -396,17 +396,21 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const [editError, setEditError] = React.useState('')
   // Edit field state
   const [ePickup, setEPickup] = React.useState('')
+  const [ePickupPlaceId, setEPickupPlaceId] = React.useState('')
   const [eDateTime, setEDateTime] = React.useState('')
   const [eTerminal, setETerminal] = React.useState('T2')
   const [eStops, setEStops] = React.useState<string[]>([])
   const [eDrop, setEDrop] = React.useState('')
+  const [eDropPlaceId, setEDropPlaceId] = React.useState('')
   const [eFlight, setEFlight] = React.useState('')
   const [ePax, setEPax] = React.useState('1')
 
   const [eHours, setEHours] = React.useState('')
   const [eFare, setEFare] = React.useState('')
   const [eDiscount, setEDiscount] = React.useState('')
-  const [eToll, setEToll] = React.useState('')
+  const [eTotal, setETotal] = React.useState('')
+  const [sendSms, setSendSms] = React.useState(true)
+  const [smsToggling, setSmsToggling] = React.useState(false)
   const [eGuestName, setEGuestName] = React.useState('')
   const [eGuestPhone, setEGuestPhone] = React.useState('')
   const [eGstin, setEGstin] = React.useState('')
@@ -457,6 +461,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
 
   React.useEffect(() => {
     setEditMode(false)
+    setSendSms(booking?.sendSms ?? true)
     setLinkUrl(booking?.razorpayLinkUrl ?? null)
     setLinkError('')
     setCopied(false)
@@ -506,6 +511,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     const isAirport = booking.tripType === 'pickup' || booking.tripType === 'drop'
     // For drop: pickup = customer address. For pickup: drop = customer address
     setEPickup(booking.pickup?.placeName ?? booking.pickup?.location ?? '')
+    setEPickupPlaceId(booking.pickup?.placeId ?? '')
     setEDateTime(booking.pickup?.dateTime ? toISTISO(new Date(booking.pickup.dateTime)) : '')
     const airportTerminal = isAirport
       ? (booking.tripType === 'pickup' ? (booking.pickup as any)?.terminal : (booking.drop as any)?.terminal) ?? 'T2'
@@ -513,16 +519,21 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     setETerminal(airportTerminal)
     setEStops((booking.stops ?? []).map((s: any) => s.placeName ?? s.location ?? '').filter(Boolean))
     setEDrop(booking.drop?.placeName ?? booking.drop?.location ?? '')
+    setEDropPlaceId(booking.drop?.placeId ?? '')
     setEFlight(booking.flight?.flightNumber ?? '')
     setEPax(String(booking.passengers ?? 1))
     const p = booking.pricing
     const fareBeforeTax = p?.fareBeforeTax ?? p?.basePrice ?? 0
-    const toll = p?.toll ?? 0
+    const storedToll = p?.toll ?? 0
+    const discount = p?.discount ?? 0
     const durationMins = p?.durationMinutes || (parseFloat((p as any)?.breakdown?.hours ?? '0') * 60) || 0
+    // Absorb stored toll into fare so edit experience is toll-free
+    const absorbedFare = fareBeforeTax + storedToll
     setEHours(durationMins ? String(durationMins / 60) : '')
-    setEFare(fareBeforeTax ? String(fareBeforeTax) : '')
-    setEDiscount(p?.discount ? String(p.discount) : '')
-    setEToll(toll ? String(toll) : '')
+    setEFare(absorbedFare ? String(absorbedFare) : '')
+    setEDiscount(discount ? String(discount) : '')
+    const computedTotal = absorbedFare ? Math.round((absorbedFare - discount) * 1.05) : 0
+    setETotal(computedTotal ? String(computedTotal) : '')
     setEGuestName(booking.guestName ?? '')
     setEGuestPhone(booking.guestPhone ?? '')
     setEGstin(booking.customerGstin ?? '')
@@ -542,6 +553,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
         ...booking.pickup,
         placeName: ePickup,
         location: ePickup,
+        ...(ePickupPlaceId ? { placeId: ePickupPlaceId } : {}),
         dateTime: eDateTime ? fromISTISO(eDateTime).toISOString() : booking.pickup?.dateTime,
         ...(isAirport && booking.tripType === 'pickup' ? { terminal: eTerminal } : {}),
       }
@@ -549,6 +561,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
         ...booking.drop,
         placeName: eDrop,
         location: eDrop,
+        ...(eDropPlaceId ? { placeId: eDropPlaceId } : {}),
         ...(isAirport && booking.tripType === 'drop' ? { terminal: eTerminal } : {}),
       }
       const stopsArr = eStops.filter(s => s.trim()).map(s => ({ location: s, placeName: s }))
@@ -562,7 +575,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
         fareBreakdown: eFare ? {
           fareBeforeTax: Number(eFare),
           discount: Number(eDiscount) || 0,
-          toll: Number(eToll) || 0,
+          toll: 0,
           durationHours: booking.tripType === 'hourly' && eHours ? Number(eHours) : undefined,
         } : undefined,
         ...(booking.tripType === 'hourly' && eHours && !eFare ? { durationHours: Number(eHours) } : {}),
@@ -598,7 +611,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const handleMarkPaid = async () => {
     if (!booking) return
     setMarkingPaid(true)
-    try { const r: any = await patchBooking(booking.id, { paymentStatus: 'paid', paymentMethod: 'cash' }); onUpdate(r.booking) }
+    try { const r: any = await patchBooking(booking.id, { paymentStatus: 'paid', paymentMethod: 'direct' }); onUpdate(r.booking) }
     catch {} finally { setMarkingPaid(false) }
   }
 
@@ -680,9 +693,10 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     const mapsLink = (() => {
       const loc = isPickup ? booking.drop : booking.pickup
       if (!loc) return null
-      if (loc.placeId) return `https://www.google.com/maps/place/?q=place_id:${loc.placeId}`
+      if (loc.lat && loc.lng) return `https://maps.google.com/?q=${loc.lat},${loc.lng}`
       const addr = loc.placeName ?? loc.location
-      if (addr) return `https://www.google.com/maps/search/?q=${encodeURIComponent(addr)}`
+      if (addr && loc.placeId) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}&query_place_id=${loc.placeId}`
+      if (addr) return `https://maps.google.com/?q=${encodeURIComponent(addr)}`
       return null
     })()
 
@@ -869,7 +883,25 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
         <div style={{ flex: 1, overflow: 'auto' }}>
           {/* Status */}
           <div style={{ padding: '18px 24px', borderBottom: `1px solid ${YL.line}` }}>
-            <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600, marginBottom: 14 }}>Status</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 600 }}>Status</div>
+              <button
+                onClick={async () => {
+                  const newVal = !sendSms
+                  setSmsToggling(true)
+                  setSendSms(newVal)
+                  try { await patchBooking(booking.id, { sendSms: newVal }); onUpdate({ ...booking, sendSms: newVal }) }
+                  catch { setSendSms(!newVal) }
+                  finally { setSmsToggling(false) }
+                }}
+                disabled={smsToggling}
+                title="Toggle whether status-change SMS are sent to the customer"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 7, border: `1.5px solid ${sendSms ? YL.leaf : YL.line}`, background: sendSms ? YL.greenSoft : YL.bg, cursor: smsToggling ? 'not-allowed' : 'pointer', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', color: sendSms ? YL.greenInk : YL.ink3, transition: 'all 150ms' }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: sendSms ? YL.leaf : YL.ink3 }}/>
+                SMS {sendSms ? 'ON' : 'OFF'}
+              </button>
+            </div>
             <StatusFlow status={booking.status} onChange={handleStatusChange}/>
           </div>
 
@@ -928,7 +960,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                 {/* Pickup */}
                 <div>
                   <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Pickup location</div>
-                  <input value={ePickup} onChange={e => setEPickup(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                  <PlacesInput label="" value={ePickup} onChange={v => { setEPickup(v); setEPickupPlaceId('') }} onSelect={s => { setEPickup(s.description); setEPickupPlaceId(s.placeId) }}/>
                 </div>
                 {/* Stops */}
                 {eStops.map((s, i) => (
@@ -944,7 +976,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                 {/* Drop */}
                 <div>
                   <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>Drop location</div>
-                  <input value={eDrop} onChange={e => setEDrop(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', height: 34, border: `1.5px solid ${YL.line}`, borderRadius: 8, padding: '0 10px', fontFamily: 'inherit', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none' }}/>
+                  <PlacesInput label="" value={eDrop} onChange={v => { setEDrop(v); setEDropPlaceId('') }} onSelect={s => { setEDrop(s.description); setEDropPlaceId(s.placeId) }}/>
                 </div>
                 {/* Date & time + Terminal */}
                 <div style={{ display: 'grid', gridTemplateColumns: (booking.tripType === 'pickup' || booking.tripType === 'drop') ? '1fr auto' : '1fr', gap: 8, alignItems: 'end' }}>
@@ -993,43 +1025,63 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                 <div>
                   <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Fare breakdown (₹)</div>
                   <div style={{ background: '#F6F3EB', borderRadius: 10, overflow: 'hidden', border: `1px solid ${YL.line}` }}>
-                    {[
-                      { label: 'Fare (before tax)', val: eFare, setter: setEFare, placeholder: '0' },
-                      { label: 'Discount', val: eDiscount, setter: setEDiscount, placeholder: '0' },
-                      { label: 'Toll', val: eToll, setter: setEToll, placeholder: '0' },
-                    ].map(({ label, val, setter, placeholder }) => (
-                      <div key={label} style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
-                        <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>{label}</span>
-                        <input
-                          type="number" min={0} value={val} placeholder={placeholder}
-                          onChange={e => setter(e.target.value)}
-                          style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: label === 'Discount' ? YL.redInk : YL.ink, background: YL.card, outline: 'none', textAlign: 'right' }}
-                        />
-                      </div>
-                    ))}
-                    {/* GST (auto, on discounted fare) */}
+                    {/* Fare (before tax) */}
+                    <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
+                      <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>Fare (before tax)</span>
+                      <input
+                        type="number" min={0} value={eFare} placeholder="0"
+                        onChange={e => {
+                          const f = e.target.value
+                          setEFare(f)
+                          const disc = Number(eDiscount) || 0
+                          setETotal(f ? String(Math.round((Number(f) - disc) * 1.05)) : '')
+                        }}
+                        style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none', textAlign: 'right' }}
+                      />
+                    </div>
+                    {/* Discount */}
+                    <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
+                      <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>Discount</span>
+                      <input
+                        type="number" min={0} value={eDiscount} placeholder="0"
+                        onChange={e => {
+                          const d = e.target.value
+                          setEDiscount(d)
+                          const fare = Number(eFare) || 0
+                          setETotal(fare ? String(Math.round((fare - (Number(d) || 0)) * 1.05)) : '')
+                        }}
+                        style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.redInk, background: YL.card, outline: 'none', textAlign: 'right' }}
+                      />
+                    </div>
+                    {/* GST (auto) */}
                     {(() => {
                       const fare = Number(eFare) || 0
                       const disc = Number(eDiscount) || 0
-                      const toll = Number(eToll) || 0
                       const taxable = Math.max(0, fare - disc)
                       const gst = Math.round(taxable * 0.05)
-                      const total = taxable + gst + toll
-                      return <>
+                      return (
                         <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
                           <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>GST (5%)</span>
                           <span style={{ width: 90, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 10, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink3, borderLeft: `1px solid ${YL.line}` }}>
                             {fare ? `₹${gst.toLocaleString('en-IN')}` : '—'}
                           </span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', background: YL.card }}>
-                          <span style={{ flex: 1, fontSize: 12.5, color: YL.ink, fontWeight: 600, paddingLeft: 12 }}>Total</span>
-                          <span style={{ width: 90, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 10, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, fontWeight: 600, color: YL.ink, borderLeft: `1px solid ${YL.line}` }}>
-                            {fare ? `₹${total.toLocaleString('en-IN')}` : '—'}
-                          </span>
-                        </div>
-                      </>
+                      )
                     })()}
+                    {/* Total — editable, back-calculates fare */}
+                    <div style={{ display: 'flex', alignItems: 'center', background: YL.card }}>
+                      <span style={{ flex: 1, fontSize: 12.5, color: YL.ink, fontWeight: 600, paddingLeft: 12 }}>Total</span>
+                      <input
+                        type="number" min={0} value={eTotal} placeholder="0"
+                        onChange={e => {
+                          const t = e.target.value
+                          setETotal(t)
+                          const disc = Number(eDiscount) || 0
+                          setEFare(t ? String(Math.max(0, Math.round(Number(t) / 1.05) + disc)) : '')
+                        }}
+                        style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, fontWeight: 600, color: YL.ink, background: YL.card, outline: 'none', textAlign: 'right' }}
+                      />
+                    </div>
                   </div>
                 </div>
                 {editError && <div style={{ padding: '8px 12px', background: YL.redSoft, color: YL.redInk, borderRadius: 8, fontSize: 12.5 }}>{editError}</div>}
@@ -1245,7 +1297,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                 {/* Payment status row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', background: booking.paymentStatus === 'paid' ? YL.greenSoft : YL.yellowSoft, color: booking.paymentStatus === 'paid' ? YL.greenInk : YL.ink, padding: '3px 7px', borderRadius: 4 }}>
-                    {booking.paymentStatus === 'paid' ? (booking.paymentMethod === 'cash' ? 'Paid · Cash' : booking.paymentMethod === 'upi' ? 'Paid · UPI' : 'Paid') : (booking.paymentStatus || 'pending')}
+                    {booking.paymentStatus === 'paid' ? (['cash', 'direct'].includes(booking.paymentMethod ?? '') ? 'Paid · Direct' : booking.paymentMethod === 'upi' ? 'Paid · UPI' : 'Paid') : (booking.paymentStatus || 'pending')}
                   </span>
                   {booking.razorpayPaymentId && (
                     <div style={{ width: '100%', marginTop: 2, fontSize: 10.5, color: YL.ink3, fontFamily: '"JetBrains Mono", monospace' }}>
@@ -1257,13 +1309,13 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                 {/* Payment actions — only when unpaid */}
                 {booking.paymentStatus !== 'paid' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {/* Cash payment */}
+                    {/* Direct payment */}
                     <button
                       onClick={handleMarkPaid}
                       disabled={markingPaid}
                       style={{ width: '100%', padding: '9px 14px', background: YL.greenSoft, color: YL.greenInk, border: `1.5px solid ${YL.leaf}`, borderRadius: 8, cursor: markingPaid ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                     >
-                      {markingPaid ? 'Saving…' : '💵 Mark as paid (Cash)'}
+                      {markingPaid ? 'Saving…' : '✓ Mark as paid (Direct)'}
                     </button>
 
                     {/* Payment link */}
@@ -1463,10 +1515,12 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                         {fieldLabel('Customer Name')}
                         <input value={ciCustomerName} onChange={e => setCiCustomerName(e.target.value)} placeholder="Override name" style={inputStyle}/>
                       </div>
-                      <div>
-                        {fieldLabel('Toll (₹)')}
-                        <input value={ciToll} onChange={e => setCiToll(e.target.value)} placeholder="0" style={inputStyle} type="number" min="0"/>
-                      </div>
+                      {booking.tripType !== 'pickup' && booking.tripType !== 'drop' && (
+                        <div>
+                          {fieldLabel('Toll (₹)')}
+                          <input value={ciToll} onChange={e => setCiToll(e.target.value)} placeholder="0" style={inputStyle} type="number" min="0"/>
+                        </div>
+                      )}
                       <div>
                         {fieldLabel('Discount (₹)')}
                         <input value={ciDiscount} onChange={e => setCiDiscount(e.target.value)} placeholder="0" style={inputStyle} type="number" min="0"/>

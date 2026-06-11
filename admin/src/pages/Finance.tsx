@@ -153,7 +153,7 @@ function ByTypeCard({ byType }: { byType: TypeRow[] }) {
 function ByMethodCard({ byMethod }: { byMethod: Record<string, number> }) {
   const total = Object.values(byMethod).reduce((s, v) => s + v, 0)
   const methods = Object.entries(byMethod).sort(([, a], [, b]) => b - a)
-  const labels: Record<string, string> = { cash: 'Cash', upi: 'UPI', razorpay: 'Razorpay' }
+  const labels: Record<string, string> = { cash: 'Direct', direct: 'Direct', upi: 'UPI', razorpay: 'Razorpay' }
   return (
     <Card>
       <div style={{ fontSize: 14, fontWeight: 600, color: YL.ink, marginBottom: 4 }}>Payment methods</div>

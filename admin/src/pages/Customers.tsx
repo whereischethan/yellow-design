@@ -2,7 +2,7 @@ import React from 'react'
 import type { Customer, Booking } from '../types'
 import {
   YL, Icons, Mono, Input, Button, PageHeader, Avatar, fmtDate, Stack,
-  ModalShell, ModalHeader, STATUS_STYLE, formatPhone, useIsMobile,
+  ModalShell, ModalHeader, STATUS_STYLE, formatPhone, useIsMobile, fmtINR,
 } from '../components/ui'
 import { patchCustomer, getCustomerBookings, generateReferralCodes } from '../api'
 
@@ -74,7 +74,7 @@ function CustomerDrawer({
     <ModalShell open={!!customer} onClose={onClose} width={520}>
       <ModalHeader
         title={customer.name || customer.phone}
-        subtitle={`Joined ${fmtDate(customer.created_at)} · ${customer.trip_count} ride${customer.trip_count !== 1 ? 's' : ''}`}
+        subtitle={`Joined ${fmtDate(customer.created_at)} · ${customer.trip_count} ride${customer.trip_count !== 1 ? 's' : ''} · ${fmtINR(customer.total_spend ?? 0)} spent`}
         onClose={onClose}
       />
 
@@ -268,13 +268,13 @@ export default function Customers({ customers, onUpdate, onRefresh }: Props & { 
 
       {!isMobile && (
         <div style={{
-          display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 120px 120px 36px',
+          display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 110px 120px 36px',
           gap: 12, padding: '10px 28px',
           borderBottom: `1px solid ${YL.line}`, fontSize: 11, color: YL.ink2,
           fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0,
           background: YL.bg,
         }}>
-          <div>Customer</div><div>Phone</div><div>Rides</div><div>Joined</div><div>Email</div><div/>
+          <div>Customer</div><div>Phone</div><div>Rides</div><div>Spend</div><div>Joined</div><div/>
         </div>
       )}
 
@@ -302,7 +302,7 @@ export default function Customers({ customers, onUpdate, onRefresh }: Props & { 
                 </div>
                 <div style={{ display: 'flex', gap: 16, fontSize: 11.5, color: YL.ink2 }}>
                   <span>Joined {fmtDate(c.created_at)}</span>
-                  {c.email && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.email}</span>}
+                  {c.total_spend ? <span style={{ fontFamily: '"JetBrains Mono", monospace', fontWeight: 600, color: YL.ink }}>{fmtINR(c.total_spend)}</span> : null}
                 </div>
               </div>
             ))}
@@ -317,7 +317,7 @@ export default function Customers({ customers, onUpdate, onRefresh }: Props & { 
                 key={c.id}
                 onClick={() => setSelected(c)}
                 style={{
-                  display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 120px 120px 36px',
+                  display: 'grid', gridTemplateColumns: '1.8fr 150px 80px 110px 120px 36px',
                   gap: 12, padding: '13px 28px', alignItems: 'center',
                   borderBottom: `1px solid ${YL.line}`, background: YL.card,
                   cursor: 'pointer', transition: 'background 100ms',
@@ -331,8 +331,8 @@ export default function Customers({ customers, onUpdate, onRefresh }: Props & { 
                 </div>
                 <Mono size={12}>{formatPhone(c.phone)}</Mono>
                 <Mono size={13} weight={600}>{c.trip_count}</Mono>
+                <Mono size={12} weight={600} color={c.total_spend ? YL.ink : YL.ink3}>{c.total_spend ? fmtINR(c.total_spend) : '—'}</Mono>
                 <Mono size={11.5} color={YL.ink2}>{fmtDate(c.created_at)}</Mono>
-                <span style={{ fontSize: 12, color: YL.ink2 }}>{c.email || '—'}</span>
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <span style={{ width: 16, height: 16, display: 'flex', color: YL.ink3 }}>{Icons.edit}</span>
                 </div>

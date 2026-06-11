@@ -127,7 +127,7 @@ export default function App() {
   const handleSignOut = () => { clearAdminKey(); setAuthed(false) }
 
   const refresh = React.useCallback(async (isInitial = false) => {
-    if (isInitial) setError(null)
+    if (isInitial) { setError(null); setLoading(true) }
     setNetworkError(null)
     try {
       if (isInitial) {
@@ -157,7 +157,6 @@ export default function App() {
       }
     } catch (e: any) {
       if (e.message?.includes('UNAUTHORIZED')) { clearAdminKey(); setAuthed(false); return }
-      // Initial load failure → full-page error; subsequent → inline banner only
       if (isInitial) setError(e.message)
       else setNetworkError(e.message)
     } finally {
@@ -186,7 +185,7 @@ export default function App() {
     getDrivers().then(r => setDrivers(r.drivers)).catch(() => {})
   }
 
-  if (!authed) return <Login onLogin={(a?: AdminProfile) => { setAuthed(true); if (a) setAdmin(a); refresh() }} />
+  if (!authed) return <Login onLogin={(a?: AdminProfile) => { setAuthed(true); if (a) setAdmin(a); refresh(true) }} />
 
   if (loading) return (
     <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: YL.bg, fontFamily: '"Bricolage Grotesque", system-ui', flexDirection: 'column', gap: 28 }}>
@@ -252,7 +251,7 @@ export default function App() {
 
         <BookingDrawer booking={openBooking} drivers={drivers} vehicles={vehicles} customers={customers} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate} onDelete={id => setBookings(prev => prev.filter(b => b.id !== id))} isSuperAdmin={isSuperAdmin} />
 
-        <CreateBookingModal open={showNewBooking} onClose={() => setShowNewBooking(false)} drivers={drivers} customers={customers} onCreated={() => { refresh(); setPage('bookings') }} />
+        <CreateBookingModal open={showNewBooking} onClose={() => setShowNewBooking(false)} drivers={drivers} customers={customers} onCreated={(b) => { if (b) setBookings(prev => [b, ...prev]); setPage('bookings'); refresh() }} />
         <AddDriverModal open={showAddDriver} onClose={() => setShowAddDriver(false)} vehicles={vehicles} onCreated={() => { getDrivers().then(r => setDrivers(r.drivers)); getVehicles().then(r => setVehicles(r.vehicles)) }} />
         <AddVehicleModal open={showAddVehicle} onClose={() => setShowAddVehicle(false)} drivers={drivers} onCreated={() => { getVehicles().then(r => setVehicles(r.vehicles)); getDrivers().then(r => setDrivers(r.drivers)) }} />
         <ProfileModal open={showProfile} admin={admin} onClose={() => setShowProfile(false)} onSaved={a => setAdmin(a)} />

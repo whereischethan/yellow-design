@@ -20,7 +20,7 @@ const JWT_SECRET = process.env.JWT_SECRET || (() => {
 const ADMIN_KEY = process.env.ADMIN_KEY || 'yellow-ops-dev'
 
 function signAdminToken(phone: string, adminRole = 'ops'): string {
-  return jwt.sign({ adminPhone: phone, role: 'admin', adminRole }, JWT_SECRET, { expiresIn: '12h' })
+  return jwt.sign({ adminPhone: phone, role: 'admin', adminRole }, JWT_SECRET, { expiresIn: '30d' })
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -240,6 +240,7 @@ function buildBooking(row: any) {
     customerGstin: row.customerGstin ?? null,
     customerGstName: row.customerGstName ?? null,
     invoiceNo: row.invoice?.invoiceNo ?? null,
+    sendSms: row.sendSms ?? true,
     createdAt: row.createdAt,
   }
 }
@@ -275,7 +276,7 @@ router.post('/bookings', async (req, res) => {
   try {
     const { tripType, vehicleType = 'yellowSky', passengers = 1,
       pickup, drop, stops, flight, pricing, guestName, guestPhone, userId,
-      assignedDriver, assignedVehicle } = req.body
+      assignedDriver, assignedVehicle, sendSms: sendSmsBody } = req.body
     if (!pickup || !drop || !pricing) return res.status(400).json({ error: 'pickup, drop, pricing required' })
 
     const id = randomUUID()
@@ -313,22 +314,25 @@ router.post('/bookings', async (req, res) => {
         assignedVehicleJson: assignedVehicle ? JSON.stringify(assignedVehicle) : null,
         status: bookingStatus,
         paymentStatus: 'pending',
+        sendSms: sendSmsBody !== undefined ? Boolean(sendSmsBody) : true,
       },
     })
 
     // Driver status unchanged on creation — they're only marked on-trip when the trip goes in_progress
 
     // Fire confirmation SMS (non-blocking)
-    ;(async () => {
-      try {
-        const user = resolvedUserId ? await prisma.user.findUnique({ where: { id: resolvedUserId }, select: { phone: true } }) : null
-        const phones = collectPhones(user?.phone, guestPhone ?? null)
-        const pickupDateTime = pickup?.dateTime
-        for (const phone of phones) {
-          sendStatusSms(phone, row.tripCode, bookingStatus, { tripType, pickupDateTime }).catch(() => {})
-        }
-      } catch {}
-    })()
+    if (row.sendSms !== false) {
+      ;(async () => {
+        try {
+          const user = resolvedUserId ? await prisma.user.findUnique({ where: { id: resolvedUserId }, select: { phone: true } }) : null
+          const phones = collectPhones(user?.phone, guestPhone ?? null)
+          const pickupDateTime = pickup?.dateTime
+          for (const phone of phones) {
+            sendStatusSms(phone, row.tripCode, bookingStatus, { tripType, pickupDateTime }).catch(() => {})
+          }
+        } catch {}
+      })()
+    }
 
     const userForBooking = resolvedUserId ? await prisma.user.findUnique({ where: { id: resolvedUserId }, select: { id: true, name: true, phone: true } }) : null
     res.json({ booking: buildBooking({ ...row, user: userForBooking }) })
@@ -345,7 +349,8 @@ router.patch('/bookings/:id', async (req, res) => {
     const { status, assignedDriver, assignedVehicle, paymentStatus, paymentMethod,
             pickupDateTime, guestName, guestPhone, price, fareBreakdown, durationHours,
             tripType, vehicleType, passengerCount, meetAndGreet, petFriendly,
-            pickup, drop, flight, stops, customerGstin, customerGstName, completedAt } = req.body
+            pickup, drop, flight, stops, customerGstin, customerGstName, completedAt,
+            sendSms } = req.body
     const data: any = {}
 
     if (status !== undefined) data.status = status
@@ -438,6 +443,7 @@ router.patch('/bookings/:id', async (req, res) => {
     if (flight !== undefined) data.flightJson = flight ? JSON.stringify(flight) : null
     if (customerGstin !== undefined) data.customerGstin = customerGstin || null
     if (customerGstName !== undefined) data.customerGstName = customerGstName || null
+    if (sendSms !== undefined) data.sendSms = Boolean(sendSms)
     if (pickupDateTime !== undefined && row.pickupJson) {
       const existingPickup = tryParse(row.pickupJson) ?? {}
       existingPickup.dateTime = pickupDateTime
@@ -477,7 +483,7 @@ router.patch('/bookings/:id', async (req, res) => {
     }
 
     // Fire SMS notifications (non-blocking)
-    if (status && ['confirmed', 'assigned', 'in_progress', 'arrived', 'completed', 'cancelled'].includes(status)) {
+    if (status && ['confirmed', 'assigned', 'in_progress', 'arrived', 'completed', 'cancelled'].includes(status) && updated.sendSms !== false) {
       ;(async () => {
         try {
           const user = updated.userId ? await prisma.user.findUnique({ where: { id: updated.userId }, select: { phone: true } }) : null
@@ -912,8 +918,22 @@ router.get('/customers', async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 200, 500)
     const offset = Number(req.query.offset) || 0
     const rows = await prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: limit, skip: offset })
-    const tripCounts = await prisma.booking.groupBy({ by: ['userId'], _count: { id: true } })
+    const userIds = rows.map(u => u.id)
+    const [tripCounts, completedBookings] = await Promise.all([
+      prisma.booking.groupBy({ by: ['userId'], where: { userId: { in: userIds } }, _count: { id: true } }),
+      prisma.booking.findMany({
+        where: { status: 'completed', userId: { in: userIds } },
+        select: { userId: true, price: true, pricingJson: true },
+      }),
+    ])
     const countMap = new Map(tripCounts.map(t => [t.userId, t._count.id]))
+    const spendMap = new Map<string, number>()
+    for (const b of completedBookings) {
+      if (!b.userId) continue
+      const pricing = tryParse(b.pricingJson)
+      const amount = b.price || pricing?.totalPrice || 0
+      spendMap.set(b.userId, (spendMap.get(b.userId) ?? 0) + amount)
+    }
 
     // Referral data — fetched separately to stay resilient if columns are missing
     let referrerMap = new Map<string, { id: string; name: string | null; phone: string }>()
@@ -943,6 +963,7 @@ router.get('/customers', async (req, res) => {
       email: u.email,
       created_at: u.createdAt,
       trip_count: countMap.get(u.id) ?? 0,
+      total_spend: spendMap.get(u.id) ?? 0,
       referral_code: (u as any).referralCode ?? null,
       referred_by: (u as any).referredById
         ? (referrerMap.get((u as any).referredById) ?? null)
@@ -1350,12 +1371,27 @@ router.get('/stats', async (_req, res) => {
     const todayStart = today.toISOString()
     const todayEnd = tomorrow.toISOString()
 
-    const todayBookings = await prisma.$queryRaw<any[]>`
-      SELECT * FROM bookings
-      WHERE status != 'cancelled'
-      AND pickup_json::json->>'dateTime' >= ${todayStart}
-      AND pickup_json::json->>'dateTime' < ${todayEnd}
-    `
+    const now = new Date()
+    const twoHoursLater = new Date(now.getTime() + 2 * 3600000)
+    const nowStr = now.toISOString()
+    const twoHoursLaterStr = twoHoursLater.toISOString()
+
+    const [todayBookings, driversActive, pendingCount, nextTwoHoursResult, openLeads] = await Promise.all([
+      prisma.$queryRaw<any[]>`
+        SELECT price, pricing_json FROM bookings
+        WHERE status != 'cancelled'
+        AND pickup_json::json->>'dateTime' >= ${todayStart}
+        AND pickup_json::json->>'dateTime' < ${todayEnd}
+      `,
+      prisma.driver.count({ where: { status: { not: 'offline' } } }),
+      prisma.booking.count({ where: { status: 'pending' } }),
+      prisma.$queryRaw<[{ cnt: bigint }]>`
+        SELECT COUNT(*) as cnt FROM bookings
+        WHERE status IN ('pending','confirmed','assigned')
+        AND pickup_json::json->>'dateTime' BETWEEN ${nowStr} AND ${twoHoursLaterStr}
+      `,
+      prisma.lead.count({ where: { status: { in: ['new', 'called'] } } }),
+    ])
 
     const ridesToday = todayBookings.length
     const revenueToday = todayBookings.reduce((s: number, b: any) => {
@@ -1365,22 +1401,7 @@ router.get('/stats', async (_req, res) => {
       } catch { return s + (b.price ?? 0) }
     }, 0)
 
-    const driversActive = await prisma.driver.count({ where: { status: { not: 'offline' } } })
-    const pendingCount = await prisma.booking.count({ where: { status: 'pending' } })
-
-    const now = new Date()
-    const twoHoursLater = new Date(now.getTime() + 2 * 3600000)
-    const nowStr = now.toISOString()
-    const twoHoursLaterStr = twoHoursLater.toISOString()
-
-    const nextTwoHoursResult = await prisma.$queryRaw<[{ cnt: bigint }]>`
-      SELECT COUNT(*) as cnt FROM bookings
-      WHERE status IN ('pending','confirmed','assigned')
-      AND pickup_json::json->>'dateTime' BETWEEN ${nowStr} AND ${twoHoursLaterStr}
-    `
     const nextTwoHours = Number(nextTwoHoursResult[0]?.cnt ?? 0)
-
-    const openLeads = await prisma.lead.count({ where: { status: { in: ['new', 'called'] } } })
 
     res.json({ ridesToday, revenueToday, driversActive, pendingCount, nextTwoHours, openLeads })
   } catch (e: any) {

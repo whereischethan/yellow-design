@@ -69,27 +69,35 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
   const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
   const baseTotal = pricing?.totalPrice ?? 0
-  const { user } = useAuth()
+  const { user, updateUser } = useAuth()
   const availableCredits = user?.referralCredits ?? 0
   // Referee promo: first-ride 10% off (no credit balance needed, just referredById set)
   const hasReferralPromo = !!(user?.referredById && availableCredits === 0)
   const showDiscount = availableCredits > 0 || hasReferralPromo
 
-  // New user discount: 20% off fares ≥ ₹1,000 (floored so final ≥ ₹1,000), 10% off fares < ₹1,000
+  // New user discount: 20% off first ride (10% if fare < ₹1,000)
+  // When empty leg active: new users get 20% first-ride + 5% empty leg, both applied on the original (pre-empty-leg) fare
+  // Existing users with empty leg: server-computed empty leg only (already in baseTotal)
   const isNewUser = (user?.bookingCount ?? 0) === 0
-  function calcNewUserDiscount(fare: number): number {
+  const hasEmptyLeg = !!pricing?.emptyLeg
+  const originalFare = hasEmptyLeg ? baseTotal + (pricing?.emptyLeg?.savedAmount ?? 0) : baseTotal
+  const fareForDiscount = isNewUser && hasEmptyLeg ? originalFare : baseTotal
+  function calcFirstRideDiscount(fare: number): number {
     if (fare >= 1000) return Math.min(Math.round(fare * 0.20), fare - 1000)
     return Math.round(fare * 0.10)
   }
-  const newUserDiscount = isNewUser ? calcNewUserDiscount(baseTotal) : 0
-  const newUserPct = baseTotal >= 1000 ? 20 : 10
+  const newUserFirstRideDiscount = isNewUser ? calcFirstRideDiscount(fareForDiscount) : 0
+  const newUserEmptyLegDiscount = isNewUser && hasEmptyLeg ? Math.round(originalFare * 0.05) : 0
+  const newUserDiscount = newUserFirstRideDiscount + newUserEmptyLegDiscount
+  const newUserPct = fareForDiscount >= 1000 ? 20 : 10
+  const effectiveFare = isNewUser && hasEmptyLeg ? originalFare : baseTotal
 
   const [applyCredits, setApplyCredits] = useState(false)
   const discountAmount = Math.round(baseTotal * 0.1)
   const creditsToApply = applyCredits
     ? hasReferralPromo ? discountAmount : Math.min(discountAmount, availableCredits)
     : 0
-  const total = baseTotal - newUserDiscount - creditsToApply
+  const total = effectiveFare - newUserDiscount - creditsToApply
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -161,6 +169,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
       razorpaySignature,
       bookingData,
     })
+    updateUser({ bookingCount: (user?.bookingCount ?? 0) + 1 })
     // Purchase pixel — eventID matches the Conversions API event sent by the server
     pixelPurchase({ value: booking.pricing?.totalPrice ?? total, bookingId: booking.id })
     router.replace({
@@ -361,7 +370,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
           </Text>
 
           {/* New user first-ride discount banner — always applied, no toggle */}
-          {newUserDiscount > 0 && (
+          {isNewUser && (
             <View style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
               paddingVertical: 10, paddingHorizontal: 14, marginBottom: 10,
@@ -370,7 +379,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
             }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontFamily: FONTS.display, fontSize: 13.5, fontWeight: '600', color: YL.ink }}>
-                  🎉 First ride — {newUserPct}% off
+                  🎉 First ride — {newUserPct}% off{hasEmptyLeg ? ' + special rate' : ''}
                 </Text>
                 <Text style={{ fontFamily: FONTS.display, fontSize: 11.5, color: YL.ink3, marginTop: 1 }}>
                   Save ₹{newUserDiscount.toLocaleString('en-IN')} on this ride
@@ -423,7 +432,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
             </Pressable>
           )}
 
-          {pricing?.emptyLeg && (
+          {pricing?.emptyLeg && !isNewUser && (
             <FareLine
               label={pricing.emptyLeg.type === 'homeBase' ? 'Home base rate' : 'Special rate discount'}
               value={`−₹${pricing.emptyLeg.savedAmount.toLocaleString('en-IN')}`}
@@ -431,10 +440,13 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
           )}
 
           {(newUserDiscount > 0 || creditsToApply > 0) && (
-            <FareLine label="Ride fare" value={`₹${baseTotal.toLocaleString('en-IN')}`} muted />
+            <FareLine label="Ride fare" value={`₹${effectiveFare.toLocaleString('en-IN')}`} muted />
           )}
-          {newUserDiscount > 0 && (
-            <FareLine label={`First ride ${newUserPct}% off`} value={`−₹${newUserDiscount.toLocaleString('en-IN')}`} />
+          {newUserEmptyLegDiscount > 0 && (
+            <FareLine label="Special rate 5% off" value={`−₹${newUserEmptyLegDiscount.toLocaleString('en-IN')}`} />
+          )}
+          {newUserFirstRideDiscount > 0 && (
+            <FareLine label={`First ride ${newUserPct}% off`} value={`−₹${newUserFirstRideDiscount.toLocaleString('en-IN')}`} />
           )}
           {creditsToApply > 0 && (
             <FareLine label="10% referral discount" value={`−₹${creditsToApply.toLocaleString('en-IN')}`} />

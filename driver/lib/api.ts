@@ -73,7 +73,7 @@ export async function updateBookingStatus(id: string, status: string) {
 
 export async function saveReading(data: {
   bookingId?: string
-  type: 'handoff' | 'trip_start' | 'trip_end' | 'close_duty'
+  type: 'handoff' | 'trip_start' | 'trip_end' | 'close_duty' | 'clock_in'
   odometer?: number
   soc?: number
 }) {
@@ -97,7 +97,7 @@ export async function getPaymentStatus(bookingId: string) {
   return driverFetch(`/bookings/${bookingId}/payment-status`)
 }
 
-export async function markPaid(bookingId: string, method: 'cash' | 'upi' = 'cash') {
+export async function markPaid(bookingId: string, method: 'cash' | 'direct' | 'upi' = 'direct') {
   return driverFetch(`/bookings/${bookingId}/mark-paid`, {
     method: 'POST',
     body: JSON.stringify({ method }),

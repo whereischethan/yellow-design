@@ -26,6 +26,7 @@ model User {
   leads         Lead[]
   savedPlaces   SavedPlace[]
 
+  @@index([referredById])
   @@map("users")
 }
 
@@ -79,12 +80,16 @@ model Booking {
   stopsJson           String? @map("stops_json")
   customerGstin       String? @map("customer_gstin")
   customerGstName     String? @map("customer_gst_name")
+  sendSms             Boolean @default(true) @map("send_sms")
   createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
   user           User?           @relation(fields: [userId], references: [id])
   invoice        Invoice?
   customInvoices CustomInvoice[]
 
+  @@index([status])
+  @@index([userId])
+  @@index([createdAt])
   @@map("bookings")
 }
 
@@ -214,6 +219,7 @@ model Lead {
 
   user User @relation(fields: [userId], references: [id])
 
+  @@index([status])
   @@map("leads")
 }
 

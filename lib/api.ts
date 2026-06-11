@@ -384,7 +384,7 @@ export async function verifyPaymentAndCreateBooking(payload: {
 
 // ─── User Profile ─────────────────────────────────────────────────────────────
 
-export async function getUserProfile(): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number; referredById?: string | null }> {
+export async function getUserProfile(): Promise<{ id: string; phone: string; name?: string; email?: string; referralCode?: string; referralCredits?: number; referredById?: string | null; bookingCount?: number }> {
   const res = await authenticatedFetch(`${getApiBase()}/user/profile`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Failed to fetch profile' }))

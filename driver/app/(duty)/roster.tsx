@@ -12,6 +12,7 @@ import { router } from 'expo-router'
 import { YL, FONTS } from '@/constants/theme'
 import { useDuty, DutyBooking } from '@/context/DutyContext'
 import { getDriverBookings } from '@/lib/api'
+import DriverBottomNav from '@/components/DriverBottomNav'
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'arrived']
 const DONE_STATUSES = ['completed', 'cancelled']
@@ -136,7 +137,7 @@ function TripCard({ booking, index, isCurrent, onSetTripIndex }: TripCardProps) 
   }
 
   const paymentLabel =
-    booking.paymentMethod === 'cash' ? 'CASH' : booking.paymentStatus === 'paid' ? 'PRE-PAID' : 'PENDING'
+    ['cash', 'direct'].includes(booking.paymentMethod ?? '') ? 'DIRECT' : booking.paymentStatus === 'paid' ? 'PRE-PAID' : 'PENDING'
   const paymentPillColor = booking.paymentStatus === 'paid' ? YL.leafSoft : YL.bg2
   const paymentTextColor = booking.paymentStatus === 'paid' ? YL.leaf : YL.ink2
 
@@ -221,7 +222,7 @@ export default function RosterScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Roster</Text>
@@ -269,6 +270,8 @@ export default function RosterScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+
+      <DriverBottomNav />
     </SafeAreaView>
   )
 }

@@ -98,13 +98,14 @@ export interface Booking {
   assignedDriver?: Driver
   assignedVehicle?: { make: string; model: string; licensePlate: string; color: string }
   paymentStatus?: string
-  paymentMethod?: 'cash' | 'upi' | null
+  paymentMethod?: 'cash' | 'direct' | 'upi' | null
   razorpayPaymentId?: string
   razorpayLinkId?: string | null
   razorpayLinkUrl?: string | null
   customerGstin?: string | null
   customerGstName?: string | null
   invoiceNo?: string | null
+  sendSms?: boolean
   createdAt: string
 }
 
@@ -146,6 +147,7 @@ export interface Customer {
   email?: string
   created_at: string
   trip_count: number
+  total_spend: number
   referral_code?: string | null
   referred_by?: { id: string; name: string | null; phone: string } | null
   referral_count?: number

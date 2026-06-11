@@ -189,12 +189,6 @@ export default function InTripScreen() {
           >
             <Text style={styles.sosText}>🆘 SOS</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.issueButton}
-            onPress={() => router.push('/(duty)/dispatch')}
-          >
-            <Text style={styles.issueText}>Report issue</Text>
-          </TouchableOpacity>
         </View>
 
         <TouchableOpacity

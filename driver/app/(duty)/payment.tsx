@@ -80,7 +80,7 @@ export default function PaymentScreen() {
   async function handleCash() {
     setHandlingCash(true);
     try {
-      await markPaid(bookingId, 'cash');
+      await markPaid(bookingId, 'direct');
       try {
         const updated = await getDriverBooking(bookingId);
         if (updated?.booking) refreshBooking(updated.booking);
@@ -171,7 +171,7 @@ export default function PaymentScreen() {
           disabled={handlingCash || paid}
         >
           <Text style={styles.cashButtonText}>
-            {handlingCash ? 'Processing…' : 'Accept cash instead'}
+            {handlingCash ? 'Processing…' : 'Accept direct payment'}
           </Text>
         </TouchableOpacity>
       </ScrollView>

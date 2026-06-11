@@ -38,10 +38,10 @@ function MailIcon() {
   )
 }
 
-function ChevronLeft() {
+function HomeIcon() {
   return (
     <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
-      <Path d="M11 4L6 9L11 14" stroke={YL.ink} strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M3 8.5L9 3L15 8.5V15H11V11H7V15H3V8.5Z" stroke={YL.ink} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   )
 }
@@ -70,7 +70,6 @@ export default function ScreenPartnerEnRoute() {
   const vehicle = (booking as any)?.assignedVehicle
 
   const driverName = driver?.name ?? 'Your chauffeur'
-  const driverRating = driver?.rating != null ? String(driver.rating.toFixed(2)) : '—'
   const initials = driver?.name ? getInitials(driver.name) : '?'
   const vehicleLabel = vehicle ? `${vehicle.make} ${vehicle.model}` : 'Yellow Sky'
   const plate = vehicle?.licensePlate ?? '——'
@@ -97,7 +96,7 @@ export default function ScreenPartnerEnRoute() {
 
         <View style={{ position: 'absolute', top: 14, left: 14, right: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => router.replace('/(app)/home')}
             style={({ pressed }) => ({
               width: 40, height: 40, borderRadius: 20, backgroundColor: YL.card,
               alignItems: 'center', justifyContent: 'center',
@@ -106,7 +105,7 @@ export default function ScreenPartnerEnRoute() {
               opacity: pressed ? 0.8 : 1,
             })}
           >
-            <ChevronLeft />
+            <HomeIcon />
           </Pressable>
 
           <View style={{
@@ -152,12 +151,6 @@ export default function ScreenPartnerEnRoute() {
 
           <View style={{ flex: 1 }}>
             <Text style={{ fontFamily: FONTS.display, fontSize: 18, fontWeight: '500', color: YL.ink }}>{driverName}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-              <Svg width={12} height={12} viewBox="0 0 12 12">
-                <Path d="M6 1L7.2 4.2L10.5 4.5L8.1 6.8L8.9 10.1L6 8.4L3.1 10.1L3.9 6.8L1.5 4.5L4.8 4.2L6 1Z" fill={YL.yellowDeep} />
-              </Svg>
-              <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3 }}>{driverRating}</Text>
-            </View>
           </View>
 
           <ActionCircle onPress={() => { if (driver?.phone) Linking.openURL(`tel:${driver.phone}`) }}>
@@ -187,7 +180,6 @@ export default function ScreenPartnerEnRoute() {
             const to = (booking as any)?.drop?.location ?? ''
             Share.share({ message: `Tracking my Yellow ride\nFrom: ${from}\nTo: ${to}\nDriver: ${driverName} · ${plate}` })
           }}>Share trip</YButton>
-          <YButton variant="ink" size="md" full={false} style={{ flex: 1 }} onPress={() => router.push({ pathname: '/(app)/ontrip', params: { booking: params.booking } })}>Trip started</YButton>
         </View>
       </View>
     </SafeAreaView>

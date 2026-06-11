@@ -14,7 +14,8 @@ interface ISTComponents {
 
 export function getISTComponents(iso: string): ISTComponents | null {
   try {
-    const ms = new Date(iso).getTime()
+    // Some sources (e.g. flight API) use "yyyy-MM-dd HH:mm+05:30" — make it ISO
+    const ms = new Date(iso.replace(' ', 'T')).getTime()
     if (isNaN(ms)) return null
     const ist = new Date(ms + IST_OFFSET_MS)
     return {
@@ -54,6 +55,22 @@ export function fmtRelativeDateTimeIST(iso: string): string {
   if (diffDays === 1) return `Tomorrow · ${timeStr}`
   const dd = String(c.d).padStart(2, '0')
   return `${dd} ${MONTHS[c.mo]} · ${timeStr}`
+}
+
+/** Format a UTC ISO string as "6:30 AM" in IST */
+export function fmtTimeIST(iso: string): string {
+  const c = getISTComponents(iso)
+  if (!c) return ''
+  const ampm = c.h >= 12 ? 'PM' : 'AM'
+  const h12 = c.h % 12 || 12
+  return `${h12}:${String(c.mi).padStart(2, '0')} ${ampm}`
+}
+
+/** The IST calendar date of a UTC ISO string, as "yyyy-MM-dd" */
+export function istDateString(iso: string): string {
+  const c = getISTComponents(iso)
+  if (!c) return ''
+  return `${c.y}-${String(c.mo + 1).padStart(2, '0')}-${String(c.d).padStart(2, '0')}`
 }
 
 /** IST start-of-today as a UTC Date (for comparisons) */

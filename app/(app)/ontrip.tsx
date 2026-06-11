@@ -7,7 +7,9 @@ import { YL, FONTS } from '../../constants/theme'
 import YButton from '../../components/YButton'
 import LiveMap from '../../components/LiveMap'
 import { useBookingTracking } from '../../lib/useBookingTracking'
-import type { Booking } from '../../types/booking'
+import { fetchFlight } from '../../lib/api'
+import { fmtTimeIST, istDateString } from '../../lib/ist'
+import type { Booking, FlightInfo } from '../../types/booking'
 
 function getInitials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
@@ -29,6 +31,28 @@ function PhoneIcon() {
   )
 }
 
+function HomeIcon() {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 18 18" fill="none">
+      <Path d="M3 8.5L9 3L15 8.5V15H11V11H7V15H3V8.5Z" stroke={YL.ink} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  )
+}
+
+// Badge colors keyed off the live flight status text
+function flightBadgeColors(status: string): { bg: string; accent: string } {
+  const s = status.toLowerCase()
+  if (s.includes('cancel') || s.includes('divert')) return { bg: '#FEF2F2', accent: '#C0392B' }
+  if (s.includes('delay')) return { bg: YL.gulmoharSoft, accent: YL.gulmohar }
+  return { bg: YL.leafSoft, accent: YL.leaf }
+}
+
+function flightStatusLabel(status: string): string {
+  const s = status.toLowerCase()
+  if (s === 'scheduled' || s === 'expected') return 'On time'
+  return status.charAt(0).toUpperCase() + status.slice(1)
+}
+
 export default function ScreenOnTrip() {
   const router = useRouter()
   const params = useLocalSearchParams<{ booking: string }>()
@@ -47,9 +71,20 @@ export default function ScreenOnTrip() {
     }
   }, [liveBooking?.status])
 
+  // Live flight status: fetched once on mount, stored snapshot as fallback
+  const [liveFlight, setLiveFlight] = React.useState<FlightInfo | null>(null)
+  React.useEffect(() => {
+    const fn = initialBooking?.flight?.flightNumber
+    if (!fn) return
+    const date = initialBooking?.pickup?.dateTime ? istDateString(initialBooking.pickup.dateTime) : undefined
+    fetchFlight(fn, date || new Date())
+      .then(setLiveFlight)
+      .catch(() => {})
+  }, [])
+
   const driver = (booking as any)?.assignedDriver
   const vehicle = (booking as any)?.assignedVehicle
-  const flight = (booking as any)?.flight
+  const flight: FlightInfo | null = liveFlight ?? (booking as any)?.flight ?? null
 
   const driverName = driver?.name ?? 'Your chauffeur'
   const initials = driver?.name ? getInitials(driver.name) : '?'
@@ -73,17 +108,31 @@ export default function ScreenOnTrip() {
           style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
         />
 
-        <View style={{
-          position: 'absolute', top: 14, left: 14, right: 14,
-          paddingHorizontal: 14, paddingVertical: 10,
-          backgroundColor: YL.ink, borderRadius: 14,
-          flexDirection: 'row', alignItems: 'center', gap: 10,
-        }}>
-          <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: YL.yellow }} />
-          <Text style={{ fontFamily: FONTS.display, fontSize: 12.5, color: 'white', flex: 1 }}>
-            On the way to <Text style={{ fontWeight: '600' }}>{dropName}</Text>
-            {eta != null ? <Text style={{ fontWeight: '600' }}> · {eta} min</Text> : null}
-          </Text>
+        <View style={{ position: 'absolute', top: 14, left: 14, right: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+          <Pressable
+            onPress={() => router.replace('/(app)/home')}
+            style={({ pressed }) => ({
+              width: 40, height: 40, borderRadius: 20, backgroundColor: YL.card,
+              alignItems: 'center', justifyContent: 'center',
+              shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.12, shadowRadius: 4, elevation: 3,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <HomeIcon />
+          </Pressable>
+
+          <View style={{
+            flex: 1, paddingHorizontal: 14, paddingVertical: 10,
+            backgroundColor: YL.ink, borderRadius: 14,
+            flexDirection: 'row', alignItems: 'center', gap: 10,
+          }}>
+            <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: YL.yellow }} />
+            <Text style={{ fontFamily: FONTS.display, fontSize: 12.5, color: 'white', flex: 1 }}>
+              On the way to <Text style={{ fontWeight: '600' }}>{dropName}</Text>
+              {eta != null ? <Text style={{ fontWeight: '600' }}> · {eta} min</Text> : null}
+            </Text>
+          </View>
         </View>
 
         {updateText ? (
@@ -104,22 +153,39 @@ export default function ScreenOnTrip() {
       }}>
         <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: YL.line, alignSelf: 'center', marginTop: -4, marginBottom: 14 }} />
 
-        {flightNum ? (
-          <View style={{
-            paddingHorizontal: 14, paddingVertical: 12,
-            backgroundColor: YL.leafSoft, borderRadius: 12,
-            flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12,
-          }}>
-            <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: YL.leaf, alignItems: 'center', justifyContent: 'center' }}>
-              <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
-                <Path d="M2 11L7 8.5V4L9 3L10 6.5L14 5V7L8.5 9.5L9 14H7L5 10L2 11Z" fill="white" />
-              </Svg>
+        {flightNum ? (() => {
+          const { bg, accent } = flightBadgeColors(flight?.status ?? '')
+          const arrivalTime = flight?.arrival ? fmtTimeIST(flight.arrival) : ''
+          const detailBits = [
+            flight?.status ? flightStatusLabel(flight.status) : '',
+            arrivalTime ? `Arrives ${arrivalTime}` : '',
+            flight?.terminal || '',
+          ].filter(Boolean)
+          return (
+            <View style={{
+              paddingHorizontal: 14, paddingVertical: 12,
+              backgroundColor: bg, borderRadius: 12,
+              flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12,
+            }}>
+              <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: accent, alignItems: 'center', justifyContent: 'center' }}>
+                <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
+                  <Path d="M2 11L7 8.5V4L9 3L10 6.5L14 5V7L8.5 9.5L9 14H7L5 10L2 11Z" fill="white" />
+                </Svg>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: FONTS.display, fontSize: 12.5, color: YL.ink }}>
+                  <Text style={{ fontWeight: '600' }}>{flightNum}</Text>
+                  {flight?.airline ? ` · ${flight.airline}` : ''}
+                </Text>
+                {detailBits.length ? (
+                  <Text style={{ fontFamily: FONTS.display, fontSize: 11.5, color: YL.ink3, marginTop: 1 }}>
+                    {detailBits.join(' · ')}
+                  </Text>
+                ) : null}
+              </View>
             </View>
-            <Text style={{ fontFamily: FONTS.display, fontSize: 12.5, color: YL.ink, flex: 1 }}>
-              <Text style={{ fontWeight: '600' }}>{flightNum}</Text>
-            </Text>
-          </View>
-        ) : null}
+          )
+        })() : null}
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: YL.gulmoharSoft, alignItems: 'center', justifyContent: 'center' }}>
@@ -147,7 +213,6 @@ export default function ScreenOnTrip() {
             Share.share({ message: `Tracking my Yellow ride\nFrom: ${from}\nTo: ${to}\nDriver: ${driverName} · ${plate}` })
           }}>Share</YButton>
           <YButton variant="soft" size="md" full={false} style={{ flex: 1 }} onPress={() => Linking.openURL('tel:112')}>SOS</YButton>
-          <YButton variant="ink" size="md" full={false} style={{ flex: 1 }} onPress={() => router.push({ pathname: '/(app)/complete', params: { bookingId: booking?.id, booking: params.booking } })}>Complete</YButton>
         </View>
       </View>
     </SafeAreaView>

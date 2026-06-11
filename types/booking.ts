@@ -58,6 +58,8 @@ export interface FlightInfo {
   departure: string;
   arrival: string;
   status: string;
+  terminal?: string;
+  gate?: string;
 }
 
 export interface BookingLocation {

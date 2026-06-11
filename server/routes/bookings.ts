@@ -480,29 +480,8 @@ router.get('/:id/location', requireAuth, async (req: AuthRequest, res: Response)
   }
 })
 
-router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
-  try {
-    const row = await prisma.booking.findFirst({
-      where: { id: String(req.params.id), userId: req.userId! },
-    })
-    if (!row) return res.status(404).json({ error: 'Booking not found' })
-
-    const { status } = req.body
-    if (status === 'cancelled') {
-      return res.status(403).json({ error: "Rides can't be cancelled in the app. Please contact support on WhatsApp." })
-    }
-    const allowed = ['completed']
-    if (!status || !allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' })
-
-    const updated = await prisma.booking.update({
-      where: { id: String(req.params.id) },
-      data: { status },
-    })
-    return res.json({ booking: buildBookingResponse(updated) })
-  } catch (e: any) {
-    return res.status(500).json({ error: e.message || 'Failed to update booking' })
-  }
-})
+// Trip status is driver/admin-managed only — there is intentionally no
+// customer-facing status mutation endpoint.
 
 function buildBookingResponse(row: any) {
   return {

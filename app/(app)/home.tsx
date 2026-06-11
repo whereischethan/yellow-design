@@ -1,12 +1,16 @@
 import React from 'react'
 import { View, Text, Pressable, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useFocusEffect } from 'expo-router'
 import Svg, { Path, Circle, Rect } from 'react-native-svg'
 import { YL, FONTS } from '../../constants/theme'
 import YBrand from '../../components/YBrand'
 import BottomNav from '../../components/BottomNav'
 import { useAuth } from '../../context/AuthContext'
+import { getBookings } from '../../lib/api'
+import { pickActiveBooking, trackingRouteForBooking } from '../../lib/tracking'
+import { fmtRelativeDateTimeIST } from '../../lib/ist'
+import type { Booking } from '../../types/booking'
 
 // Airport illustration
 function AirportIllustration() {
@@ -139,6 +143,44 @@ function RideIllustration({ kind }: { kind: RideKind }) {
   }
 }
 
+function rideStatusBadge(status: string): { bg: string; color: string; label: string } {
+  if (['confirmed', 'assigned', 'arrived'].includes(status)) return { bg: YL.yellowSoft, color: YL.ink, label: 'UPCOMING RIDE' }
+  if (status === 'in_progress') return { bg: YL.leafSoft, color: YL.leaf, label: 'EN ROUTE' }
+  return { bg: YL.bg2, color: YL.ink3, label: 'PENDING' }
+}
+
+function ActiveRideCard({ booking, onPress }: { booking: Booking; onPress: () => void }) {
+  const badge = rideStatusBadge(booking.status)
+  const pickupName = booking.pickup?.placeName || booking.pickup?.location || 'Pickup'
+  const dropName = booking.drop?.placeName || booking.drop?.location || 'Drop'
+  const time = booking.pickup?.dateTime ? fmtRelativeDateTimeIST(booking.pickup.dateTime) : ''
+  const driver = booking.assignedDriver
+  const plate = booking.assignedVehicle?.licensePlate
+  const subBits = [time, driver?.name, plate].filter(Boolean)
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.activeRideCard, { opacity: pressed ? 0.88 : 1 }]}
+    >
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: badge.bg }}>
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 10, color: badge.color, letterSpacing: 0.3 }}>{badge.label}</Text>
+          </View>
+        </View>
+        <Text numberOfLines={1} style={styles.activeRideTitle}>
+          {pickupName} → {dropName}
+        </Text>
+        {subBits.length ? (
+          <Text numberOfLines={1} style={styles.activeRideSub}>{subBits.join(' · ')}</Text>
+        ) : null}
+      </View>
+      <ChevronRight />
+    </Pressable>
+  )
+}
+
 function RideTypeCard({
   data,
   onPress,
@@ -183,6 +225,17 @@ export default function ScreenHome() {
     ? user.name.split(' ')[0].toUpperCase()
     : user?.phone?.slice(-4) || ''
 
+  const [activeBooking, setActiveBooking] = React.useState<Booking | null>(null)
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false
+      getBookings()
+        .then(list => { if (!cancelled) setActiveBooking(pickActiveBooking(list)) })
+        .catch(() => {}) // home renders fine without the card
+      return () => { cancelled = true }
+    }, [])
+  )
+
   const handleCardPress = (kind: RideKind) => {
     switch (kind) {
       case 'airport':
@@ -220,6 +273,16 @@ export default function ScreenHome() {
           <Text style={[styles.headline, { fontStyle: 'italic' }]}>today?</Text>
         </Text>
       </View>
+
+      {/* Active ride */}
+      {activeBooking ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
+          <ActiveRideCard
+            booking={activeBooking}
+            onPress={() => router.push(trackingRouteForBooking(activeBooking) as any)}
+          />
+        </View>
+      ) : null}
 
       {/* Card deck */}
       <View style={styles.cardDeck}>
@@ -295,6 +358,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     gap: 12,
+  },
+  activeRideCard: {
+    padding: 16,
+    borderRadius: 22,
+    backgroundColor: YL.card,
+    borderWidth: 1.5,
+    borderColor: YL.ink,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  activeRideTitle: {
+    fontFamily: FONTS.display,
+    fontSize: 16,
+    fontWeight: '500',
+    letterSpacing: -0.3,
+    color: YL.ink,
+    marginTop: 8,
+  },
+  activeRideSub: {
+    fontFamily: FONTS.mono,
+    fontSize: 11.5,
+    color: YL.ink3,
+    marginTop: 3,
   },
   rideCard: {
     padding: 16,

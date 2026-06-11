@@ -374,6 +374,8 @@ router.patch('/bookings/:id', async (req, res) => {
 
     if (status !== undefined) data.status = status
     if (assignedDriver !== undefined) data.assignedDriverJson = assignedDriver ? JSON.stringify(assignedDriver) : null
+    // Assigning a driver moves the booking to "assigned" unless a status was sent explicitly
+    if (assignedDriver && status === undefined && ['pending', 'confirmed'].includes(row.status)) data.status = 'assigned'
     if (assignedVehicle !== undefined) data.assignedVehicleJson = assignedVehicle ? JSON.stringify(assignedVehicle) : null
     if (paymentStatus !== undefined) data.paymentStatus = paymentStatus
     if (paymentMethod !== undefined) data.paymentMethod = paymentMethod

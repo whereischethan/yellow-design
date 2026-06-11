@@ -9,6 +9,7 @@ import YButton from '../../components/YButton'
 import GulmoharSpray from '../../components/GulmoharSpray'
 import RouteVisualizer from '../../components/RouteVisualizer'
 import { getBooking } from '../../lib/api'
+import { trackingRouteForBooking } from '../../lib/tracking'
 import type { Booking } from '../../types/booking'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -40,17 +41,20 @@ export default function ScreenAwaitingPartner() {
 
   useEffect(() => {
     if (!booking?.id) return
-    if (booking.assignedDriver) {
-      router.push({ pathname: '/(app)/enroute', params: { booking: JSON.stringify(booking) } })
+    // If the ride has moved past "waiting for assignment", hand off immediately
+    const route = trackingRouteForBooking(booking)
+    if (route.pathname !== '/(app)/awaiting') {
+      router.replace(route as any)
       return
     }
     pollRef.current = setInterval(async () => {
       try {
         const updated = await getBooking(booking.id)
         setBooking(updated)
-        if (updated.assignedDriver) {
+        const r = trackingRouteForBooking(updated)
+        if (r.pathname !== '/(app)/awaiting') {
           if (pollRef.current) clearInterval(pollRef.current)
-          router.push({ pathname: '/(app)/enroute', params: { booking: JSON.stringify(updated) } })
+          router.replace(r as any)
         }
       } catch {
         // silent

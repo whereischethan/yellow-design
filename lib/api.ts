@@ -240,8 +240,8 @@ export async function verifyOtp(
 
 // ─── Flight API ───────────────────────────────────────────────────────────────
 
-export async function fetchFlight(flightNumber: string, date: Date = new Date()) {
-  const yyyyMmDd = date.toISOString().split('T')[0]
+export async function fetchFlight(flightNumber: string, date: Date | string = new Date()) {
+  const yyyyMmDd = typeof date === 'string' ? date : date.toISOString().split('T')[0]
   const res = await resilientFetch(
     `${getApiBase()}/flights/lookup?flight_number=${encodeURIComponent(flightNumber)}&date=${yyyyMmDd}`
   )
@@ -462,18 +462,6 @@ export async function logLead(data: {
   } catch {
     // Non-critical — don't surface lead logging failures to the user
     return null
-  }
-}
-
-export async function updateBookingStatus(bookingId: string, status: string): Promise<void> {
-  const res = await authenticatedFetch(`${getApiBase()}/bookings/${bookingId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Failed to update booking' }))
-    throw new Error(err.error || 'Failed to update booking')
   }
 }
 

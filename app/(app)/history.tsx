@@ -11,10 +11,10 @@ import type { Booking } from '../../types/booking'
 
 type Tab = 'upcoming' | 'past'
 
-const UPCOMING_STATUSES = new Set(['pending', 'confirmed', 'assigned', 'arrived', 'in_progress'])
 const PAST_STATUSES = new Set(['completed', 'cancelled'])
 
 import { fmtRelativeDateTimeIST } from '../../lib/ist'
+import { ACTIVE_STATUSES as UPCOMING_STATUSES, trackingRouteForBooking } from '../../lib/tracking'
 
 function formatDateTime(dt: string): string {
   return fmtRelativeDateTimeIST(dt) || dt
@@ -308,13 +308,7 @@ export default function ScreenRideHistory() {
               >
                 <BookingRow
                   booking={booking}
-                  onPress={() => {
-                    if (UPCOMING_STATUSES.has(booking.status)) {
-                      router.push({ pathname: '/(app)/awaiting', params: { booking: JSON.stringify(booking) } })
-                    } else {
-                      router.push({ pathname: '/(app)/complete', params: { bookingId: booking.id } })
-                    }
-                  }}
+                  onPress={() => router.push(trackingRouteForBooking(booking) as any)}
                 />
               </View>
             ))}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import {
   View,
   Text,
@@ -205,6 +205,16 @@ export default function RosterScreen() {
     } finally {
       setRefreshing(false)
     }
+  }, [setBookings])
+
+  // Silent background refresh so new assignments appear without pull-to-refresh
+  useEffect(() => {
+    const t = setInterval(() => {
+      getDriverBookings()
+        .then((trips) => setBookings(trips?.bookings ?? trips ?? []))
+        .catch(() => {})
+    }, 60_000)
+    return () => clearInterval(t)
   }, [setBookings])
 
   const sorted = [...bookings].sort((a, b) => {

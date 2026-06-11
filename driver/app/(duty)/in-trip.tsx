@@ -13,6 +13,7 @@ import * as Location from 'expo-location';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
 import { isWithinKm } from '@/lib/geo';
+import { postDriverLocation } from '@/lib/api';
 
 export default function InTripScreen() {
   const router = useRouter();
@@ -42,20 +43,28 @@ export default function InTripScreen() {
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
+    let lastPost = 0;
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
       sub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, distanceInterval: 100 },
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 10000, distanceInterval: 50 },
         (loc) => {
+          if (Date.now() - lastPost >= 10_000) {
+            lastPost = Date.now();
+            postDriverLocation({
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+              heading: loc.coords.heading ?? undefined,
+              speed: loc.coords.speed ?? undefined,
+            });
+          }
           const drop = (booking?.drop as any);
           if (drop?.lat && drop?.lng) {
             setNearDrop(
               isWithinKm(
-                loc.coords.latitude,
-                loc.coords.longitude,
-                drop.lat,
-                drop.lng,
+                { lat: loc.coords.latitude, lng: loc.coords.longitude },
+                { lat: drop.lat, lng: drop.lng },
                 2,
               ),
             );

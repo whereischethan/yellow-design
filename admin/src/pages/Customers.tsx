@@ -4,7 +4,7 @@ import {
   YL, Icons, Mono, Input, Button, PageHeader, Avatar, fmtDate, Stack,
   ModalShell, ModalHeader, STATUS_STYLE, formatPhone, useIsMobile, fmtINR,
 } from '../components/ui'
-import { patchCustomer, getCustomerBookings, generateReferralCodes } from '../api'
+import { patchCustomer, getCustomerBookings, generateReferralCodes, impersonate, CUSTOMER_APP_URL } from '../api'
 
 interface Props {
   customers: Customer[]
@@ -61,6 +61,21 @@ function CustomerDrawer({
   }
 
   const changed = name !== (customer?.name || '') || email !== (customer?.email || '')
+
+  const [opening, setOpening] = React.useState(false)
+  const handleViewAs = async () => {
+    if (!customer) return
+    setOpening(true)
+    setError('')
+    try {
+      const r: any = await impersonate('user', customer.id)
+      window.open(`${CUSTOMER_APP_URL}/?impersonate=${encodeURIComponent(r.token)}`, '_blank')
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setOpening(false)
+    }
+  }
 
   if (!customer) return null
 
@@ -161,6 +176,9 @@ function CustomerDrawer({
             )}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+              <Button variant="secondary" onClick={handleViewAs} disabled={opening} style={{ marginRight: 'auto' }} title="Open the customer app signed in as this customer (1h session)">
+                {opening ? 'Opening…' : '👤 View as customer'}
+              </Button>
               <Button variant="secondary" onClick={onClose}>Cancel</Button>
               <Button variant="primary" onClick={handleSave} disabled={saving || !changed}>
                 {saving ? 'Saving…' : 'Save changes'}

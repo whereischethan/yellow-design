@@ -5,7 +5,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router'
 import Svg, { Path, Circle, Rect } from 'react-native-svg'
 import { YL, FONTS } from '../../constants/theme'
 import YButton from '../../components/YButton'
-import MapStub from '../../components/MapStub'
+import LiveMap from '../../components/LiveMap'
+import { useBookingTracking } from '../../lib/useBookingTracking'
 import type { Booking } from '../../types/booking'
 
 function getInitials(name: string): string {
@@ -48,9 +49,22 @@ function ChevronLeft() {
 export default function ScreenPartnerEnRoute() {
   const router = useRouter()
   const params = useLocalSearchParams<{ booking: string }>()
-  const booking: Booking | null = (() => {
+  const initialBooking: Booking | null = (() => {
     try { return params.booking ? JSON.parse(params.booking) : null } catch { return null }
   })()
+
+  const { booking: liveBooking, trackingInfo, secondsAgo, isLive } = useBookingTracking(initialBooking)
+  const booking = liveBooking ?? initialBooking
+
+  // Auto-advance when the trip status moves on (driver/admin updates)
+  React.useEffect(() => {
+    if (!liveBooking) return
+    if (liveBooking.status === 'in_progress') {
+      router.replace({ pathname: '/(app)/ontrip', params: { booking: JSON.stringify(liveBooking) } })
+    } else if (liveBooking.status === 'completed' || liveBooking.status === 'cancelled') {
+      router.replace({ pathname: '/(app)/complete', params: { bookingId: liveBooking.id, booking: JSON.stringify(liveBooking) } })
+    }
+  }, [liveBooking?.status])
 
   const driver = (booking as any)?.assignedDriver
   const vehicle = (booking as any)?.assignedVehicle
@@ -61,10 +75,25 @@ export default function ScreenPartnerEnRoute() {
   const vehicleLabel = vehicle ? `${vehicle.make} ${vehicle.model}` : 'Yellow Sky'
   const plate = vehicle?.licensePlate ?? '——'
 
+  const arrived = booking?.status === 'arrived'
+  const eta = trackingInfo?.etaMinutes
+  const statusText = arrived
+    ? 'Partner has arrived'
+    : eta != null ? `Partner is on the way · ${eta} min` : 'Partner is on the way'
+  const updateText = isLive && secondsAgo != null
+    ? `Live · updated ${secondsAgo}s ago`
+    : trackingInfo?.tracking && trackingInfo.driver?.stale ? 'Live location unavailable' : null
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: YL.bg, overflow: 'hidden' }}>
       <View style={{ flex: 1, position: 'relative', backgroundColor: YL.bg2, minHeight: 360 }}>
-        <MapStub style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+        <LiveMap
+          driver={isLive ? trackingInfo?.driver : null}
+          pickup={trackingInfo?.pickup}
+          drop={trackingInfo?.drop}
+          target="pickup"
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        />
 
         <View style={{ position: 'absolute', top: 14, left: 14, right: 14, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <Pressable
@@ -87,12 +116,22 @@ export default function ScreenPartnerEnRoute() {
             shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
             shadowOpacity: 0.12, shadowRadius: 4, elevation: 3,
           }}>
-            <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: YL.leaf }} />
+            <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: arrived ? YL.yellowDeep : YL.leaf }} />
             <Text style={{ fontFamily: FONTS.display, fontSize: 12.5, fontWeight: '500', color: YL.ink }}>
-              Partner is on the way
+              {statusText}
             </Text>
           </View>
         </View>
+
+        {updateText ? (
+          <View style={{
+            position: 'absolute', bottom: 32, left: 14,
+            paddingHorizontal: 10, paddingVertical: 5,
+            backgroundColor: YL.card, borderRadius: 100, opacity: 0.92,
+          }}>
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: YL.ink3 }}>{updateText}</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={{

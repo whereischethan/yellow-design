@@ -207,4 +207,19 @@ router.delete('/places/:id', requireAuth, async (req: AuthRequest, res: Response
   }
 })
 
+router.post('/push-token', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { token, platform } = req.body
+    if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token required' })
+    await prisma.pushToken.upsert({
+      where: { token },
+      create: { token, ownerType: 'user', ownerId: req.userId!, platform: platform ?? null },
+      update: { ownerType: 'user', ownerId: req.userId!, platform: platform ?? null },
+    })
+    return res.json({ ok: true })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
 export default router

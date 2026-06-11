@@ -1,6 +1,6 @@
 import React from 'react'
 import type { Driver } from '../types'
-import { patchDriver, getDriverBookings } from '../api'
+import { patchDriver, getDriverBookings, impersonate, DRIVER_APP_URL } from '../api'
 import type { Booking } from '../types'
 import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, formatPhone, useIsMobile, ModalShell, ModalHeader } from '../components/ui'
 
@@ -39,6 +39,7 @@ function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; on
   const [tripsLoading, setTripsLoading] = React.useState(false)
   const [completedCount, setCompletedCount] = React.useState<number | null>(null)
   const [totalEarnings, setTotalEarnings] = React.useState<number | null>(null)
+  const [opening, setOpening] = React.useState(false)
 
   React.useEffect(() => {
     if (!driver) return
@@ -64,6 +65,17 @@ function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; on
     const next: Record<string, Driver['status']> = { available: 'offline', 'on-trip': 'available', offline: 'available' }
     const res = await patchDriver(driver.id, { status: next[driver.status] })
     onUpdate(res.driver)
+  }
+  const handleViewAs = async () => {
+    setOpening(true)
+    try {
+      const r: any = await impersonate('driver', driver.id)
+      window.open(`${DRIVER_APP_URL}/?impersonate=${encodeURIComponent(r.token)}`, '_blank')
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setOpening(false)
+    }
   }
   const statusColor = driver.status === 'available' ? YL.greenInk : driver.status === 'on-trip' ? YL.ink : YL.ink3
   const statusLabel = driver.status === 'available' ? 'Available' : driver.status === 'on-trip' ? 'On trip' : 'Offline'
@@ -95,9 +107,14 @@ function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; on
                   <span style={{ width: 7, height: 7, borderRadius: 999, background: statusColor, flexShrink: 0 }} />
                   <span style={{ fontSize: 12, color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
                 </div>
-                <Button size="sm" variant="ghost" onClick={cycleStatus}>
-                  {driver.status === 'offline' ? 'Set active' : driver.status === 'on-trip' ? 'Mark available' : 'Set offline'}
-                </Button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <Button size="sm" variant="ghost" onClick={cycleStatus}>
+                    {driver.status === 'offline' ? 'Set active' : driver.status === 'on-trip' ? 'Mark available' : 'Set offline'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={handleViewAs} disabled={opening} title="Open the driver app signed in as this driver (1h session)">
+                    {opening ? 'Opening…' : '👤 View as driver'}
+                  </Button>
+                </div>
               </Stack>
             </div>
 

@@ -160,6 +160,7 @@ model Driver {
 
   vehicles Vehicle[]
   readings DriverReading[]
+  location DriverLocation?
 
   @@map("drivers")
 }
@@ -221,6 +222,30 @@ model Lead {
 
   @@index([status])
   @@map("leads")
+}
+
+model DriverLocation {
+  driverId  String   @id @map("driver_id")
+  lat       Float
+  lng       Float
+  heading   Float?
+  speed     Float?
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@map("driver_locations")
+}
+
+model PushToken {
+  token     String   @id
+  ownerType String   @map("owner_type") // 'user' | 'driver'
+  ownerId   String   @map("owner_id")
+  platform  String?
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([ownerType, ownerId])
+  @@map("push_tokens")
 }
 
 model PricingConfig {

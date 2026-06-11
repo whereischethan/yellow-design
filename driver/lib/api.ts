@@ -87,6 +87,22 @@ export async function getTodayReadings() {
   return driverFetch('/readings/today')
 }
 
+// ── Location & push ───────────────────────────────────────────────────────────
+
+export function postDriverLocation(loc: { lat: number; lng: number; heading?: number; speed?: number }) {
+  return driverFetch('/location', {
+    method: 'POST',
+    body: JSON.stringify(loc),
+  }).catch(() => {})
+}
+
+export function postPushToken(token: string, platform: string) {
+  return driverFetch('/push-token', {
+    method: 'POST',
+    body: JSON.stringify({ token, platform }),
+  }).catch(() => {})
+}
+
 // ── Payment ───────────────────────────────────────────────────────────────────
 
 export async function createPaymentQr(bookingId: string) {

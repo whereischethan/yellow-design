@@ -14,6 +14,7 @@ import * as Location from 'expo-location'
 import { YL, FONTS } from '@/constants/theme'
 import { useDuty } from '@/context/DutyContext'
 import { haversineKm, isWithinKm } from '@/lib/geo'
+import { postDriverLocation } from '@/lib/api'
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
@@ -40,6 +41,7 @@ export default function EnRouteScreen() {
   const [permissionGranted, setPermissionGranted] = useState(false)
   const [locationLoading, setLocationLoading] = useState(true)
   const subRef = useRef<Location.LocationSubscription | null>(null)
+  const lastPostRef = useRef(0)
 
   const pickupLat = booking?.pickup?.lat
   const pickupLng = booking?.pickup?.lng
@@ -58,11 +60,7 @@ export default function EnRouteScreen() {
       }
       setPermissionGranted(true)
 
-      if (!hasCoords) {
-        setLocationLoading(false)
-        return
-      }
-
+      // Watch regardless of pickup coords — location posting must not depend on them
       const sub = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
@@ -71,12 +69,24 @@ export default function EnRouteScreen() {
         },
         (loc: Location.LocationObject) => {
           if (!mounted) return
-          const km = haversineKm(loc.coords.latitude, loc.coords.longitude, pickupLat!, pickupLng!)
-          setDistanceKm(km)
+          if (Date.now() - lastPostRef.current >= 10_000) {
+            lastPostRef.current = Date.now()
+            postDriverLocation({
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+              heading: loc.coords.heading ?? undefined,
+              speed: loc.coords.speed ?? undefined,
+            })
+          }
+          if (hasCoords) {
+            const km = haversineKm(loc.coords.latitude, loc.coords.longitude, pickupLat!, pickupLng!)
+            setDistanceKm(km)
+          }
           setLocationLoading(false)
         }
       )
       subRef.current = sub
+      if (!hasCoords) setLocationLoading(false)
     })()
 
     return () => {

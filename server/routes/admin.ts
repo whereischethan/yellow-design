@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { randomUUID, createHmac } from 'crypto'
 import jwt from 'jsonwebtoken'
 import prisma from '../lib/prisma'
-import { sendStatusSms, collectPhones } from '../lib/sms'
+import { notifyBookingEvent } from '../lib/notify'
 import { getInvoiceCounter, getCompanyConfig, COMPANY_KEYS } from '../lib/invoice'
 import { genTripCode } from '../lib/tripcode'
 import { getEmptyLegStatus } from '../lib/emptyLeg'
@@ -187,6 +187,35 @@ router.get('/me', (_req, res) => {
   res.json({ ok: true })
 })
 
+// ─── Impersonation (superadmin) ───────────────────────────────────────────────
+// Issues a short-lived customer/driver token so ops can see the app exactly as
+// that person does. The token expires in 1h and never touches their real session.
+
+router.post('/impersonate', requireSuperAdmin, async (req, res) => {
+  try {
+    const { type, id } = req.body
+    if (!['user', 'driver'].includes(type) || !id) {
+      return res.status(400).json({ error: 'type (user|driver) and id required' })
+    }
+
+    if (type === 'user') {
+      const user = await prisma.user.findUnique({ where: { id: String(id) } })
+      if (!user) return res.status(404).json({ error: 'User not found' })
+      const token = jwt.sign({ userId: user.id, impersonated: true }, JWT_SECRET, { expiresIn: '1h' })
+      console.log(`[IMPERSONATE] admin → user ${user.id} (${user.phone})`)
+      return res.json({ token, name: user.name, phone: user.phone, expiresInMinutes: 60 })
+    }
+
+    const driver = await prisma.driver.findUnique({ where: { id: String(id) } })
+    if (!driver) return res.status(404).json({ error: 'Driver not found' })
+    const token = jwt.sign({ role: 'driver', driverId: driver.id, phone: driver.phone, impersonated: true }, JWT_SECRET, { expiresIn: '1h' })
+    console.log(`[IMPERSONATE] admin → driver ${driver.id} (${driver.phone})`)
+    return res.json({ token, name: driver.name, phone: driver.phone, expiresInMinutes: 60 })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── OTP lookup (for WhatsApp verification relay) ─────────────────────────────
 
 router.get('/otp-lookup', async (req, res) => {
@@ -320,19 +349,9 @@ router.post('/bookings', async (req, res) => {
 
     // Driver status unchanged on creation — they're only marked on-trip when the trip goes in_progress
 
-    // Fire confirmation SMS (non-blocking)
-    if (row.sendSms !== false) {
-      ;(async () => {
-        try {
-          const user = resolvedUserId ? await prisma.user.findUnique({ where: { id: resolvedUserId }, select: { phone: true } }) : null
-          const phones = collectPhones(user?.phone, guestPhone ?? null)
-          const pickupDateTime = pickup?.dateTime
-          for (const phone of phones) {
-            sendStatusSms(phone, row.tripCode, bookingStatus, { tripType, pickupDateTime }).catch(() => {})
-          }
-        } catch {}
-      })()
-    }
+    // Fire confirmation SMS + push (non-blocking; gated on sendSms inside)
+    notifyBookingEvent(row, bookingStatus)
+    if (assignedDriver?.id) notifyBookingEvent(row, 'driver_assigned')
 
     const userForBooking = resolvedUserId ? await prisma.user.findUnique({ where: { id: resolvedUserId }, select: { id: true, name: true, phone: true } }) : null
     res.json({ booking: buildBooking({ ...row, user: userForBooking }) })
@@ -482,26 +501,20 @@ router.patch('/bookings/:id', async (req, res) => {
       }
     }
 
-    // Fire SMS notifications (non-blocking)
-    if (status && ['confirmed', 'assigned', 'in_progress', 'arrived', 'completed', 'cancelled'].includes(status) && updated.sendSms !== false) {
-      ;(async () => {
-        try {
-          const user = updated.userId ? await prisma.user.findUnique({ where: { id: updated.userId }, select: { phone: true } }) : null
-          const phones = collectPhones(user?.phone, updated.guestPhone)
-          const driver = assignedDriver ?? tryParse(updated.assignedDriverJson)
-          const vehicle = tryParse(updated.assignedVehicleJson)
-          const pickup = tryParse(updated.pickupJson)
-          const ctx = {
-            tripType: updated.tripType ?? undefined,
-            pickupDateTime: pickup?.dateTime,
-            driverName: driver?.name,
-            vehiclePlate: vehicle?.licensePlate ?? driver?.plate,
-          }
-          for (const phone of phones) {
-            sendStatusSms(phone, updated.tripCode, status, ctx).catch(() => {})
-          }
-        } catch {}
-      })()
+    // Fire SMS + push notifications (non-blocking; sendSms gate handled inside)
+    if (status && ['confirmed', 'assigned', 'in_progress', 'arrived', 'completed', 'cancelled'].includes(status)) {
+      notifyBookingEvent(updated, status)
+    }
+
+    // Driver-directed pushes: assignment changes, time changes, cancellations
+    const prevDriverId = tryParse(row.assignedDriverJson)?.id ?? null
+    const newDriverId = tryParse(updated.assignedDriverJson)?.id ?? null
+    if (assignedDriver !== undefined && newDriverId !== prevDriverId) {
+      if (newDriverId) notifyBookingEvent(updated, 'driver_assigned')
+      if (prevDriverId) notifyBookingEvent(updated, 'driver_unassigned', { previousDriverId: prevDriverId })
+    } else if (newDriverId) {
+      if (status === 'cancelled') notifyBookingEvent(updated, 'driver_cancelled')
+      else if (pickupDateTime !== undefined) notifyBookingEvent(updated, 'time_changed')
     }
 
     // Increment driver and vehicle trip count on completion

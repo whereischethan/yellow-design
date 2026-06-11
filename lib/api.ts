@@ -527,6 +527,36 @@ export async function deleteSavedPlace(id: string): Promise<void> {
   await authenticatedFetch(`${getApiBase()}/user/places/${id}`, { method: 'DELETE' })
 }
 
+// ─── Live tracking & push ─────────────────────────────────────────────────────
+
+export interface BookingTracking {
+  tracking: boolean
+  status: string
+  target?: 'pickup' | 'drop'
+  driver?: { lat: number; lng: number; heading: number | null; updatedAt: string; stale: boolean }
+  pickup?: { lat: number; lng: number } | null
+  drop?: { lat: number; lng: number } | null
+  etaMinutes?: number | null
+  distanceKm?: number | null
+}
+
+export async function getBookingLocation(bookingId: string): Promise<BookingTracking> {
+  const res = await authenticatedFetch(`${getApiBase()}/bookings/${bookingId}/location`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to fetch location' }))
+    throw new Error(err.error || 'Failed to fetch location')
+  }
+  return res.json()
+}
+
+export async function postPushToken(token: string, platform: string): Promise<void> {
+  await authenticatedFetch(`${getApiBase()}/user/push-token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, platform }),
+  }).catch(() => {})
+}
+
 export interface ReferralData {
   earned: number
   invited: { name: string; date: string }[]

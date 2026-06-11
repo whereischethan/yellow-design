@@ -10,9 +10,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
-import { updateBookingStatus } from '@/lib/api';
 
 const WAIT_SECONDS = 300;
+const OPS_WHATSAPP = '918628062808';
 
 function formatCountdown(s: number) {
   const m = Math.floor(s / 60);
@@ -55,11 +55,13 @@ export default function NoShowScreen() {
 
   const progress = secondsLeft / WAIT_SECONDS;
 
-  async function handleMarkNoShow() {
+  // Cancellations are admin-only — the driver reports the no-show to ops,
+  // who cancel the trip from the dashboard.
+  function handleReportNoShow() {
     setMarking(true);
-    try {
-      await updateBookingStatus(bookingId, 'cancelled');
-    } catch (_) {}
+    const tripCode = (booking as any)?.tripCode ?? bookingId.slice(-6).toUpperCase();
+    const msg = encodeURIComponent(`No-show report: rider not at pickup for trip ${tripCode} after 5 min wait. Please cancel.`);
+    Linking.openURL(`https://wa.me/${OPS_WHATSAPP}?text=${msg}`).catch(() => {});
     advanceTrip();
     router.replace('/(duty)/roster');
   }
@@ -113,7 +115,7 @@ export default function NoShowScreen() {
         {/* Policy note */}
         <View style={styles.policyNote}>
           <Text style={styles.policyText}>
-            After 5 minutes, a ₹85 no-show fee applies to the rider.
+            If the rider doesn't show within 5 minutes, report it to ops — they'll cancel the trip.
           </Text>
         </View>
 
@@ -121,11 +123,11 @@ export default function NoShowScreen() {
         {expired && (
           <TouchableOpacity
             style={styles.noShowButton}
-            onPress={handleMarkNoShow}
+            onPress={handleReportNoShow}
             disabled={marking}
           >
             <Text style={styles.noShowButtonText}>
-              {marking ? 'Marking…' : 'Mark as No-Show'}
+              {marking ? 'Reporting…' : 'Report no-show to ops'}
             </Text>
           </TouchableOpacity>
         )}

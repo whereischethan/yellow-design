@@ -48,14 +48,6 @@ export default function CancelledScreen() {
           <Text style={styles.alertNote}>{cancellationNote}</Text>
         </View>
 
-        {/* Compensation card */}
-        <View style={styles.compensationCard}>
-          <Text style={styles.compensationAmount}>₹85</Text>
-          <Text style={styles.compensationNote}>
-            Cancellation fee credited to your account
-          </Text>
-        </View>
-
         {/* Next trip card */}
         {nextBooking && (
           <View style={styles.nextTripCard}>
@@ -111,24 +103,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: YL.ink,
     lineHeight: 22,
-  },
-  compensationCard: {
-    backgroundColor: YL.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: YL.line,
-    padding: 20,
-    gap: 6,
-  },
-  compensationAmount: {
-    fontFamily: FONTS.displaySemiBold,
-    fontSize: 32,
-    color: YL.leaf,
-  },
-  compensationNote: {
-    fontFamily: FONTS.display,
-    fontSize: 13,
-    color: YL.ink2,
   },
   nextTripCard: {
     backgroundColor: YL.card,

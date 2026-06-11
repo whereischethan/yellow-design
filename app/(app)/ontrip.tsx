@@ -5,7 +5,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router'
 import Svg, { Path } from 'react-native-svg'
 import { YL, FONTS } from '../../constants/theme'
 import YButton from '../../components/YButton'
-import MapStub from '../../components/MapStub'
+import LiveMap from '../../components/LiveMap'
+import { useBookingTracking } from '../../lib/useBookingTracking'
 import type { Booking } from '../../types/booking'
 
 function getInitials(name: string): string {
@@ -31,9 +32,20 @@ function PhoneIcon() {
 export default function ScreenOnTrip() {
   const router = useRouter()
   const params = useLocalSearchParams<{ booking: string }>()
-  const booking: Booking | null = (() => {
+  const initialBooking: Booking | null = (() => {
     try { return params.booking ? JSON.parse(params.booking) : null } catch { return null }
   })()
+
+  const { booking: liveBooking, trackingInfo, secondsAgo, isLive } = useBookingTracking(initialBooking)
+  const booking = liveBooking ?? initialBooking
+
+  // Auto-advance when the trip finishes (driver/admin updates)
+  React.useEffect(() => {
+    if (!liveBooking) return
+    if (liveBooking.status === 'completed' || liveBooking.status === 'cancelled') {
+      router.replace({ pathname: '/(app)/complete', params: { bookingId: liveBooking.id, booking: JSON.stringify(liveBooking) } })
+    }
+  }, [liveBooking?.status])
 
   const driver = (booking as any)?.assignedDriver
   const vehicle = (booking as any)?.assignedVehicle
@@ -45,10 +57,21 @@ export default function ScreenOnTrip() {
   const dropName = booking?.drop?.placeName ?? booking?.drop?.location ?? 'Destination'
   const flightNum = flight?.flightNumber ?? ''
 
+  const eta = trackingInfo?.etaMinutes
+  const updateText = isLive && secondsAgo != null
+    ? `Live · updated ${secondsAgo}s ago`
+    : trackingInfo?.tracking && trackingInfo.driver?.stale ? 'Live location unavailable' : null
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: YL.bg, overflow: 'hidden' }}>
       <View style={{ flex: 1, position: 'relative', minHeight: 320 }}>
-        <MapStub style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+        <LiveMap
+          driver={isLive ? trackingInfo?.driver : null}
+          pickup={trackingInfo?.pickup}
+          drop={trackingInfo?.drop}
+          target="drop"
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        />
 
         <View style={{
           position: 'absolute', top: 14, left: 14, right: 14,
@@ -59,8 +82,19 @@ export default function ScreenOnTrip() {
           <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: YL.yellow }} />
           <Text style={{ fontFamily: FONTS.display, fontSize: 12.5, color: 'white', flex: 1 }}>
             On the way to <Text style={{ fontWeight: '600' }}>{dropName}</Text>
+            {eta != null ? <Text style={{ fontWeight: '600' }}> · {eta} min</Text> : null}
           </Text>
         </View>
+
+        {updateText ? (
+          <View style={{
+            position: 'absolute', bottom: 32, left: 14,
+            paddingHorizontal: 10, paddingVertical: 5,
+            backgroundColor: YL.card, borderRadius: 100, opacity: 0.92,
+          }}>
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 10.5, color: YL.ink3 }}>{updateText}</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={{

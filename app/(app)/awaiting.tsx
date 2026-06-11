@@ -8,7 +8,7 @@ import YAppChrome from '../../components/YAppChrome'
 import YButton from '../../components/YButton'
 import GulmoharSpray from '../../components/GulmoharSpray'
 import RouteVisualizer from '../../components/RouteVisualizer'
-import { getBooking, updateBookingStatus } from '../../lib/api'
+import { getBooking } from '../../lib/api'
 import type { Booking } from '../../types/booking'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']

@@ -2,9 +2,10 @@ import { Router, Response } from 'express'
 import { randomUUID, createHmac } from 'crypto'
 import { requireAuth, AuthRequest } from '../middleware/auth'
 import prisma from '../lib/prisma'
-import { sendStatusSms, collectPhones } from '../lib/sms'
 import { genTripCode } from '../lib/tripcode'
 import { sendMetaEvent } from '../lib/metaPixel'
+import { notifyBookingEvent } from '../lib/notify'
+import { getEta } from '../lib/eta'
 
 const router = Router()
 
@@ -195,19 +196,8 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
       data: { status: 'converted', tripCode: booking.tripCode },
     }).catch(() => {})
 
-    // Confirmation SMS (non-blocking)
-    ;(async () => {
-      try {
-        const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { phone: true } })
-        const phones = collectPhones(user?.phone, booking.guestPhone)
-        for (const phone of phones) {
-          sendStatusSms(phone, booking.tripCode, 'confirmed', {
-            tripType,
-            pickupDateTime: pickup?.dateTime,
-          }).catch(() => {})
-        }
-      } catch {}
-    })()
+    // Confirmation SMS + push (non-blocking)
+    notifyBookingEvent(booking, 'confirmed')
 
     return res.json({ booking: buildBookingResponse(booking) })
   } catch (e: any) {
@@ -369,6 +359,9 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
       } catch {}
     })()
 
+    // Confirmation SMS + push (non-blocking)
+    notifyBookingEvent(booking, 'confirmed')
+
     return res.json({ booking: buildBookingResponse(booking) })
   } catch (e: any) {
     if (e?.code === 'P2003' && e?.meta?.field_name?.includes('user_id')) {
@@ -402,6 +395,91 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   }
 })
 
+// ─── Live tracking ────────────────────────────────────────────────────────────
+
+const TRACKABLE_STATUSES = ['assigned', 'arrived', 'in_progress']
+const LOCATION_STALE_MS = 60_000
+const geocodeCache = new Map<string, { lat: number; lng: number }>()
+
+async function resolveCoords(point: any): Promise<{ lat: number; lng: number } | null> {
+  if (point?.lat != null && point?.lng != null) return { lat: Number(point.lat), lng: Number(point.lng) }
+  const placeId = point?.placeId
+  if (!placeId) return null
+  const cached = geocodeCache.get(placeId)
+  if (cached) return cached
+  const key = process.env.GOOGLE_MAPS_KEY || ''
+  if (!key) return null
+  try {
+    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?place_id=${encodeURIComponent(placeId)}&key=${key}`)
+    const data = await res.json() as any
+    const loc = data?.results?.[0]?.geometry?.location
+    if (loc?.lat != null && loc?.lng != null) {
+      const coords = { lat: loc.lat, lng: loc.lng }
+      geocodeCache.set(placeId, coords)
+      return coords
+    }
+  } catch {}
+  return null
+}
+
+router.get('/:id/location', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const row = await prisma.booking.findFirst({
+      where: { id: String(req.params.id), userId: req.userId! },
+    })
+    if (!row) return res.status(404).json({ error: 'Booking not found' })
+
+    const assignedDriver = row.assignedDriverJson ? JSON.parse(row.assignedDriverJson) : null
+    if (!TRACKABLE_STATUSES.includes(row.status) || !assignedDriver?.id) {
+      return res.json({ tracking: false, status: row.status })
+    }
+
+    const loc = await prisma.driverLocation.findUnique({ where: { driverId: assignedDriver.id } })
+    if (!loc) return res.json({ tracking: false, status: row.status })
+
+    const pickupPoint = row.pickupJson ? JSON.parse(row.pickupJson) : null
+    const dropPoint = row.dropJson ? JSON.parse(row.dropJson) : null
+    const [pickup, drop] = await Promise.all([resolveCoords(pickupPoint), resolveCoords(dropPoint)])
+
+    // Persist resolved coords back into the booking JSON so we geocode at most once
+    const persist: any = {}
+    if (pickup && pickupPoint && (pickupPoint.lat == null || pickupPoint.lng == null)) {
+      persist.pickupJson = JSON.stringify({ ...pickupPoint, ...pickup })
+    }
+    if (drop && dropPoint && (dropPoint.lat == null || dropPoint.lng == null)) {
+      persist.dropJson = JSON.stringify({ ...dropPoint, ...drop })
+    }
+    if (Object.keys(persist).length) {
+      prisma.booking.update({ where: { id: row.id }, data: persist }).catch(() => {})
+    }
+
+    const target = row.status === 'in_progress' ? 'drop' : 'pickup'
+    const targetCoords = target === 'drop' ? drop : pickup
+    const stale = Date.now() - loc.updatedAt.getTime() > LOCATION_STALE_MS
+
+    let etaMinutes: number | null = null
+    let distanceKm: number | null = null
+    if (!stale && targetCoords) {
+      const eta = await getEta(`${row.id}:${target}`, { lat: loc.lat, lng: loc.lng }, targetCoords)
+      etaMinutes = eta.etaMinutes
+      distanceKm = eta.distanceKm
+    }
+
+    return res.json({
+      tracking: true,
+      status: row.status,
+      target,
+      driver: { lat: loc.lat, lng: loc.lng, heading: loc.heading, updatedAt: loc.updatedAt.toISOString(), stale },
+      pickup,
+      drop,
+      etaMinutes,
+      distanceKm,
+    })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || 'Failed to fetch location' })
+  }
+})
+
 router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const row = await prisma.booking.findFirst({
@@ -410,7 +488,10 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     if (!row) return res.status(404).json({ error: 'Booking not found' })
 
     const { status } = req.body
-    const allowed = ['completed', 'cancelled']
+    if (status === 'cancelled') {
+      return res.status(403).json({ error: "Rides can't be cancelled in the app. Please contact support on WhatsApp." })
+    }
+    const allowed = ['completed']
     if (!status || !allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' })
 
     const updated = await prisma.booking.update({

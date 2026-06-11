@@ -249,3 +249,10 @@ export const setEmptyLegToggle = (key: string, value: 0 | 1) =>
   adminFetch('/empty-leg/toggle', { method: 'PATCH', body: JSON.stringify({ key, value }) })
 export const saveEmptyLegConfig = (config: Record<string, number>) =>
   adminFetch('/empty-leg/config', { method: 'PATCH', body: JSON.stringify(config) })
+
+// ─── Impersonation (superadmin) ───────────────────────────────────────────────
+export const impersonate = (type: 'user' | 'driver', id: string) =>
+  adminFetch('/impersonate', { method: 'POST', body: JSON.stringify({ type, id }) })
+
+export const CUSTOMER_APP_URL = (import.meta as any).env?.VITE_CUSTOMER_APP_URL || 'https://book.ridewithyellow.com'
+export const DRIVER_APP_URL = (import.meta as any).env?.VITE_DRIVER_APP_URL || 'https://yellow-design-driver.web.app'

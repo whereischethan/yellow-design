@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import { randomUUID } from 'crypto'
 import prisma from '../lib/prisma'
 import { requireDriver, signDriverToken, DriverRequest } from '../middleware/auth'
+import { notifyBookingEvent } from '../lib/notify'
 
 const router = Router()
 
@@ -306,6 +307,7 @@ router.get('/bookings/:id', requireDriver, async (req: DriverRequest, res: Respo
 router.patch('/bookings/:id/status', requireDriver, async (req: DriverRequest, res: Response) => {
   try {
     const { status } = req.body
+    // Cancellations are admin-only — drivers report no-shows to ops
     const allowed = ['arrived', 'in_progress', 'completed']
     if (!allowed.includes(status)) {
       return res.status(400).json({ error: `Status must be one of: ${allowed.join(', ')}` })
@@ -334,7 +336,51 @@ router.patch('/bookings/:id/status', requireDriver, async (req: DriverRequest, r
       })
     }
 
+    notifyBookingEvent(updated, status)
+
     return res.json({ status: updated.status })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+// ── Location ──────────────────────────────────────────────────────────────────
+
+router.post('/location', requireDriver, async (req: DriverRequest, res: Response) => {
+  try {
+    const { lat, lng, heading, speed } = req.body
+    const latNum = Number(lat)
+    const lngNum = Number(lng)
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum) ||
+        latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+      return res.status(400).json({ error: 'Valid lat and lng required' })
+    }
+    const headingNum = Number.isFinite(Number(heading)) ? Number(heading) : null
+    const speedNum = Number.isFinite(Number(speed)) ? Number(speed) : null
+
+    await prisma.driverLocation.upsert({
+      where: { driverId: req.driverId! },
+      create: { driverId: req.driverId!, lat: latNum, lng: lngNum, heading: headingNum, speed: speedNum },
+      update: { lat: latNum, lng: lngNum, heading: headingNum, speed: speedNum },
+    })
+    return res.json({ ok: true })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+// ── Push token ────────────────────────────────────────────────────────────────
+
+router.post('/push-token', requireDriver, async (req: DriverRequest, res: Response) => {
+  try {
+    const { token, platform } = req.body
+    if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token required' })
+    await prisma.pushToken.upsert({
+      where: { token },
+      create: { token, ownerType: 'driver', ownerId: req.driverId!, platform: platform ?? null },
+      update: { ownerType: 'driver', ownerId: req.driverId!, platform: platform ?? null },
+    })
+    return res.json({ ok: true })
   } catch (e: any) {
     return res.status(500).json({ error: e.message })
   }

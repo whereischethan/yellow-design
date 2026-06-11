@@ -37,7 +37,16 @@ async function adminFetch(path: string, init?: RequestInit) {
   }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(`/admin${path}`, { ...init, headers })
+  // Retry GETs once — covers Cloud Run cold starts dropping the first request
+  const isGet = !init?.method || init.method === 'GET'
+  let res: globalThis.Response
+  try {
+    res = await fetch(`/admin${path}`, { ...init, headers })
+  } catch (e) {
+    if (!isGet) throw e
+    await new Promise(r => setTimeout(r, 1500))
+    res = await fetch(`/admin${path}`, { ...init, headers })
+  }
   if (res.status === 401) throw new Error('UNAUTHORIZED')
   if (!res.ok) {
     const body = await res.text()

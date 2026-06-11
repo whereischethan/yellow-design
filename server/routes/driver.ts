@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import prisma from '../lib/prisma'
 import { requireDriver, signDriverToken, DriverRequest } from '../middleware/auth'
 import { notifyBookingEvent } from '../lib/notify'
+import { slimAssignedDriver } from '../lib/shape'
 
 const router = Router()
 
@@ -247,7 +248,7 @@ router.get('/bookings', requireDriver, async (req: DriverRequest, res: Response)
       drop: tryParse(b.dropJson),
       flight: tryParse(b.flightJson),
       pricing: tryParse(b.pricingJson),
-      assignedDriver: tryParse(b.assignedDriverJson),
+      assignedDriver: slimAssignedDriver(tryParse(b.assignedDriverJson)),
       assignedVehicle: tryParse(b.assignedVehicleJson),
       stops: tryParse(b.stopsJson),
       createdAt: b.createdAt,

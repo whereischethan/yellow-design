@@ -6,6 +6,7 @@ import { notifyBookingEvent } from '../lib/notify'
 import { getInvoiceCounter, getCompanyConfig, COMPANY_KEYS } from '../lib/invoice'
 import { genTripCode } from '../lib/tripcode'
 import { getEmptyLegStatus } from '../lib/emptyLeg'
+import { slimAssignedDriver } from '../lib/shape'
 
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || ''
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''
@@ -259,7 +260,7 @@ function buildBooking(row: any) {
     pricing: tryParse(row.pricingJson),
     guestName: row.guestName,
     guestPhone: row.guestPhone,
-    assignedDriver: tryParse(row.assignedDriverJson),
+    assignedDriver: slimAssignedDriver(tryParse(row.assignedDriverJson)),
     assignedVehicle: tryParse(row.assignedVehicleJson),
     paymentStatus: row.paymentStatus || 'pending',
     paymentMethod: row.paymentMethod ?? null,
@@ -339,7 +340,7 @@ router.post('/bookings', async (req, res) => {
         pricingJson: JSON.stringify(pricing),
         guestName: guestName ?? null,
         guestPhone: guestPhone ?? null,
-        assignedDriverJson: assignedDriver ? JSON.stringify(assignedDriver) : null,
+        assignedDriverJson: assignedDriver ? JSON.stringify(slimAssignedDriver(assignedDriver)) : null,
         assignedVehicleJson: assignedVehicle ? JSON.stringify(assignedVehicle) : null,
         status: bookingStatus,
         paymentStatus: 'pending',
@@ -373,7 +374,7 @@ router.patch('/bookings/:id', async (req, res) => {
     const data: any = {}
 
     if (status !== undefined) data.status = status
-    if (assignedDriver !== undefined) data.assignedDriverJson = assignedDriver ? JSON.stringify(assignedDriver) : null
+    if (assignedDriver !== undefined) data.assignedDriverJson = assignedDriver ? JSON.stringify(slimAssignedDriver(assignedDriver)) : null
     // Assigning a driver moves the booking to "assigned" unless a status was sent explicitly
     if (assignedDriver && status === undefined && ['pending', 'confirmed'].includes(row.status)) data.status = 'assigned'
     if (assignedVehicle !== undefined) data.assignedVehicleJson = assignedVehicle ? JSON.stringify(assignedVehicle) : null

@@ -6,6 +6,7 @@ import { genTripCode } from '../lib/tripcode'
 import { sendMetaEvent } from '../lib/metaPixel'
 import { notifyBookingEvent } from '../lib/notify'
 import { getEta } from '../lib/eta'
+import { slimAssignedDriver } from '../lib/shape'
 
 const router = Router()
 
@@ -500,7 +501,7 @@ function buildBookingResponse(row: any) {
     guestName: row.guestName,
     guestPhone: row.guestPhone,
     stops: row.stopsJson ? JSON.parse(row.stopsJson) : null,
-    assignedDriver: row.assignedDriverJson ? JSON.parse(row.assignedDriverJson) : null,
+    assignedDriver: slimAssignedDriver(row.assignedDriverJson ? JSON.parse(row.assignedDriverJson) : null),
     assignedVehicle: row.assignedVehicleJson ? JSON.parse(row.assignedVehicleJson) : null,
     paymentStatus: row.paymentStatus ?? 'paid',
     razorpayPaymentId: row.razorpayPaymentId ?? null,

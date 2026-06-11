@@ -811,7 +811,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     setSaving(true)
     try {
       const newStatus = driver && booking.status === 'confirmed' ? 'assigned' : booking.status
-      const res = await patchBooking(booking.id, { assignedDriver: driver, status: newStatus })
+      // Never embed the full driver row (base64 docs) in the booking
+      const slim = driver ? { id: driver.id, name: driver.name, phone: driver.phone, rating: driver.rating, licenseNo: driver.licenseNo, plate: driver.plate, vehicle: driver.vehicle } : null
+      const res = await patchBooking(booking.id, { assignedDriver: slim, status: newStatus })
       onUpdate(res.booking)
     } finally {
       setSaving(false)

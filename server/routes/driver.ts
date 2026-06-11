@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import prisma from '../lib/prisma'
 import { requireDriver, signDriverToken, DriverRequest } from '../middleware/auth'
 import { notifyBookingEvent } from '../lib/notify'
-import { slimAssignedDriver } from '../lib/shape'
+import { slimAssignedDriver, fixAirportStop } from '../lib/shape'
 
 const router = Router()
 
@@ -233,26 +233,34 @@ router.get('/bookings', requireDriver, async (req: DriverRequest, res: Response)
       return pickupDate >= todayIST
     })
 
-    const result = driverBookings.map((b) => ({
-      id: b.id,
-      tripCode: b.tripCode,
-      status: b.status,
-      tripType: b.tripType,
-      vehicleType: b.vehicleType,
-      passengerCount: b.passengerCount,
-      paymentStatus: b.paymentStatus,
-      paymentMethod: b.paymentMethod,
-      guestName: b.guestName,
-      guestPhone: b.guestPhone,
-      pickup: tryParse(b.pickupJson),
-      drop: tryParse(b.dropJson),
-      flight: tryParse(b.flightJson),
-      pricing: tryParse(b.pricingJson),
-      assignedDriver: slimAssignedDriver(tryParse(b.assignedDriverJson)),
-      assignedVehicle: tryParse(b.assignedVehicleJson),
-      stops: tryParse(b.stopsJson),
-      createdAt: b.createdAt,
-    }))
+    const userIds = [...new Set(driverBookings.map((b) => b.userId).filter((id): id is string => id != null))]
+    const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
+    const userMap = new Map(users.map((u) => [u.id, u]))
+
+    const result = driverBookings.map((b) => {
+      const user = b.userId ? userMap.get(b.userId) : null
+      return {
+        id: b.id,
+        tripCode: b.tripCode,
+        status: b.status,
+        tripType: b.tripType,
+        vehicleType: b.vehicleType,
+        passengerCount: b.passengerCount,
+        paymentStatus: b.paymentStatus,
+        paymentMethod: b.paymentMethod,
+        driverCollect: b.driverCollect ?? false,
+        guestName: b.guestName ?? user?.name ?? null,
+        guestPhone: b.guestPhone ?? user?.phone ?? null,
+        pickup: fixAirportStop(tryParse(b.pickupJson)),
+        drop: fixAirportStop(tryParse(b.dropJson)),
+        flight: tryParse(b.flightJson),
+        pricing: tryParse(b.pricingJson),
+        assignedDriver: slimAssignedDriver(tryParse(b.assignedDriverJson)),
+        assignedVehicle: tryParse(b.assignedVehicleJson),
+        stops: tryParse(b.stopsJson),
+        createdAt: b.createdAt,
+      }
+    })
 
     // Sort by pickup time
     result.sort((a, b) => {
@@ -278,6 +286,8 @@ router.get('/bookings/:id', requireDriver, async (req: DriverRequest, res: Respo
       return res.status(403).json({ error: 'Not authorized' })
     }
 
+    const user = b.userId ? await prisma.user.findUnique({ where: { id: b.userId }, select: { name: true, phone: true } }) : null
+
     return res.json({
       booking: {
         id: b.id,
@@ -288,13 +298,14 @@ router.get('/bookings/:id', requireDriver, async (req: DriverRequest, res: Respo
         passengerCount: b.passengerCount,
         paymentStatus: b.paymentStatus,
         paymentMethod: b.paymentMethod,
-        guestName: b.guestName,
-        guestPhone: b.guestPhone,
-        pickup: tryParse(b.pickupJson),
-        drop: tryParse(b.dropJson),
+        driverCollect: b.driverCollect ?? false,
+        guestName: b.guestName ?? user?.name ?? null,
+        guestPhone: b.guestPhone ?? user?.phone ?? null,
+        pickup: fixAirportStop(tryParse(b.pickupJson)),
+        drop: fixAirportStop(tryParse(b.dropJson)),
         flight: tryParse(b.flightJson),
         pricing: tryParse(b.pricingJson),
-        assignedDriver: tryParse(b.assignedDriverJson),
+        assignedDriver: slimAssignedDriver(tryParse(b.assignedDriverJson)),
         assignedVehicle: tryParse(b.assignedVehicleJson),
         stops: tryParse(b.stopsJson),
         createdAt: b.createdAt,

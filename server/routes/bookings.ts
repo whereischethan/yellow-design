@@ -6,7 +6,7 @@ import { genTripCode } from '../lib/tripcode'
 import { sendMetaEvent } from '../lib/metaPixel'
 import { notifyBookingEvent } from '../lib/notify'
 import { getEta } from '../lib/eta'
-import { slimAssignedDriver } from '../lib/shape'
+import { slimAssignedDriver, fixAirportStop } from '../lib/shape'
 
 const router = Router()
 
@@ -494,8 +494,8 @@ function buildBookingResponse(row: any) {
     vehicleType: row.vehicleType,
     price: row.price,
     passengers: row.passengerCount,
-    pickup: row.pickupJson ? JSON.parse(row.pickupJson) : null,
-    drop: row.dropJson ? JSON.parse(row.dropJson) : null,
+    pickup: fixAirportStop(row.pickupJson ? JSON.parse(row.pickupJson) : null),
+    drop: fixAirportStop(row.dropJson ? JSON.parse(row.dropJson) : null),
     flight: row.flightJson ? JSON.parse(row.flightJson) : null,
     pricing: row.pricingJson ? JSON.parse(row.pricingJson) : null,
     guestName: row.guestName,

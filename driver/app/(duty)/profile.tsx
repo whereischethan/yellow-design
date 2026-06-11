@@ -78,8 +78,8 @@ export default function ProfileScreen() {
           <View style={styles.card}>
             <Text style={styles.sectionEyebrow}>ASSIGNED VEHICLE</Text>
             <View style={styles.vehicleRow}>
-              <View>
-                <Text style={styles.vehicleName}>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={styles.vehicleName} numberOfLines={2}>
                   {vehicle.make} {vehicle.model}
                 </Text>
                 <Text style={styles.vehicleDetail}>{vehicle.color}</Text>
@@ -88,7 +88,7 @@ export default function ProfileScreen() {
                 <Text style={styles.plateText}>{vehicle.licensePlate}</Text>
               </View>
             </View>
-            {vehicle.soc != null && (
+            {vehicle.soc != null && vehicle.soc > 0 && (
               <View style={styles.socRow}>
                 <View style={styles.socBarBg}>
                   <View

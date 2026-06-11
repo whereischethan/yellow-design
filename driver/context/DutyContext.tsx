@@ -21,6 +21,7 @@ export interface DutyBooking {
   passengerCount: number | null
   paymentStatus: string
   paymentMethod: string | null
+  driverCollect?: boolean
   guestName: string | null
   guestPhone: string | null
   pickup: {

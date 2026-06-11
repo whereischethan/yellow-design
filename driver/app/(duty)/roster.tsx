@@ -119,33 +119,40 @@ const pillStyles = StyleSheet.create({
   },
 })
 
+function tripTypeLabel(b: DutyBooking): string {
+  switch (b.tripType) {
+    case 'pickup': return 'Airport pickup'
+    case 'drop': return 'Airport drop'
+    case 'outstation': return 'Outstation trip'
+    case 'hourly': return 'Hourly rental'
+    default: return 'Trip'
+  }
+}
+
 interface TripCardProps {
   booking: DutyBooking
   index: number
   isCurrent: boolean
+  masked: boolean
   onSetTripIndex: (index: number) => void
 }
 
-function TripCard({ booking, index, isCurrent, onSetTripIndex }: TripCardProps) {
+function TripCard({ booking, index, isCurrent, masked, onSetTripIndex }: TripCardProps) {
   const isActive = ACTIVE_STATUSES.includes(booking.status)
-  const fare = booking.pricing?.totalPrice
+  const collectFare =
+    booking.driverCollect && booking.paymentStatus !== 'paid' ? booking.pricing?.totalPrice : null
 
   function handlePress() {
-    if (!isActive) return
+    if (!isActive || masked) return
     onSetTripIndex(index)
     router.push(`/(duty)/enroute?id=${booking.id}`)
   }
-
-  const paymentLabel =
-    ['cash', 'direct'].includes(booking.paymentMethod ?? '') ? 'DIRECT' : booking.paymentStatus === 'paid' ? 'PRE-PAID' : 'PENDING'
-  const paymentPillColor = booking.paymentStatus === 'paid' ? YL.leafSoft : YL.bg2
-  const paymentTextColor = booking.paymentStatus === 'paid' ? YL.leaf : YL.ink2
 
   return (
     <TouchableOpacity
       style={[styles.tripCard, !isActive && styles.tripCardMuted]}
       onPress={handlePress}
-      activeOpacity={isActive ? 0.8 : 1}
+      activeOpacity={isActive && !masked ? 0.8 : 1}
     >
       {/* Top row: time + date label + status pill */}
       <View style={styles.tripTopRow}>
@@ -160,33 +167,42 @@ function TripCard({ booking, index, isCurrent, onSetTripIndex }: TripCardProps) 
         <StatusPill status={booking.status} isCurrent={isCurrent} />
       </View>
 
-      {/* Route row */}
-      <View style={styles.routeRow}>
-        <Text style={styles.routeText} numberOfLines={1}>
-          {booking.pickup?.placeName ?? booking.pickup?.location ?? '—'}
-        </Text>
-        <Text style={styles.routeArrow}>→</Text>
-        <Text style={styles.routeText} numberOfLines={1}>
-          {booking.drop?.placeName ?? booking.drop?.location ?? '—'}
-        </Text>
-      </View>
-
-      {/* Bottom chips */}
-      <View style={styles.chipsRow}>
-        {booking.flight?.flightNumber ? (
-          <View style={styles.chip}>
-            <Text style={styles.chipText}>{booking.flight.flightNumber}</Text>
-          </View>
-        ) : null}
-        <View style={[styles.chip, { backgroundColor: paymentPillColor }]}>
-          <Text style={[styles.chipText, { color: paymentTextColor }]}>{paymentLabel}</Text>
+      {masked ? (
+        /* Upcoming trips stay summary-only until the current one is done */
+        <View>
+          <Text style={styles.routeText}>{tripTypeLabel(booking)}</Text>
+          <Text style={styles.maskedNote}>Details unlock after your current trip</Text>
         </View>
-        {fare != null ? (
-          <View style={styles.fareChip}>
-            <Text style={styles.fareText}>₹{fare}</Text>
+      ) : (
+        <>
+          {/* Route row */}
+          <View style={styles.routeRow}>
+            <Text style={styles.routeText} numberOfLines={1}>
+              {booking.pickup?.placeName ?? booking.pickup?.location ?? '—'}
+            </Text>
+            <Text style={styles.routeArrow}>→</Text>
+            <Text style={styles.routeText} numberOfLines={1}>
+              {booking.drop?.placeName ?? booking.drop?.location ?? '—'}
+            </Text>
           </View>
-        ) : null}
-      </View>
+
+          {/* Bottom chips */}
+          {(booking.flight?.flightNumber || collectFare != null) ? (
+            <View style={styles.chipsRow}>
+              {booking.flight?.flightNumber ? (
+                <View style={styles.chip}>
+                  <Text style={styles.chipText}>{booking.flight.flightNumber}</Text>
+                </View>
+              ) : null}
+              {collectFare != null ? (
+                <View style={styles.fareChip}>
+                  <Text style={styles.fareText}>COLLECT ₹{collectFare}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </>
+      )}
     </TouchableOpacity>
   )
 }
@@ -260,18 +276,24 @@ export default function RosterScreen() {
             <Text style={styles.emptySubtitle}>Pull down to refresh once admin assigns a trip.</Text>
           </View>
         ) : (
-          sorted.map((booking, i) => {
-            const originalIndex = bookings.findIndex((b) => b.id === booking.id)
-            return (
-              <TripCard
-                key={booking.id}
-                booking={booking}
-                index={originalIndex}
-                isCurrent={originalIndex === currentTripIndex}
-                onSetTripIndex={setCurrentTripIndex}
-              />
-            )
-          })
+          (() => {
+            // Only the next pending trip shows full details; later ones stay summary-only
+            const nextId = sorted.find((b) => !DONE_STATUSES.includes(b.status))?.id
+            return sorted.map((booking) => {
+              const originalIndex = bookings.findIndex((b) => b.id === booking.id)
+              const masked = !DONE_STATUSES.includes(booking.status) && booking.id !== nextId
+              return (
+                <TripCard
+                  key={booking.id}
+                  booking={booking}
+                  index={originalIndex}
+                  isCurrent={originalIndex === currentTripIndex}
+                  masked={masked}
+                  onSetTripIndex={setCurrentTripIndex}
+                />
+              )
+            })
+          })()
         )}
 
         {allDone && (
@@ -387,6 +409,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 4,
+  },
+  maskedNote: {
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    color: YL.ink3,
+    marginTop: 4,
   },
   fareText: {
     fontFamily: FONTS.mono,

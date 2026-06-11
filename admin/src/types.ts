@@ -106,6 +106,7 @@ export interface Booking {
   customerGstName?: string | null
   invoiceNo?: string | null
   sendSms?: boolean
+  driverCollect?: boolean
   createdAt: string
 }
 

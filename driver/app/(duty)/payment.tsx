@@ -12,7 +12,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
-import { createPaymentQr, getPaymentStatus, markPaid, getDriverBooking } from '@/lib/api';
+import { createPaymentQr, getPaymentStatus, markPaid, getDriverBooking, updateBookingStatus } from '@/lib/api';
 
 type QrData = {
   image_url?: string;
@@ -62,6 +62,7 @@ export default function PaymentScreen() {
         if (status?.paid) {
           setPaid(true);
           clearInterval(pollRef.current!);
+          try { await updateBookingStatus(bookingId, 'completed'); } catch (_) {}
           try {
             const updated = await getDriverBooking(bookingId);
             if (updated?.booking) refreshBooking(updated.booking);
@@ -81,6 +82,7 @@ export default function PaymentScreen() {
     setHandlingCash(true);
     try {
       await markPaid(bookingId, 'direct');
+      try { await updateBookingStatus(bookingId, 'completed'); } catch (_) {}
       try {
         const updated = await getDriverBooking(bookingId);
         if (updated?.booking) refreshBooking(updated.booking);

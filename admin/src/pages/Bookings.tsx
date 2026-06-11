@@ -441,6 +441,7 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const [flightError, setFlightError] = React.useState('')
   const [refreshingBooking, setRefreshingBooking] = React.useState(false)
   const [markingPaid, setMarkingPaid] = React.useState(false)
+  const [togglingCollect, setTogglingCollect] = React.useState(false)
   const [showCustomInvoice, setShowCustomInvoice] = React.useState(false)
   const [customInvoices, setCustomInvoices] = React.useState<CustomInvoice[]>([])
   const [ciAmount, setCiAmount] = React.useState('')
@@ -613,6 +614,13 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     setMarkingPaid(true)
     try { const r: any = await patchBooking(booking.id, { paymentStatus: 'paid', paymentMethod: 'direct' }); onUpdate(r.booking) }
     catch {} finally { setMarkingPaid(false) }
+  }
+
+  const handleToggleDriverCollect = async () => {
+    if (!booking) return
+    setTogglingCollect(true)
+    try { const r: any = await patchBooking(booking.id, { driverCollect: !booking.driverCollect }); onUpdate(r.booking) }
+    catch {} finally { setTogglingCollect(false) }
   }
 
   if (!booking) return null
@@ -1318,6 +1326,16 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                       style={{ width: '100%', padding: '9px 14px', background: YL.greenSoft, color: YL.greenInk, border: `1.5px solid ${YL.leaf}`, borderRadius: 8, cursor: markingPaid ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                     >
                       {markingPaid ? 'Saving…' : '✓ Mark as paid (Direct)'}
+                    </button>
+
+                    {/* Driver collects — fare becomes visible in the driver app */}
+                    <button
+                      onClick={handleToggleDriverCollect}
+                      disabled={togglingCollect}
+                      title="Driver collects payment at trip end — the fare is shown to the driver only for these rides"
+                      style={{ width: '100%', padding: '9px 14px', background: booking.driverCollect ? YL.yellow : YL.bg, color: YL.ink, border: `1.5px solid ${booking.driverCollect ? YL.yellowDeep : YL.line}`, borderRadius: 8, cursor: togglingCollect ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, fontFamily: '"Bricolage Grotesque", system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                    >
+                      {togglingCollect ? 'Saving…' : booking.driverCollect ? '✓ Driver to collect — fare shown to driver' : 'Driver to collect'}
                     </button>
 
                     {/* Payment link */}

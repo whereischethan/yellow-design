@@ -526,9 +526,9 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
       if (bookingCategory === 'airport') {
         pickupObj = tripType === 'drop'
           ? { placeName: address, location: address, placeId: addressPlaceId || undefined, dateTime: fromISTISO(dateTime).toISOString() }
-          : { placeName: `BLR Airport T${terminal}`, location: 'Kempegowda International Airport', dateTime: fromISTISO(dateTime).toISOString(), terminal }
+          : { placeName: `BLR Airport ${terminal}`, location: 'Kempegowda International Airport', dateTime: fromISTISO(dateTime).toISOString(), terminal }
         dropObj = tripType === 'drop'
-          ? { placeName: `BLR Airport T${terminal}`, location: 'Kempegowda International Airport', terminal }
+          ? { placeName: `BLR Airport ${terminal}`, location: 'Kempegowda International Airport', terminal }
           : { placeName: address, location: address, placeId: addressPlaceId || undefined }
         tripTypeStr = tripType
       } else if (bookingCategory === 'outstation') {
@@ -570,9 +570,9 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
       if (bookingCategory === 'airport') {
         pickupObj = tripType === 'drop'
           ? { placeName: address, location: address, placeId: addressPlaceId, dateTime: fromISTISO(dateTime).toISOString() }
-          : { placeName: `BLR Airport T${terminal}`, location: 'Kempegowda International Airport', dateTime: fromISTISO(dateTime).toISOString(), terminal }
+          : { placeName: `BLR Airport ${terminal}`, location: 'Kempegowda International Airport', dateTime: fromISTISO(dateTime).toISOString(), terminal }
         dropObj = tripType === 'drop'
-          ? { placeName: `BLR Airport T${terminal}`, location: 'Kempegowda International Airport', terminal }
+          ? { placeName: `BLR Airport ${terminal}`, location: 'Kempegowda International Airport', terminal }
           : { placeName: address, location: address, placeId: addressPlaceId }
         tripTypeStr = tripType
       } else if (bookingCategory === 'outstation') {

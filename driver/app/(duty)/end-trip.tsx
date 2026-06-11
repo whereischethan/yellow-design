@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
 import { useDriverAuth } from '@/context/DriverAuthContext';
-import { saveReading } from '@/lib/api';
+import { saveReading, updateBookingStatus } from '@/lib/api';
 import { calcKwh, calcEfficiency, calcCo2Grams } from '@/lib/energy';
 
 export default function EndTripScreen() {
@@ -67,10 +67,15 @@ export default function EndTripScreen() {
     (booking?.pricing as any)?.totalPrice ?? 0;
   const tripCode = bookingId.slice(-6).toUpperCase();
 
-  const canSubmit = odometer.length > 0 && soc.length > 0;
+  // Fare is only the driver's business when they collect it
+  const driverCollects =
+    Boolean((booking as any)?.driverCollect) && booking?.paymentStatus !== 'paid';
 
-  async function handleCollectPayment() {
-    if (!canSubmit) return;
+  const canSubmit = odometer.length > 0 && soc.length > 0;
+  const [completing, setCompleting] = useState(false);
+
+  async function handleSubmit() {
+    if (!canSubmit || completing) return;
     const reading = {
       type: 'trip_end' as const,
       bookingId,
@@ -81,7 +86,17 @@ export default function EndTripScreen() {
       await saveReading(reading);
     } catch (_) {}
     addReading(reading);
-    router.push(`/(duty)/payment?id=${bookingId}`);
+    if (driverCollects) {
+      router.push(`/(duty)/payment?id=${bookingId}`);
+      return;
+    }
+    // Pre-paid / billed rides: no collection step — complete the trip
+    setCompleting(true);
+    try {
+      await updateBookingStatus(bookingId, 'completed');
+    } catch (_) {}
+    setCompleting(false);
+    router.replace(`/(duty)/review-request?id=${bookingId}`);
   }
 
   return (
@@ -176,11 +191,13 @@ export default function EndTripScreen() {
           </View>
         </View>
 
-        {/* Fare card */}
-        <View style={styles.fareCard}>
-          <Text style={styles.fareEyebrow}>FARE TO COLLECT</Text>
-          <Text style={styles.fareAmount}>₹{totalPrice.toLocaleString('en-IN')}</Text>
-        </View>
+        {/* Fare card — only when the driver collects payment */}
+        {driverCollects ? (
+          <View style={styles.fareCard}>
+            <Text style={styles.fareEyebrow}>FARE TO COLLECT</Text>
+            <Text style={styles.fareAmount}>₹{totalPrice.toLocaleString('en-IN')}</Text>
+          </View>
+        ) : null}
 
         {/* Expenses */}
         <View style={styles.expensesCard}>
@@ -204,17 +221,17 @@ export default function EndTripScreen() {
       {/* CTA */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
         <TouchableOpacity
-          style={[styles.collectButton, !canSubmit && styles.collectButtonDisabled]}
-          disabled={!canSubmit}
-          onPress={handleCollectPayment}
+          style={[styles.collectButton, (!canSubmit || completing) && styles.collectButtonDisabled]}
+          disabled={!canSubmit || completing}
+          onPress={handleSubmit}
         >
           <Text
             style={[
               styles.collectButtonText,
-              !canSubmit && styles.collectButtonTextDisabled,
+              (!canSubmit || completing) && styles.collectButtonTextDisabled,
             ]}
           >
-            Collect payment →
+            {completing ? 'Completing…' : driverCollects ? 'Collect payment →' : 'Complete trip ✓'}
           </Text>
         </TouchableOpacity>
       </View>

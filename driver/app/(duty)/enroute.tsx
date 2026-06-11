@@ -165,13 +165,21 @@ export default function EnRouteScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionEyebrow}>PICKUP</Text>
           <Text style={styles.addressText}>
-            {booking.pickup?.location ?? '—'}
+            {booking.pickup?.location ?? booking.pickup?.placeName ?? '—'}
           </Text>
           {hasCoords ? (
             <TouchableOpacity style={styles.mapsLink} onPress={handleOpenMaps} activeOpacity={0.7}>
               <Text style={styles.mapsLinkText}>Open in Maps →</Text>
             </TouchableOpacity>
           ) : null}
+        </View>
+
+        {/* Drop address card */}
+        <View style={styles.card}>
+          <Text style={styles.sectionEyebrow}>DROP</Text>
+          <Text style={styles.addressText}>
+            {booking.drop?.placeName ?? booking.drop?.location ?? '—'}
+          </Text>
         </View>
 
         {/* Geofence status bar */}

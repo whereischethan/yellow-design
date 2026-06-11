@@ -6,7 +6,7 @@ import { notifyBookingEvent } from '../lib/notify'
 import { getInvoiceCounter, getCompanyConfig, COMPANY_KEYS } from '../lib/invoice'
 import { genTripCode } from '../lib/tripcode'
 import { getEmptyLegStatus } from '../lib/emptyLeg'
-import { slimAssignedDriver } from '../lib/shape'
+import { slimAssignedDriver, fixAirportStop } from '../lib/shape'
 
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || ''
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''
@@ -253,8 +253,8 @@ function buildBooking(row: any) {
     tripType: row.tripType,
     vehicleType: row.vehicleType,
     passengers: row.passengerCount,
-    pickup: tryParse(row.pickupJson),
-    drop: tryParse(row.dropJson),
+    pickup: fixAirportStop(tryParse(row.pickupJson)),
+    drop: fixAirportStop(tryParse(row.dropJson)),
     stops: tryParse(row.stopsJson),
     flight: tryParse(row.flightJson),
     pricing: tryParse(row.pricingJson),
@@ -271,6 +271,7 @@ function buildBooking(row: any) {
     customerGstName: row.customerGstName ?? null,
     invoiceNo: row.invoice?.invoiceNo ?? null,
     sendSms: row.sendSms ?? true,
+    driverCollect: row.driverCollect ?? false,
     createdAt: row.createdAt,
   }
 }
@@ -370,7 +371,7 @@ router.patch('/bookings/:id', async (req, res) => {
             pickupDateTime, guestName, guestPhone, price, fareBreakdown, durationHours,
             tripType, vehicleType, passengerCount, meetAndGreet, petFriendly,
             pickup, drop, flight, stops, customerGstin, customerGstName, completedAt,
-            sendSms } = req.body
+            sendSms, driverCollect } = req.body
     const data: any = {}
 
     if (status !== undefined) data.status = status
@@ -380,6 +381,7 @@ router.patch('/bookings/:id', async (req, res) => {
     if (assignedVehicle !== undefined) data.assignedVehicleJson = assignedVehicle ? JSON.stringify(assignedVehicle) : null
     if (paymentStatus !== undefined) data.paymentStatus = paymentStatus
     if (paymentMethod !== undefined) data.paymentMethod = paymentMethod
+    if (driverCollect !== undefined) data.driverCollect = Boolean(driverCollect)
     if (guestName !== undefined) data.guestName = guestName || null
     if (guestPhone !== undefined) data.guestPhone = guestPhone || null
     if (price !== undefined) {

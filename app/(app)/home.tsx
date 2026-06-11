@@ -153,6 +153,12 @@ function ActiveRideCard({ booking, onPress }: { booking: Booking; onPress: () =>
   const badge = rideStatusBadge(booking.status)
   const pickupName = booking.pickup?.placeName || booking.pickup?.location || 'Pickup'
   const dropName = booking.drop?.placeName || booking.drop?.location || 'Drop'
+  // Airport rides read better as a simple label than two long addresses
+  const title = booking.tripType === 'pickup'
+    ? 'Your airport pickup'
+    : booking.tripType === 'drop'
+      ? 'Your airport drop'
+      : `${pickupName} → ${dropName}`
   const time = booking.pickup?.dateTime ? fmtRelativeDateTimeIST(booking.pickup.dateTime) : ''
   const driver = booking.assignedDriver
   const plate = booking.assignedVehicle?.licensePlate
@@ -170,7 +176,7 @@ function ActiveRideCard({ booking, onPress }: { booking: Booking; onPress: () =>
           </View>
         </View>
         <Text numberOfLines={1} style={styles.activeRideTitle}>
-          {pickupName} → {dropName}
+          {title}
         </Text>
         {subBits.length ? (
           <Text numberOfLines={1} style={styles.activeRideSub}>{subBits.join(' · ')}</Text>

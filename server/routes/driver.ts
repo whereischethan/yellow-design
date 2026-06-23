@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
-import { randomUUID } from 'crypto'
+import { randomUUID, randomInt } from 'crypto'
+import rateLimit from 'express-rate-limit'
 import prisma from '../lib/prisma'
 import { requireDriver, signDriverToken, DriverRequest } from '../middleware/auth'
 import { notifyBookingEvent } from '../lib/notify'
@@ -10,11 +11,22 @@ const router = Router()
 const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || process.env.MSG91_AUTHKEY || ''
 const MSG91_TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID || ''
 const OTP_TTL_SECS = 10 * 60
+const SEND_WINDOW_SECS = 15 * 60
+const MAX_SENDS_PER_WINDOW = 3
+
+const verifyRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many attempts. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.body?.phone ? String(req.body.phone) : (req.ip ?? 'unknown'),
+})
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || ''
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''
 
 function generateOtp(): string {
-  return String(Math.floor(1000 + Math.random() * 9000))
+  return String(randomInt(1000, 10000))
 }
 
 async function sendOtpViaMSG91(phone: string, otp: string): Promise<void> {
@@ -22,14 +34,23 @@ async function sendOtpViaMSG91(phone: string, otp: string): Promise<void> {
     console.log(`[DEV] Driver OTP for ${phone}: ${otp}`)
     return
   }
-  const url = `https://control.msg91.com/api/v5/otp?template_id=${MSG91_TEMPLATE_ID}&mobile=${phone}&otp=${otp}&authkey=${MSG91_AUTH_KEY}`
-  const res = await fetch(url)
+  const url = `https://control.msg91.com/api/v5/otp?template_id=${encodeURIComponent(MSG91_TEMPLATE_ID)}&mobile=${encodeURIComponent(phone)}&otp=${encodeURIComponent(otp)}`
+  const res = await fetch(url, { headers: { authkey: MSG91_AUTH_KEY } })
   if (!res.ok) throw new Error('Failed to send OTP via MSG91')
 }
 
 function tryParse(s: string | null | undefined) {
   if (!s) return null
   try { return JSON.parse(s) } catch { return null }
+}
+
+// Strip financial breakdown from driver-facing pricing.
+// Drivers only see the total when they're responsible for collecting it (driverCollect).
+function driverPricing(pricingJson: string | null | undefined, driverCollect: boolean) {
+  const p = tryParse(pricingJson)
+  if (!p) return null
+  const { totalPrice, fareBeforeTax, basePrice, gst, discount, ...rest } = p
+  return driverCollect ? { totalPrice, ...rest } : rest
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -58,6 +79,16 @@ router.post('/auth/send-otp', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'No driver account found for this number' })
     }
 
+    const windowStart = BigInt(Math.floor(Date.now() / 1000) - SEND_WINDOW_SECS)
+    const recentCount = await prisma.otpSession.count({
+      where: { phone: driver.phone, createdAt: { gt: windowStart } },
+    })
+    if (recentCount >= MAX_SENDS_PER_WINDOW) {
+      return res.status(429).json({ error: 'Too many OTP requests. Please try again later.' })
+    }
+
+    await prisma.otpSession.deleteMany({ where: { phone: driver.phone, verified: 0 } })
+
     const otp = generateOtp()
     const id = randomUUID()
     const expiresAt = BigInt(Math.floor(Date.now() / 1000) + OTP_TTL_SECS)
@@ -74,7 +105,7 @@ router.post('/auth/send-otp', async (req: Request, res: Response) => {
   }
 })
 
-router.post('/auth/verify-otp', async (req: Request, res: Response) => {
+router.post('/auth/verify-otp', verifyRateLimit, async (req: Request, res: Response) => {
   try {
     const { phone, otp, countryCode = '+91' } = req.body
     if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP required' })
@@ -254,7 +285,7 @@ router.get('/bookings', requireDriver, async (req: DriverRequest, res: Response)
         pickup: fixAirportStop(tryParse(b.pickupJson)),
         drop: fixAirportStop(tryParse(b.dropJson)),
         flight: tryParse(b.flightJson),
-        pricing: tryParse(b.pricingJson),
+        pricing: driverPricing(b.pricingJson, b.driverCollect ?? false),
         assignedDriver: slimAssignedDriver(tryParse(b.assignedDriverJson)),
         assignedVehicle: tryParse(b.assignedVehicleJson),
         stops: tryParse(b.stopsJson),
@@ -304,7 +335,7 @@ router.get('/bookings/:id', requireDriver, async (req: DriverRequest, res: Respo
         pickup: fixAirportStop(tryParse(b.pickupJson)),
         drop: fixAirportStop(tryParse(b.dropJson)),
         flight: tryParse(b.flightJson),
-        pricing: tryParse(b.pricingJson),
+        pricing: driverPricing(b.pricingJson, b.driverCollect ?? false),
         assignedDriver: slimAssignedDriver(tryParse(b.assignedDriverJson)),
         assignedVehicle: tryParse(b.assignedVehicleJson),
         stops: tryParse(b.stopsJson),
@@ -344,7 +375,11 @@ router.patch('/bookings/:id/status', requireDriver, async (req: DriverRequest, r
     } else if (status === 'completed') {
       await prisma.driver.update({
         where: { id: req.driverId },
-        data: { status: 'available', trips: { increment: 1 } },
+        data: {
+          status: 'available',
+          // Only increment if not already completed — prevents double-count if admin also patches
+          ...(b.status !== 'completed' ? { trips: { increment: 1 } } : {}),
+        },
       })
     }
 

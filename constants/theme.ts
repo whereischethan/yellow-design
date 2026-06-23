@@ -30,9 +30,6 @@ export const FONTS = {
   displayRegular: 'BricolageGrotesque_400Regular',
   mono: 'JetBrainsMono_400Regular',
   monoMedium: 'JetBrainsMono_500Medium',
-  kannada: 'NotoSansKannada_400Regular',
-  kannadaMedium: 'NotoSansKannada_500Medium',
-  kannadaSemiBold: 'NotoSansKannada_600SemiBold',
   // General Sans not on Google Fonts — use system fallback
   sans: undefined, // uses system default (sans-serif)
 } as const

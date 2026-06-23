@@ -3,6 +3,14 @@ import type { Lead, Booking } from '../types'
 import { patchLead, createBooking, downloadCSV } from '../api'
 import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile, formatPhone, telPhone, getISTComponents, fromISTISO } from '../components/ui'
 
+function mapsUrl(loc: { placeName?: string; location?: string; lat?: number; lng?: number; placeId?: string } | null | undefined): string | null {
+  if (!loc) return null
+  if (loc.lat != null && loc.lng != null) return `https://www.google.com/maps?q=${loc.lat},${loc.lng}`
+  if (loc.placeId) return `https://www.google.com/maps/place/?q=place_id:${loc.placeId}`
+  const name = loc.placeName || loc.location
+  return name ? `https://www.google.com/maps/search/${encodeURIComponent(name)}` : null
+}
+
 const minutesUntil = (iso: string) => Math.round((new Date(iso).getTime() - Date.now()) / 60000)
 const fmtAge = (iso: string) => {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
@@ -77,11 +85,26 @@ function LeadDrawer({ lead, onClose, onMark, onConvert, isMobile }: { lead: Lead
             <Stack gap={10}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: YL.leaf, flexShrink: 0 }}/>
-                <span style={{ fontSize: 13, color: YL.ink }}>{lead.pickup?.placeName || lead.pickup?.location || '—'}</span>
+                {mapsUrl(lead.pickup)
+                  ? <a href={mapsUrl(lead.pickup)!} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: YL.ink, textDecoration: 'underline', textDecorationColor: YL.ink3, textUnderlineOffset: 3 }}>{lead.pickup?.placeName || lead.pickup?.location || '—'}</a>
+                  : <span style={{ fontSize: 13, color: YL.ink }}>{lead.pickup?.placeName || lead.pickup?.location || '—'}</span>
+                }
               </div>
+              {(lead.stops ?? []).map((stop, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: YL.yellowDeep, flexShrink: 0 }}/>
+                  {mapsUrl(stop)
+                    ? <a href={mapsUrl(stop)!} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: YL.ink, textDecoration: 'underline', textDecorationColor: YL.ink3, textUnderlineOffset: 3 }}>{stop.placeName || stop.location}</a>
+                    : <span style={{ fontSize: 13, color: YL.ink }}>{stop.placeName || stop.location}</span>
+                  }
+                </div>
+              ))}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: YL.gulmohar, flexShrink: 0 }}/>
-                <span style={{ fontSize: 13, color: YL.ink }}>{lead.drop?.placeName || lead.drop?.location || 'BLR Airport'}</span>
+                {mapsUrl(lead.drop)
+                  ? <a href={mapsUrl(lead.drop)!} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: YL.ink, textDecoration: 'underline', textDecorationColor: YL.ink3, textUnderlineOffset: 3 }}>{lead.drop?.placeName || lead.drop?.location || 'BLR Airport'}</a>
+                  : <span style={{ fontSize: 13, color: YL.ink }}>{lead.drop?.placeName || lead.drop?.location || 'BLR Airport'}</span>
+                }
               </div>
             </Stack>
             {lead.pickup_time && (

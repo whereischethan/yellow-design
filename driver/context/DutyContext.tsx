@@ -56,7 +56,13 @@ export interface DutyBooking {
   } | null
   assignedDriver: any | null
   assignedVehicle: any | null
-  stops: any[] | null
+  stops: {
+    location: string
+    placeName?: string
+    placeId?: string
+    lat?: number
+    lng?: number
+  }[] | null
   createdAt: string
 }
 

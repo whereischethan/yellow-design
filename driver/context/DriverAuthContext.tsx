@@ -28,6 +28,8 @@ export interface DriverProfile {
   phone: string
   photoUrl?: string | null
   rating: number
+  status?: string
+  trips?: number
   vehicle?: string | null
   plate?: string | null
   bankUpi?: string | null

@@ -31,7 +31,7 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
         select: { id: true, phone: true, name: true, email: true, role: true,
                   referralCode: true, referralCredits: true, referredById: true },
       }),
-      prisma.booking.count({ where: { userId: req.userId! } }),
+      prisma.booking.count({ where: { userId: req.userId!, status: { not: 'cancelled' } } }),
     ])
     if (!userRow) return res.status(404).json({ error: 'User not found' })
 

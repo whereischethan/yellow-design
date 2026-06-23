@@ -19,9 +19,7 @@ export default function CancelledScreen() {
 
   const booking = bookings.find((b) => b.id === id) ?? currentBooking;
 
-  const cancellationNote =
-    (booking as any)?.cancellationNote ??
-    'This trip was cancelled. You are not at fault.';
+  const cancellationNote = 'This trip was cancelled. You are not at fault.';
 
   const hasMoreTrips = currentTripIndex < bookings.length - 1;
   const nextBooking = hasMoreTrips ? bookings[currentTripIndex + 1] : null;

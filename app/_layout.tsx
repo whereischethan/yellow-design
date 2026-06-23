@@ -15,11 +15,6 @@ import {
   JetBrainsMono_400Regular,
   JetBrainsMono_500Medium,
 } from '@expo-google-fonts/jetbrains-mono'
-import {
-  NotoSansKannada_400Regular,
-  NotoSansKannada_500Medium,
-  NotoSansKannada_600SemiBold,
-} from '@expo-google-fonts/noto-sans-kannada'
 
 SplashScreen.preventAutoHideAsync()
 
@@ -30,9 +25,6 @@ export default function RootLayout() {
     BricolageGrotesque_600SemiBold,
     JetBrainsMono_400Regular,
     JetBrainsMono_500Medium,
-    NotoSansKannada_400Regular,
-    NotoSansKannada_500Medium,
-    NotoSansKannada_600SemiBold,
   })
 
   useEffect(() => {

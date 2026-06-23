@@ -307,12 +307,6 @@ const styles = StyleSheet.create({
     color: YL.ink,
     marginBottom: 6,
   },
-  kannadaSub: {
-    fontFamily: FONTS.kannada,
-    fontSize: 14,
-    color: YL.ink3,
-    marginBottom: 18,
-  },
   sentTo: {
     fontSize: 14.5,
     color: YL.ink2,

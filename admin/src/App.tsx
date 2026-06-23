@@ -1,5 +1,5 @@
 import React from 'react'
-import type { Booking, Driver, Vehicle, Customer, Lead, Stats } from './types'
+import type { Booking, Driver, Vehicle, Customer, Lead, Stats, BookingFilter } from './types'
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: any) { super(props); this.state = { error: null } }
@@ -123,6 +123,12 @@ export default function App() {
   const [showAddDriver, setShowAddDriver]   = React.useState(false)
   const [showAddVehicle, setShowAddVehicle] = React.useState(false)
   const [showProfile, setShowProfile]       = React.useState(false)
+  const [bookingFilters, setBookingFilters] = React.useState<BookingFilter>({})
+
+  const navigateToBookings = React.useCallback((filters: BookingFilter) => {
+    setBookingFilters(filters)
+    setPage('bookings')
+  }, [])
 
   const handleSignOut = () => { clearAdminKey(); setAuthed(false) }
 
@@ -236,8 +242,8 @@ export default function App() {
             <button onClick={() => setNetworkError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 16, lineHeight: 1, padding: '0 4px' }}>×</button>
           </div>
         )}
-        {page === 'dashboard'  && <Dashboard bookings={bookings} drivers={drivers} stats={stats} adminName={admin?.name} onOpen={setOpenBooking} onAssignRequest={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} />}
-        {page === 'bookings'   && <BookingsList bookings={bookings} onOpen={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} />}
+        {page === 'dashboard'  && <Dashboard bookings={bookings} drivers={drivers} stats={stats} adminName={admin?.name} onOpen={setOpenBooking} onAssignRequest={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} onNavigateToBookings={navigateToBookings} />}
+        {page === 'bookings'   && <BookingsList bookings={bookings} onOpen={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} initialFilters={bookingFilters} onClearFilters={() => setBookingFilters({})} />}
         {page === 'drivers'    && <DriversPage drivers={drivers} onUpdate={d => setDrivers(prev => prev.map(x => x.id === d.id ? d : x))} onAddDriver={() => setShowAddDriver(true)} onAddVehicle={() => setShowAddVehicle(true)} />}
         {page === 'vehicles'   && <VehiclesPage vehicles={vehicles} drivers={drivers} onUpdate={v => setVehicles(prev => prev.map(x => x.id === v.id ? v : x))} onAddVehicle={() => setShowAddVehicle(true)} onVehiclesRefresh={() => getVehicles().then(r => setVehicles(r.vehicles)).catch(() => {})} />}
         {page === 'customers'  && <CustomersPage customers={customers} onUpdate={c => setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...c } : x))} onRefresh={() => getCustomers().then(r => setCustomers(r.customers)).catch(() => {})} />}
@@ -245,7 +251,7 @@ export default function App() {
         {page === 'pricing'    && <PricingPage isSuperAdmin={isSuperAdmin} />}
         {page === 'empty-leg'  && <EmptyLegPage />}
         {page === 'invoices'   && <InvoicesPage />}
-        {page === 'finance'    && <FinancePage />}
+        {page === 'finance'    && <FinancePage onNavigateToBookings={navigateToBookings} />}
         {page === 'settings'   && <SettingsPage />}
         {page === 'team'       && <TeamPage selfPhone={admin?.phone ?? ''} />}
 

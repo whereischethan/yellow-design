@@ -85,7 +85,7 @@ export default function EndTripScreen() {
     try {
       await saveReading(reading);
     } catch (_) {}
-    addReading(reading);
+    addReading({ ...reading, timestamp: new Date().toISOString() });
     if (driverCollects) {
       router.push(`/(duty)/payment?id=${bookingId}`);
       return;

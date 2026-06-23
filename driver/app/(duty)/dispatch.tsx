@@ -38,7 +38,9 @@ export default function DispatchScreen() {
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
         <TouchableOpacity
           style={styles.ackButton}
-          onPress={() => router.back()}
+          onPress={() =>
+            router.canGoBack() ? router.back() : router.replace('/(duty)/roster')
+          }
         >
           <Text style={styles.ackButtonText}>Go back</Text>
         </TouchableOpacity>

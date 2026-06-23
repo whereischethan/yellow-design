@@ -182,8 +182,9 @@ export interface Lead {
   user_phone: string | null
   status: 'new' | 'called' | 'converted' | 'lost'
   trip_type: string
-  pickup: { placeName?: string; location: string; dateTime?: string } | null
-  drop: { placeName?: string; location: string } | null
+  pickup: { placeName?: string; location: string; dateTime?: string; lat?: number; lng?: number; placeId?: string } | null
+  drop: { placeName?: string; location: string; lat?: number; lng?: number; placeId?: string } | null
+  stops: { placeName?: string; location: string; lat?: number; lng?: number; placeId?: string }[] | null
   price: number
   pickup_time: string | null
   flight: string | null
@@ -203,3 +204,14 @@ export interface Stats {
 }
 
 export type PricingConfig = Record<string, string>
+
+export interface BookingFilter {
+  statuses?: string[]
+  paymentStatus?: 'paid' | 'unpaid' | ''
+  dateFrom?: string
+  dateTo?: string
+  tripType?: string
+  isToday?: boolean
+  source?: string
+  sourceLabel?: string
+}

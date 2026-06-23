@@ -17,6 +17,7 @@ import YAppChrome from '../../components/YAppChrome'
 import YButton from '../../components/YButton'
 import { IconPerson } from '../../components/icons'
 import { checkAvailability, logLead } from '../../lib/api'
+import { useAuth } from '../../context/AuthContext'
 import { pixelViewContent, pixelLead, pixelInitiateCheckout } from '../../lib/pixel'
 import type { PricingResponse, BookingLocation, FlightInfo } from '../../types/booking'
 
@@ -144,6 +145,21 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
 
   const distanceKm = pricing?.distanceKm
 
+  const { user } = useAuth()
+  const isNewUser = (user?.bookingCount ?? 0) === 0
+  const hasEmptyLeg = !!pricing?.emptyLeg
+  const originalFare = hasEmptyLeg ? yellowSkyPrice + (pricing?.emptyLeg?.savedAmount ?? 0) : yellowSkyPrice
+  function calcFirstRideDiscount(fare: number): number {
+    if (fare >= 1000) return Math.min(Math.round(fare * 0.20), fare - 1000)
+    return Math.round(fare * 0.10)
+  }
+  // Empty leg is exclusive — no first-ride discount stacks with it
+  const newUserDiscount = !hasEmptyLeg && isNewUser ? calcFirstRideDiscount(yellowSkyPrice) : 0
+  const newUserPct = yellowSkyPrice >= 1000 ? 20 : 10
+  const effectivePrice = yellowSkyPrice - newUserDiscount
+  const totalSaved = (hasEmptyLeg ? pricing!.emptyLeg!.savedAmount : 0) + newUserDiscount
+  const showDiscount = hasEmptyLeg || isNewUser
+
   const [availability, setAvailability] = useState<{
     checked: boolean
     available: boolean
@@ -173,17 +189,17 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
       pickup,
       drop,
       stops,
-      price: yellowSkyPrice,
+      price: effectivePrice,
       pickupTime: pickup.dateTime,
       flight: params.flight || undefined,
       pricing: pricing ?? undefined,
     }).then((leadId) => {
       // ViewContent — user sees the priced vehicle card
-      pixelViewContent({ value: yellowSkyPrice, eventID: `vc_${leadId ?? Date.now()}` })
+      pixelViewContent({ value: effectivePrice, eventID: `vc_${leadId ?? Date.now()}` })
       if (leadId) {
         // Lead + InitiateCheckout with IDs matching the server Conversions API events
-        pixelLead({ value: yellowSkyPrice, eventID: `lead_${leadId}` })
-        pixelInitiateCheckout({ value: yellowSkyPrice, eventID: `checkout_${leadId}` })
+        pixelLead({ value: effectivePrice, eventID: `lead_${leadId}` })
+        pixelInitiateCheckout({ value: effectivePrice, eventID: `checkout_${leadId}` })
       }
     })
   }, [])
@@ -254,10 +270,12 @@ tripType: params.tripType,
           <View style={styles.recommendedBadge}>
             <Text style={styles.recommendedText}>YELLOW SKY</Text>
           </View>
-          {pricing?.emptyLeg && (
+          {showDiscount && (
             <View style={styles.specialRateBadge}>
               <Text style={styles.specialRateText}>
-                {pricing.emptyLeg.type === 'homeBase' ? 'HOME RATE' : '✦ SPECIAL RATE'}
+                {isNewUser && !hasEmptyLeg
+                  ? `✦ ${newUserPct}% FIRST RIDE`
+                  : pricing!.emptyLeg!.type === 'homeBase' ? 'HOME RATE' : '✦ SPECIAL RATE'}
               </Text>
             </View>
           )}
@@ -277,9 +295,12 @@ tripType: params.tripType,
             </View>
 
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
-              <Text style={styles.price}>₹{yellowSkyPrice.toLocaleString('en-IN')}</Text>
-              {pricing?.emptyLeg && (
-                <Text style={styles.savingsText}>save ₹{pricing.emptyLeg.savedAmount.toLocaleString('en-IN')}</Text>
+              {showDiscount && (
+                <Text style={styles.originalPrice}>₹{originalFare.toLocaleString('en-IN')}</Text>
+              )}
+              <Text style={styles.price}>₹{effectivePrice.toLocaleString('en-IN')}</Text>
+              {showDiscount && (
+                <Text style={styles.savingsText}>save ₹{totalSaved.toLocaleString('en-IN')}</Text>
               )}
               <CheckMark />
             </View>
@@ -392,6 +413,7 @@ const styles = StyleSheet.create({
   distanceText: { fontFamily: FONTS.mono, fontSize: 11, color: YL.ink3, marginTop: 6, letterSpacing: 0.2 },
   statRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   statText: { fontFamily: FONTS.display, fontSize: 12, color: YL.ink2 },
+  originalPrice: { fontFamily: FONTS.display, fontSize: 13, color: YL.ink3, textDecorationLine: 'line-through', letterSpacing: -0.2 },
   price: { fontFamily: FONTS.display, fontSize: 20, fontWeight: '600', color: YL.ink, letterSpacing: -0.4 },
   specialRateBadge: {
     position: 'absolute',

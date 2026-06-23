@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,22 +24,19 @@ export default function InTripScreen() {
   const booking = bookings.find((b) => b.id === id) ?? currentBooking;
 
   const [nearDrop, setNearDrop] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+  const [gpsUnavailable, setGpsUnavailable] = useState(false);
+  const gotFixRef = useRef(false);
 
   const distanceKm: number = (booking?.pricing as any)?.distanceKm ?? 0;
-  const totalDuration = distanceKm > 0 ? (distanceKm / 30) * 60 : null; // minutes, null if unknown
 
-  const pickupDt = booking?.pickup
-    ? new Date((booking.pickup as any).dateTime ?? Date.now())
-    : new Date();
-
+  // If GPS never resolves within 60s (permission denied, slow web geolocation),
+  // unlock manual arrival instead of soft-locking the driver
   useEffect(() => {
-    const tick = setInterval(() => {
-      setElapsed((Date.now() - pickupDt.getTime()) / 60000);
-    }, 10000);
-    setElapsed((Date.now() - pickupDt.getTime()) / 60000);
-    return () => clearInterval(tick);
-  }, [pickupDt.getTime()]);
+    const timer = setTimeout(() => {
+      if (!gotFixRef.current) setGpsUnavailable(true);
+    }, 60_000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -50,6 +47,8 @@ export default function InTripScreen() {
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: 10000, distanceInterval: 50 },
         (loc) => {
+          gotFixRef.current = true;
+          setGpsUnavailable(false);
           if (Date.now() - lastPost >= 10_000) {
             lastPost = Date.now();
             postDriverLocation({
@@ -79,26 +78,18 @@ export default function InTripScreen() {
     };
   }, []);
 
-  const progress = totalDuration ? Math.min(100, Math.round((elapsed / totalDuration) * 100)) : 0;
-
-  const pickupName = (booking?.pickup as any)?.placeName ?? 'Pickup';
-  const dropName = (booking?.drop as any)?.placeName ?? 'Drop-off';
-  const tripCode = booking?.id?.slice(-6).toUpperCase() ?? '------';
-  const riderName =
-    (booking as any)?.riderName ?? (booking as any)?.userName ?? 'Rider';
+  const pickupName = (booking?.pickup as any)?.placeName ?? (booking?.pickup as any)?.location ?? 'Pickup';
+  const dropName = (booking?.drop as any)?.placeName ?? (booking?.drop as any)?.location ?? 'Drop-off';
+  const tripCode = booking?.tripCode ?? booking?.id?.slice(-6).toUpperCase() ?? '------';
+  const riderName = booking?.guestName ?? 'Passenger';
   const passengerCount = (booking as any)?.passengerCount ?? 1;
-
-  const etaStr = (() => {
-    if (!totalDuration) return 'ETA unknown'
-    const etaMinutes = Math.max(0, Math.round(totalDuration - elapsed))
-    const h = Math.floor(etaMinutes / 60)
-    const m = etaMinutes % 60
-    return h > 0 ? `${h}h ${m}m remaining` : `${m}m remaining`
-  })()
+  const stops = booking?.stops ?? [];
 
   const dropHasCoords = !!(
     (booking?.drop as any)?.lat && (booking?.drop as any)?.lng
   );
+
+  const canArrive = nearDrop || !dropHasCoords || gpsUnavailable;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -115,39 +106,51 @@ export default function InTripScreen() {
           </View>
         </View>
 
-        {/* Progress card */}
+        {/* Route card */}
         <View style={styles.card}>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+          <View style={styles.routeStop}>
+            <Text style={styles.routeLabel}>FROM</Text>
+            <Text style={styles.routeName} numberOfLines={2}>
+              {pickupName}
+            </Text>
           </View>
-          <Text style={styles.progressPct}>{progress}% complete</Text>
 
-          <View style={styles.routeRow}>
-            <View style={styles.routeItem}>
-              <Text style={styles.routeLabel}>FROM</Text>
+          {stops.map((stop, i) => (
+            <View key={i} style={styles.routeStop}>
+              <Text style={styles.routeLabel}>STOP {i + 1}</Text>
               <Text style={styles.routeName} numberOfLines={2}>
-                {pickupName}
+                {stop.placeName ?? stop.location}
               </Text>
             </View>
-            <Text style={styles.routeArrow}>→</Text>
-            <View style={[styles.routeItem, styles.routeItemRight]}>
-              <Text style={[styles.routeLabel, { textAlign: 'right' }]}>TO</Text>
-              <Text
-                style={[styles.routeName, { textAlign: 'right' }]}
-                numberOfLines={2}
-              >
-                {dropName}
-              </Text>
-            </View>
+          ))}
+
+          <View style={styles.routeStop}>
+            <Text style={styles.routeLabel}>TO</Text>
+            <Text style={styles.routeName} numberOfLines={2}>
+              {dropName}
+            </Text>
           </View>
 
-          <View style={styles.etaRow}>
-            <Text style={styles.etaText}>ETA: {etaStr}</Text>
-            {distanceKm > 0 && <Text style={styles.etaDist}>{distanceKm} km total</Text>}
-          </View>
+          {distanceKm > 0 && (
+            <Text style={styles.distanceText}>{distanceKm} km total</Text>
+          )}
+
+          {dropHasCoords && (
+            <TouchableOpacity
+              style={styles.navigateLink}
+              onPress={() =>
+                Linking.openURL(
+                  `https://www.google.com/maps/dir/?api=1&destination=${(booking?.drop as any).lat},${(booking?.drop as any).lng}&travelmode=driving`,
+                )
+              }
+              activeOpacity={0.7}
+            >
+              <Text style={styles.navigateLinkText}>Navigate to drop →</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Rider card */}
+        {/* Passenger card */}
         <View style={styles.card}>
           <View style={styles.riderRow}>
             <View style={styles.riderAvatar}>
@@ -161,9 +164,6 @@ export default function InTripScreen() {
                 {passengerCount} passenger{passengerCount !== 1 ? 's' : ''}
               </Text>
             </View>
-            <View style={styles.acPill}>
-              <Text style={styles.acText}>❄ 20°C</Text>
-            </View>
           </View>
         </View>
 
@@ -171,17 +171,19 @@ export default function InTripScreen() {
         <View
           style={[
             styles.geofenceCard,
-            { backgroundColor: nearDrop ? YL.leafSoft : YL.gulmoharSoft },
+            { backgroundColor: canArrive ? YL.leafSoft : YL.gulmoharSoft },
           ]}
         >
           <Text
             style={[
               styles.geofenceText,
-              { color: nearDrop ? YL.leaf : YL.gulmohar },
+              { color: canArrive ? YL.leaf : YL.gulmohar },
             ]}
           >
             {nearDrop
               ? '📍 Near drop-off — ready to arrive'
+              : gpsUnavailable
+              ? '📍 Location unavailable — manual arrival enabled'
               : dropHasCoords
               ? '📍 Not yet near drop-off (within 2 km to unlock arrival)'
               : '📍 Manual arrival — no drop coordinates'}
@@ -201,8 +203,8 @@ export default function InTripScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.arrivedButton, !nearDrop && styles.arrivedButtonDisabled]}
-          disabled={!nearDrop}
+          style={[styles.arrivedButton, !canArrive && styles.arrivedButtonDisabled]}
+          disabled={!canArrive}
           onPress={() =>
             router.push(`/(duty)/end-trip?id=${booking?.id ?? id}`)
           }
@@ -210,7 +212,7 @@ export default function InTripScreen() {
           <Text
             style={[
               styles.arrivedButtonText,
-              !nearDrop && styles.arrivedButtonTextDisabled,
+              !canArrive && styles.arrivedButtonTextDisabled,
             ]}
           >
             Arrived at destination ✓
@@ -263,38 +265,13 @@ const styles = StyleSheet.create({
     borderColor: YL.line,
     padding: 16,
   },
-  progressBarBg: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: YL.line,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressBarFill: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: YL.yellow,
-  },
-  progressPct: {
-    fontFamily: FONTS.mono,
-    fontSize: 12,
-    color: YL.ink3,
+  routeStop: {
     marginBottom: 12,
-  },
-  routeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  routeItem: {
-    flex: 1,
-  },
-  routeItemRight: {
-    alignItems: 'flex-end',
   },
   routeLabel: {
     fontFamily: FONTS.mono,
     fontSize: 10,
+    letterSpacing: 1.2,
     color: YL.ink3,
     marginBottom: 2,
   },
@@ -303,28 +280,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: YL.ink,
   },
-  routeArrow: {
-    fontFamily: FONTS.display,
-    fontSize: 18,
+  distanceText: {
+    fontFamily: FONTS.mono,
+    fontSize: 13,
     color: YL.ink3,
-    marginHorizontal: 8,
-  },
-  etaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     borderTopWidth: 1,
     borderTopColor: YL.lineSoft,
     paddingTop: 10,
   },
-  etaText: {
-    fontFamily: FONTS.mono,
-    fontSize: 13,
-    color: YL.ink2,
+  navigateLink: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
   },
-  etaDist: {
+  navigateLinkText: {
     fontFamily: FONTS.mono,
     fontSize: 13,
-    color: YL.ink3,
+    color: YL.leaf,
   },
   riderRow: {
     flexDirection: 'row',
@@ -358,17 +329,6 @@ const styles = StyleSheet.create({
     color: YL.ink2,
     marginTop: 2,
   },
-  acPill: {
-    backgroundColor: YL.bg2,
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  acText: {
-    fontFamily: FONTS.mono,
-    fontSize: 12,
-    color: YL.ink2,
-  },
   geofenceCard: {
     borderRadius: 12,
     padding: 12,
@@ -399,19 +359,6 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.displaySemiBold,
     fontSize: 15,
     color: YL.gulmohar,
-  },
-  issueButton: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: YL.line,
-  },
-  issueText: {
-    fontFamily: FONTS.display,
-    fontSize: 15,
-    color: YL.ink2,
   },
   arrivedButton: {
     backgroundColor: YL.ink,

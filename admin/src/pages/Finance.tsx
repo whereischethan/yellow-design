@@ -1,6 +1,7 @@
 import React from 'react'
 import { getFinanceSummary } from '../api'
 import { YL, Icons, Mono, Stack, Card, PageHeader, Button, fmtINR, useIsMobile, getISTComponents, fromISTISO } from '../components/ui'
+import type { BookingFilter } from '../types'
 
 interface MonthRow  { month: string; revenue: number; collected: number; upcoming: number; gst: number; rides: number }
 interface TypeRow   { type: string;  revenue: number; gst: number; rides: number }
@@ -25,19 +26,49 @@ const TYPE_COLOR: Record<string, string> = {
   'Other':          YL.ink3,
 }
 
-function StatCard({ label, value, hint, accent }: { label: string; value: string; hint?: string; accent?: string }) {
+function StatCard({ label, value, hint, accent, onClick }: { label: string; value: string; hint?: string; accent?: string; onClick?: () => void }) {
+  const [hovered, setHovered] = React.useState(false)
+  const isClickable = !!onClick
   return (
-    <div style={{ flex: 1, minWidth: 0, background: YL.card, border: `1px solid ${YL.line}`, borderRadius: 12, padding: '18px 18px 16px', position: 'relative', overflow: 'hidden' }}>
+    <div
+      onClick={onClick}
+      onMouseEnter={() => isClickable && setHovered(true)}
+      onMouseLeave={() => isClickable && setHovered(false)}
+      style={{
+        flex: 1, minWidth: 0, background: YL.card,
+        border: `1px solid ${isClickable && hovered ? YL.yellowDeep : YL.line}`,
+        borderRadius: 12, padding: '18px 18px 16px', position: 'relative', overflow: 'hidden',
+        cursor: isClickable ? 'pointer' : 'default',
+        transition: 'border-color 150ms',
+        boxShadow: isClickable && hovered ? `0 2px 8px rgba(43,39,32,0.08)` : 'none',
+      }}
+    >
       {accent && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: accent }}/>}
       <div style={{ fontSize: 12, color: YL.ink2, fontWeight: 500 }}>{label}</div>
       <div style={{ marginTop: 10, fontSize: 28, fontWeight: 600, color: YL.ink, letterSpacing: -0.5, lineHeight: 1 }}>{value}</div>
       {hint && <div style={{ marginTop: 8, fontSize: 11.5, color: YL.ink2 }}>{hint}</div>}
+      {isClickable && (
+        <div style={{ position: 'absolute', bottom: 10, right: 12, fontSize: 10.5, color: hovered ? YL.ink2 : YL.ink3, fontWeight: 500, transition: 'color 150ms' }}>
+          View bookings →
+        </div>
+      )}
     </div>
   )
 }
 
-function RevenueChart({ monthly }: { monthly: MonthRow[] }) {
+function getMonthRange(month: string): { dateFrom: string; dateTo: string } {
+  const [y, mo] = month.split('-').map(Number)
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  const dateFrom = fromISTISO(`${y}-${p2(mo)}-01T00:00`).toISOString()
+  const nextMo = mo === 12 ? 1 : mo + 1
+  const nextY = mo === 12 ? y + 1 : y
+  const dateTo = fromISTISO(`${nextY}-${p2(nextMo)}-01T00:00`).toISOString()
+  return { dateFrom, dateTo }
+}
+
+function RevenueChart({ monthly, onNavigate }: { monthly: MonthRow[]; onNavigate?: (f: BookingFilter) => void }) {
   const maxRev = Math.max(...monthly.map(m => m.revenue), 1)
+  const [hoveredRow, setHoveredRow] = React.useState<string | null>(null)
   const cols = [
     { h: 'Month',    align: 'left'  },
     { h: 'Rides',    align: 'right' },
@@ -51,7 +82,10 @@ function RevenueChart({ monthly }: { monthly: MonthRow[] }) {
       <div style={{ padding: '16px 18px 12px', borderBottom: `1px solid ${YL.line}` }}>
         <Stack gap={3}>
           <div style={{ fontSize: 14, fontWeight: 600, color: YL.ink }}>Monthly breakdown</div>
-          <div style={{ fontSize: 12, color: YL.ink2 }}>Earned = completed · Collected = paid · Upcoming = confirmed / assigned</div>
+          <div style={{ fontSize: 12, color: YL.ink2 }}>
+            Earned = completed · Collected = paid · Upcoming = confirmed / assigned
+            {onNavigate && <span style={{ color: YL.ink3 }}> · Click a row to see those bookings</span>}
+          </div>
         </Stack>
       </div>
       <div style={{ overflowX: 'auto' }}>
@@ -70,9 +104,25 @@ function RevenueChart({ monthly }: { monthly: MonthRow[] }) {
             )}
             {monthly.map(m => {
               const barW = maxRev > 0 ? (m.revenue / maxRev) * 100 : 0
+              const isHovered = hoveredRow === m.month
               return (
-                <tr key={m.month} style={{ borderTop: `1px solid ${YL.line}` }}>
-                  <td style={{ padding: '11px 18px', fontWeight: 600, color: YL.ink, whiteSpace: 'nowrap' }}>{fmtMonth(m.month)}</td>
+                <tr
+                  key={m.month}
+                  style={{ borderTop: `1px solid ${YL.line}`, cursor: onNavigate ? 'pointer' : 'default', background: isHovered ? '#FCF8EE' : 'transparent', transition: 'background 100ms' }}
+                  onClick={() => {
+                    if (!onNavigate) return
+                    const { dateFrom, dateTo } = getMonthRange(m.month)
+                    onNavigate({ dateFrom, dateTo, source: 'Finance', sourceLabel: `${fmtMonth(m.month)} rides` })
+                  }}
+                  onMouseEnter={() => onNavigate && setHoveredRow(m.month)}
+                  onMouseLeave={() => setHoveredRow(null)}
+                >
+                  <td style={{ padding: '11px 18px', fontWeight: 600, color: YL.ink, whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {fmtMonth(m.month)}
+                      {onNavigate && isHovered && <span style={{ fontSize: 10.5, color: YL.ink3, fontWeight: 400 }}>→</span>}
+                    </div>
+                  </td>
                   <td style={{ padding: '11px 18px', textAlign: 'right', fontFamily: '"JetBrains Mono", monospace', fontSize: 13 }}>{m.rides}</td>
                   <td style={{ padding: '11px 18px', textAlign: 'right', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, fontWeight: 600, color: YL.ink }}>{fmtINR(m.revenue)}</td>
                   <td style={{ padding: '11px 18px', textAlign: 'right', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.greenInk }}>{fmtINR(m.collected)}</td>
@@ -118,28 +168,42 @@ function RevenueChart({ monthly }: { monthly: MonthRow[] }) {
   )
 }
 
-function ByTypeCard({ byType }: { byType: TypeRow[] }) {
+function ByTypeCard({ byType, onNavigate }: { byType: TypeRow[]; onNavigate?: (f: BookingFilter) => void }) {
   const maxRev = Math.max(...byType.map(t => t.revenue), 1)
+  const [hoveredType, setHoveredType] = React.useState<string | null>(null)
   return (
     <Card>
       <div style={{ fontSize: 14, fontWeight: 600, color: YL.ink, marginBottom: 4 }}>Revenue by ride type</div>
-      <div style={{ fontSize: 12, color: YL.ink2, marginBottom: 18 }}>Completed rides · all time in range</div>
+      <div style={{ fontSize: 12, color: YL.ink2, marginBottom: 18 }}>
+        Completed rides · all time in range
+        {onNavigate && <span style={{ color: YL.ink3 }}> · Click to drill down</span>}
+      </div>
       <Stack gap={14}>
         {byType.length === 0 && <div style={{ fontSize: 13, color: YL.ink3 }}>No completed rides in this period</div>}
         {byType.map(t => {
           const color = TYPE_COLOR[t.type] || YL.ink3
           const barW = (t.revenue / maxRev) * 100
+          const isHovered = hoveredType === t.type
           return (
-            <div key={t.type}>
+            <div
+              key={t.type}
+              onClick={() => onNavigate?.({ tripType: t.type, statuses: ['completed'], source: 'Finance', sourceLabel: t.type })}
+              onMouseEnter={() => onNavigate && setHoveredType(t.type)}
+              onMouseLeave={() => setHoveredType(null)}
+              style={{ cursor: onNavigate ? 'pointer' : 'default', padding: '6px 8px', margin: '-6px -8px', borderRadius: 8, background: isHovered ? YL.bg : 'transparent', transition: 'background 100ms' }}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 999, background: color, flexShrink: 0, display: 'inline-block' }}/>
                   <span style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{t.type}</span>
                   <span style={{ fontSize: 12, color: YL.ink3 }}>{t.rides} ride{t.rides !== 1 ? 's' : ''}</span>
                 </div>
-                <Mono size={13} weight={600}>{fmtINR(t.revenue)}</Mono>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Mono size={13} weight={600}>{fmtINR(t.revenue)}</Mono>
+                  {onNavigate && isHovered && <span style={{ fontSize: 10.5, color: YL.ink3 }}>→</span>}
+                </div>
               </div>
-              <div style={{ height: 5, background: YL.bg, borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ height: 5, background: YL.line, borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{ width: `${barW}%`, height: '100%', background: color, borderRadius: 3, opacity: 0.8, transition: 'width 400ms ease' }}/>
               </div>
             </div>
@@ -189,7 +253,11 @@ const RANGES = [
   { label: 'Last 12 months', months: 12 },
 ]
 
-export default function FinancePage() {
+interface FinancePageProps {
+  onNavigateToBookings?: (f: BookingFilter) => void
+}
+
+export default function FinancePage({ onNavigateToBookings }: FinancePageProps) {
   const isMobile = useIsMobile()
   const [summary, setSummary] = React.useState<Summary | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -228,6 +296,10 @@ export default function FinancePage() {
     { label: '6M', months: 6 },
     { label: '12M', months: 12 },
   ]
+
+  const collectionRate = summary && summary.totalRevenue > 0
+    ? Math.round((summary.totalCollected / summary.totalRevenue) * 100)
+    : null
 
   return (
     <div style={{ flex: 1, overflow: 'auto', background: YL.bg, display: 'flex', flexDirection: 'column' }}>
@@ -270,8 +342,13 @@ export default function FinancePage() {
               <StatCard
                 label="Collected"
                 value={fmtINR(summary.totalCollected) ?? '—'}
-                hint={`of ${fmtINR(summary.totalRevenue)} earned · ${summary.totalRides} rides`}
+                hint={collectionRate != null
+                  ? `${collectionRate}% of ${fmtINR(summary.totalRevenue)} earned · ${summary.totalRides} rides`
+                  : `of ${fmtINR(summary.totalRevenue)} earned · ${summary.totalRides} rides`}
                 accent={YL.leaf}
+                onClick={onNavigateToBookings
+                  ? () => onNavigateToBookings({ statuses: ['completed'], paymentStatus: 'paid', source: 'Finance', sourceLabel: 'Collected rides' })
+                  : undefined}
               />
               <StatCard
                 label="GST (5%)"
@@ -286,31 +363,43 @@ export default function FinancePage() {
                   ? `${summary.outstandingCount} ride${summary.outstandingCount !== 1 ? 's' : ''} completed but unpaid`
                   : 'All paid up'}
                 accent={summary.outstandingAmount > 0 ? YL.gulmohar : YL.leaf}
+                onClick={onNavigateToBookings && summary.outstandingCount > 0
+                  ? () => onNavigateToBookings({ statuses: ['completed'], paymentStatus: 'unpaid', source: 'Finance', sourceLabel: 'Outstanding rides' })
+                  : undefined}
               />
               <StatCard
                 label="Upcoming pipeline"
                 value={fmtINR(summary.totalUpcoming) ?? '—'}
                 hint="Confirmed + assigned bookings"
                 accent={YL.blueInk}
+                onClick={onNavigateToBookings
+                  ? () => onNavigateToBookings({ statuses: ['pending', 'confirmed', 'assigned'], source: 'Finance', sourceLabel: 'Upcoming pipeline' })
+                  : undefined}
               />
             </div>
 
             {/* Monthly revenue table */}
-            <RevenueChart monthly={summary.monthly} />
+            <RevenueChart monthly={summary.monthly} onNavigate={onNavigateToBookings} />
 
             {/* Type + method row */}
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 14 : 20 }}>
-              <ByTypeCard byType={summary.byType} />
+              <ByTypeCard byType={summary.byType} onNavigate={onNavigateToBookings} />
               <ByMethodCard byMethod={summary.byMethod} />
             </div>
 
             {/* Outstanding note */}
             {summary.outstandingCount > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: '#FFF8E6', border: `1px solid ${YL.yellowDeep}`, borderRadius: 10, fontSize: 13 }}>
+              <div
+                onClick={onNavigateToBookings
+                  ? () => onNavigateToBookings({ statuses: ['completed'], paymentStatus: 'unpaid', source: 'Finance', sourceLabel: 'Outstanding rides' })
+                  : undefined}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: '#FFF8E6', border: `1px solid ${YL.yellowDeep}`, borderRadius: 10, fontSize: 13, cursor: onNavigateToBookings ? 'pointer' : 'default' }}
+              >
                 <span style={{ display: 'flex', color: YL.gulmohar }}>{Icons.alert}</span>
-                <span style={{ color: YL.ink }}>
+                <span style={{ color: YL.ink, flex: 1 }}>
                   <strong>{summary.outstandingCount} completed booking{summary.outstandingCount !== 1 ? 's' : ''}</strong> still show unpaid ({fmtINR(summary.outstandingAmount)}). Mark them paid in Bookings or send a payment link.
                 </span>
+                {onNavigateToBookings && <span style={{ fontSize: 12, color: YL.ink2, whiteSpace: 'nowrap' }}>View all →</span>}
               </div>
             )}
           </Stack>

@@ -32,14 +32,18 @@ export default function PaymentScreen() {
   const bookingId = booking?.id ?? id ?? '';
 
   const totalPrice: number = (booking?.pricing as any)?.totalPrice ?? 0;
-  const tripCode = bookingId.slice(-6).toUpperCase();
+  const tripCode = booking?.tripCode ?? bookingId.slice(-6).toUpperCase();
 
   const [qrData, setQrData] = useState<QrData | null>(null);
   const [loadingQr, setLoadingQr] = useState(true);
   const [paid, setPaid] = useState(false);
   const [handlingCash, setHandlingCash] = useState(false);
+  const [pollExpired, setPollExpired] = useState(false);
+  const [pollRound, setPollRound] = useState(0);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Poll for ~5 minutes, then pause until the driver taps "Check again"
+  const MAX_POLLS = 60;
 
   useEffect(() => {
     (async () => {
@@ -56,7 +60,15 @@ export default function PaymentScreen() {
 
   useEffect(() => {
     if (paid) return;
+    let polls = 0;
+    setPollExpired(false);
     pollRef.current = setInterval(async () => {
+      polls += 1;
+      if (polls > MAX_POLLS) {
+        clearInterval(pollRef.current!);
+        setPollExpired(true);
+        return;
+      }
       try {
         const status = await getPaymentStatus(bookingId);
         if (status?.paid) {
@@ -76,7 +88,7 @@ export default function PaymentScreen() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [bookingId, paid]);
+  }, [bookingId, paid, pollRound]);
 
   async function handleCash() {
     setHandlingCash(true);
@@ -165,6 +177,18 @@ export default function PaymentScreen() {
             ))}
           </View>
         </View>
+
+        {/* Polling paused notice */}
+        {pollExpired && !paid && (
+          <TouchableOpacity
+            style={styles.checkAgainButton}
+            onPress={() => setPollRound((r) => r + 1)}
+          >
+            <Text style={styles.checkAgainText}>
+              Still waiting for payment — Check again
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Cash button */}
         <TouchableOpacity
@@ -314,6 +338,19 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     fontSize: 11,
     color: YL.ink2,
+  },
+  checkAgainButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: YL.gulmoharSoft,
+    alignItems: 'center',
+    width: '100%',
+  },
+  checkAgainText: {
+    fontFamily: FONTS.displaySemiBold,
+    fontSize: 14,
+    color: YL.gulmohar,
   },
   cashButton: {
     paddingVertical: 14,

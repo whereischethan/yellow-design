@@ -14,7 +14,8 @@ import * as Location from 'expo-location'
 import { YL, FONTS } from '@/constants/theme'
 import { useDuty } from '@/context/DutyContext'
 import { haversineKm, isWithinKm } from '@/lib/geo'
-import { postDriverLocation } from '@/lib/api'
+import { postDriverLocation, updateBookingStatus } from '@/lib/api'
+import { callPhone } from '@/lib/contact'
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
@@ -34,14 +35,25 @@ function mapsUrl(lat: number, lng: number): string {
 
 export default function EnRouteScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { bookings } = useDuty()
+  const { bookings, refreshBooking } = useDuty()
   const booking = bookings.find((b) => b.id === id) ?? null
 
   const [distanceKm, setDistanceKm] = useState<number | null>(null)
   const [permissionGranted, setPermissionGranted] = useState(false)
   const [locationLoading, setLocationLoading] = useState(true)
+  const [gpsUnavailable, setGpsUnavailable] = useState(false)
   const subRef = useRef<Location.LocationSubscription | null>(null)
   const lastPostRef = useRef(0)
+  const gotFixRef = useRef(false)
+
+  // If GPS never resolves within 60s (permission denied, slow web geolocation),
+  // unlock manual arrival instead of soft-locking the driver
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!gotFixRef.current) setGpsUnavailable(true)
+    }, 60_000)
+    return () => clearTimeout(timer)
+  }, [])
 
   const pickupLat = booking?.pickup?.lat
   const pickupLng = booking?.pickup?.lng
@@ -78,6 +90,8 @@ export default function EnRouteScreen() {
               speed: loc.coords.speed ?? undefined,
             })
           }
+          gotFixRef.current = true
+          setGpsUnavailable(false)
           if (hasCoords) {
             const km = haversineKm(loc.coords.latitude, loc.coords.longitude, pickupLat!, pickupLng!)
             setDistanceKm(km)
@@ -96,20 +110,40 @@ export default function EnRouteScreen() {
   }, [hasCoords, pickupLat, pickupLng])
 
   const withinRange = hasCoords && distanceKm !== null && distanceKm <= 2
-  const canMarkArrived = !hasCoords || withinRange
+  const canMarkArrived = !hasCoords || withinRange || gpsUnavailable
   const tripCode = booking?.tripCode ?? id?.slice(-6).toUpperCase() ?? '—'
+
+  const dropLat = booking?.drop?.lat
+  const dropLng = booking?.drop?.lng
+  const dropHasCoords = dropLat != null && dropLng != null
+
+  function goBack() {
+    if (router.canGoBack()) router.back()
+    else router.replace('/(duty)/roster')
+  }
 
   function handleOpenMaps() {
     if (!hasCoords) return
     Linking.openURL(mapsUrl(pickupLat!, pickupLng!))
   }
 
-  function handleCallRider() {
+  function handleOpenDropMaps() {
+    if (!dropHasCoords) return
+    Linking.openURL(mapsUrl(dropLat!, dropLng!))
+  }
+
+  function handleCallPassenger() {
     if (!booking?.guestPhone) return
-    Linking.openURL(`tel:${booking.guestPhone}`)
+    callPhone(booking.guestPhone)
   }
 
   function handleArrived() {
+    // Tell the server (and the passenger's app) the driver has arrived;
+    // never block the driver on a flaky network
+    if (booking && !['arrived', 'in_progress', 'completed'].includes(booking.status)) {
+      updateBookingStatus(String(id), 'arrived').catch(() => {})
+      refreshBooking({ ...booking, status: 'arrived' })
+    }
     router.push(`/(duty)/arrived?id=${id}`)
   }
 
@@ -118,7 +152,7 @@ export default function EnRouteScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.centerState}>
           <Text style={styles.centerText}>Trip not found.</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backLinkBtn}>
+          <TouchableOpacity onPress={() => router.replace('/(duty)/roster')} style={styles.backLinkBtn}>
             <Text style={styles.backLinkText}>← Go back</Text>
           </TouchableOpacity>
         </View>
@@ -135,7 +169,7 @@ export default function EnRouteScreen() {
       >
         {/* TopBar */}
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity onPress={goBack} hitSlop={12}>
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
           <Text style={styles.topTitle}>En Route</Text>
@@ -144,7 +178,7 @@ export default function EnRouteScreen() {
           </View>
         </View>
 
-        {/* Rider card */}
+        {/* Passenger card */}
         <View style={styles.card}>
           <Text style={styles.riderName}>{booking.guestName ?? 'Passenger'}</Text>
           {booking.flight ? (
@@ -174,16 +208,59 @@ export default function EnRouteScreen() {
           ) : null}
         </View>
 
+        {/* Stops card */}
+        {booking.stops && booking.stops.length > 0 ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionEyebrow}>
+              {booking.stops.length === 1 ? 'STOP' : `STOPS (${booking.stops.length})`}
+            </Text>
+            {booking.stops.map((stop, i) => (
+              <View key={i} style={styles.stopRow}>
+                <Text style={styles.stopIndex}>{i + 1}</Text>
+                <Text style={styles.stopText}>{stop.placeName ?? stop.location}</Text>
+                {stop.lat != null && stop.lng != null ? (
+                  <TouchableOpacity
+                    onPress={() => Linking.openURL(mapsUrl(stop.lat!, stop.lng!))}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.mapsLinkText}>Maps →</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         {/* Drop address card */}
         <View style={styles.card}>
           <Text style={styles.sectionEyebrow}>DROP</Text>
           <Text style={styles.addressText}>
             {booking.drop?.placeName ?? booking.drop?.location ?? '—'}
           </Text>
+          {booking.drop?.placeName &&
+          booking.drop?.location &&
+          booking.drop.location !== booking.drop.placeName ? (
+            <Text style={styles.addressSub}>{booking.drop.location}</Text>
+          ) : null}
+          {dropHasCoords ? (
+            <TouchableOpacity
+              style={styles.mapsLink}
+              onPress={handleOpenDropMaps}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.mapsLinkText}>Open in Maps →</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {/* Geofence status bar */}
-        {hasCoords ? (
+        {gpsUnavailable ? (
+          <View style={[styles.geofenceBar, styles.geofenceBarNeutral]}>
+            <Text style={styles.geofenceTextMuted}>
+              Location unavailable — you can mark arrival manually
+            </Text>
+          </View>
+        ) : hasCoords ? (
           locationLoading ? (
             <View style={[styles.geofenceBar, styles.geofenceBarNeutral]}>
               <ActivityIndicator size="small" color={YL.ink3} style={{ marginRight: 8 }} />
@@ -214,11 +291,11 @@ export default function EnRouteScreen() {
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={[styles.ghostBtn, !booking.guestPhone && styles.ghostBtnDisabled]}
-            onPress={handleCallRider}
+            onPress={handleCallPassenger}
             disabled={!booking.guestPhone}
             activeOpacity={0.75}
           >
-            <Text style={styles.ghostBtnText}>Call rider</Text>
+            <Text style={styles.ghostBtnText}>Call passenger</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -333,6 +410,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: YL.ink,
     lineHeight: 22,
+  },
+  addressSub: {
+    fontFamily: FONTS.display,
+    fontSize: 13,
+    color: YL.ink2,
+    lineHeight: 18,
+  },
+  stopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stopIndex: {
+    fontFamily: FONTS.mono,
+    fontSize: 12,
+    color: YL.ink3,
+    width: 16,
+    textAlign: 'center',
+  },
+  stopText: {
+    fontFamily: FONTS.display,
+    fontSize: 15,
+    color: YL.ink,
+    flex: 1,
   },
   mapsLink: {
     alignSelf: 'flex-start',

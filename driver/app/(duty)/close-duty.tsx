@@ -95,7 +95,7 @@ export default function CloseDutyScreen() {
     try {
       await saveReading(reading);
     } catch (_) {}
-    addReading(reading);
+    addReading({ ...reading, timestamp: new Date().toISOString() });
     router.replace('/(duty)/signed-off');
   }
 

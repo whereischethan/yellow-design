@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
-import { randomUUID } from 'crypto'
+import { randomUUID, randomInt } from 'crypto'
+import rateLimit from 'express-rate-limit'
 import prisma from '../lib/prisma'
 import { signAccessToken, signRefreshToken } from '../middleware/auth'
 
@@ -7,10 +8,21 @@ const router = Router()
 
 const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || process.env.MSG91_AUTHKEY || ''
 const MSG91_TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID || ''
-const OTP_TTL_SECS = 10 * 60 // 10 minutes
+const OTP_TTL_SECS = 10 * 60
+const SEND_WINDOW_SECS = 15 * 60
+const MAX_SENDS_PER_WINDOW = 3
+
+const verifyRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many attempts. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.body?.phone ? String(req.body.phone) : (req.ip ?? 'unknown'),
+})
 
 function generateOtp(): string {
-  return String(Math.floor(1000 + Math.random() * 9000))
+  return String(randomInt(1000, 10000))
 }
 
 async function sendOtpViaMSG91(phone: string, otp: string): Promise<void> {
@@ -18,8 +30,8 @@ async function sendOtpViaMSG91(phone: string, otp: string): Promise<void> {
     console.log(`[DEV] OTP for ${phone}: ${otp}`)
     return
   }
-  const url = `https://control.msg91.com/api/v5/otp?template_id=${MSG91_TEMPLATE_ID}&mobile=${phone}&otp=${otp}&authkey=${MSG91_AUTH_KEY}`
-  const res = await fetch(url)
+  const url = `https://control.msg91.com/api/v5/otp?template_id=${encodeURIComponent(MSG91_TEMPLATE_ID)}&mobile=${encodeURIComponent(phone)}&otp=${encodeURIComponent(otp)}`
+  const res = await fetch(url, { headers: { authkey: MSG91_AUTH_KEY } })
   if (!res.ok) throw new Error('Failed to send OTP via MSG91')
 }
 
@@ -29,13 +41,21 @@ router.post('/send-otp', async (req: Request, res: Response) => {
     if (!phone) return res.status(400).json({ error: 'Phone number required' })
 
     const fullPhone = `${countryCode.replace('+', '')}${phone}`
+
+    const windowStart = BigInt(Math.floor(Date.now() / 1000) - SEND_WINDOW_SECS)
+    const recentCount = await prisma.otpSession.count({
+      where: { phone: fullPhone, createdAt: { gt: windowStart } },
+    })
+    if (recentCount >= MAX_SENDS_PER_WINDOW) {
+      return res.status(429).json({ error: 'Too many OTP requests. Please try again later.' })
+    }
+
+    await prisma.otpSession.deleteMany({ where: { phone: fullPhone, verified: 0 } })
+
     const otp = generateOtp()
     const id = randomUUID()
     const expiresAt = BigInt(Math.floor(Date.now() / 1000) + OTP_TTL_SECS)
-
-    await prisma.otpSession.create({
-      data: { id, phone: fullPhone, otp, expiresAt },
-    })
+    await prisma.otpSession.create({ data: { id, phone: fullPhone, otp, expiresAt } })
 
     await sendOtpViaMSG91(fullPhone, otp)
 
@@ -51,13 +71,21 @@ router.post('/resend-otp', async (req: Request, res: Response) => {
     if (!phone) return res.status(400).json({ error: 'Phone number required' })
 
     const fullPhone = `${countryCode.replace('+', '')}${phone}`
+
+    const windowStart = BigInt(Math.floor(Date.now() / 1000) - SEND_WINDOW_SECS)
+    const recentCount = await prisma.otpSession.count({
+      where: { phone: fullPhone, createdAt: { gt: windowStart } },
+    })
+    if (recentCount >= MAX_SENDS_PER_WINDOW) {
+      return res.status(429).json({ error: 'Too many OTP requests. Please try again later.' })
+    }
+
+    await prisma.otpSession.deleteMany({ where: { phone: fullPhone, verified: 0 } })
+
     const otp = generateOtp()
     const id = randomUUID()
     const expiresAt = BigInt(Math.floor(Date.now() / 1000) + OTP_TTL_SECS)
-
-    await prisma.otpSession.create({
-      data: { id, phone: fullPhone, otp, expiresAt },
-    })
+    await prisma.otpSession.create({ data: { id, phone: fullPhone, otp, expiresAt } })
 
     await sendOtpViaMSG91(fullPhone, otp)
 
@@ -67,7 +95,7 @@ router.post('/resend-otp', async (req: Request, res: Response) => {
   }
 })
 
-router.post('/verify-otp', async (req: Request, res: Response) => {
+router.post('/verify-otp', verifyRateLimit, async (req: Request, res: Response) => {
   try {
     const { phone, otp } = req.body
     if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP required' })
@@ -100,7 +128,7 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
     const [accessToken, refreshToken, bookingCount] = await Promise.all([
       Promise.resolve(signAccessToken(user.id)),
       Promise.resolve(signRefreshToken(user.id)),
-      prisma.booking.count({ where: { userId: user.id } }),
+      prisma.booking.count({ where: { userId: user.id, status: { not: 'cancelled' } } }),
     ])
     const rtExpiry = BigInt(Math.floor(Date.now() / 1000) + 30 * 24 * 3600)
 

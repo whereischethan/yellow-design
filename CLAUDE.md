@@ -118,7 +118,7 @@ Bookings store nested data (pickup, drop, flight, pricing, driver, vehicle) as J
 All colours and font names live in `constants/theme.ts`:
 - `YL` — consumer palette (primary yellow `#FFD84A`, background `#F6F3EB`, ink `#2B2720`)
 - `YL_BIZ` — business/teal variant
-- `FONTS` — three families: `BricolageGrotesque` (UI), `JetBrainsMono` (data), `NotoSansKannada` (regional)
+- `FONTS` — two families: `BricolageGrotesque` (UI), `JetBrainsMono` (data) — same in customer and driver apps
 
 Custom components are prefixed `Y` (`YButton`, `YField`, `YAppChrome`, `YBrand`). Styles are inline using theme constants — no CSS-in-JS library.
 

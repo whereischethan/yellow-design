@@ -387,6 +387,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
 
   // Fare override
   const [fareEditMode, setFareEditMode] = React.useState(false)
+  const [fareModified, setFareModified] = React.useState(false)
   const [overrideFare, setOverrideFare] = React.useState('')
   const [overrideGst, setOverrideGst] = React.useState('')
   const [overrideToll, setOverrideToll] = React.useState('')
@@ -398,7 +399,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
   const overrideGstNum = parseFloat(overrideGst) || 0
   const overrideTollNum = parseFloat(overrideToll) || 0
   const overrideDiscountNum = parseFloat(overrideDiscount) || 0
-  const overrideTotal = Math.max(0, overrideFareNum + overrideGstNum + overrideTollNum - overrideDiscountNum)
+  const overrideTotal = Math.max(0, overrideFareNum + overrideGstNum + (bookingCategory === 'airport' ? 0 : overrideTollNum) - overrideDiscountNum)
 
   const stepNames = ['Customer', 'Trip details', 'Vehicle', 'Confirm']
 
@@ -448,6 +449,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
       }
       if (b.pricing) {
         setFareEditMode(true)
+        setFareModified(false)
         setOverrideFare(String(b.pricing.fareBeforeTax ?? b.pricing.basePrice ?? 0))
         setOverrideGst(String(b.pricing.gst ?? 0))
         setOverrideToll(String((b.pricing as any).toll ?? 0))
@@ -455,6 +457,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
         setPricingResult(b.pricing)
       } else {
         setFareEditMode(false)
+        setFareModified(false)
         setOverrideFare(''); setOverrideGst(''); setOverrideToll(''); setOverrideDiscount('')
         setPricingResult(null)
       }
@@ -469,7 +472,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
       setOutstationOrigin(''); setOutstationOriginPlaceId(''); setOutstationDest(''); setOutstationDestPlaceId('')
       setOutstationTripKind('round'); setOutstationReturnDate('')
       setHourlyPickup(''); setHourlyPickupPlaceId(''); setHourlyDuration(8)
-      setPricingResult(null); setError(''); setFareEditMode(false); setOverrideFare(''); setOverrideGst(''); setOverrideToll(''); setOverrideDiscount('')
+      setPricingResult(null); setError(''); setFareEditMode(false); setFareModified(false); setOverrideFare(''); setOverrideGst(''); setOverrideToll(''); setOverrideDiscount('')
       setSendSms(true)
     }
   }, [open])
@@ -551,7 +554,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
         drop: dropObj,
         flight: bookingCategory === 'airport' && flightNumber ? { flightNumber, ...(editBooking.flight ?? {}) } : null,
         ...(editBooking.guestPhone ? { guestName, guestPhone } : {}),
-        price: overrideTotal || pricingResult?.totalPrice || undefined,
+        ...(fareModified ? { price: overrideTotal || undefined } : {}),
       })
       onEdited?.()
       onClose()
@@ -595,7 +598,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
             distanceKm: pricingResult?.distanceKm ?? 0,
             fareBeforeTax: overrideFareNum,
             gst: overrideGstNum,
-            toll: overrideTollNum,
+            toll: bookingCategory === 'airport' ? 0 : overrideTollNum,
             discount: overrideDiscountNum || undefined,
             basePrice: overrideFareNum,
             totalPrice: overrideTotal,
@@ -605,7 +608,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
             distanceKm: pricingResult.distanceKm,
             fareBeforeTax: pricingResult.fareBeforeTax,
             gst: pricingResult.gst,
-            toll: pricingResult.toll ?? 0,
+            toll: 0,
             basePrice: pricingResult.basePrice,
             totalPrice: pricingResult.totalPrice,
           }
@@ -997,7 +1000,18 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                       {fareEditMode ? 'Custom fare' : 'Estimated fare'}
                     </div>
                     {!fareEditMode && pricingLoading && <div style={{ fontSize: 11, color: YL.ink2 }}>Calculating…</div>}
-                    {!fareEditMode && pricingResult && <div style={{ fontSize: 11, color: YL.ink2 }}>{pricingResult.distanceKm > 0 ? `${pricingResult.distanceKm} km · incl. GST` : `${hourlyDuration}h package · incl. GST`}</div>}
+                    {!fareEditMode && pricingResult && (
+                      <div style={{ fontSize: 11, color: YL.ink2 }}>
+                        {pricingResult.distanceKm > 0 ? `${pricingResult.distanceKm} km · incl. GST` : `${hourlyDuration}h package · incl. GST`}
+                      </div>
+                    )}
+                    {!fareEditMode && pricingResult?.breakdown && (
+                      <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {Object.values(pricingResult.breakdown).map((line: any, i: number) => (
+                          <div key={i} style={{ fontSize: 10.5, color: YL.ink3, fontFamily: '"JetBrains Mono", monospace' }}>{line}</div>
+                        ))}
+                      </div>
+                    )}
                     {!fareEditMode && !pricingResult && !pricingLoading && (
                       <div style={{ fontSize: 11, color: YL.ink2 }}>
                         {bookingCategory === 'airport' && !addressPlaceId && 'Select address from dropdown for auto-fare'}
@@ -1049,7 +1063,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                             <div style={{ fontSize: 10, fontWeight: 600, color: minus ? YL.redInk : YL.ink2, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
                             <div style={{ position: 'relative' }}>
                               <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: minus ? YL.redInk : YL.ink2, pointerEvents: 'none' }}>{minus ? '−₹' : '₹'}</span>
-                              <input type="number" min={0} value={value} onChange={e => set(e.target.value)}
+                              <input type="number" min={0} value={value} onChange={e => { set(e.target.value); setFareModified(true) }}
                                 style={{ width: '100%', height: 34, border: `1.5px solid ${minus && parseFloat(value) > 0 ? 'rgba(200,50,50,0.35)' : 'rgba(0,0,0,0.15)'}`, borderRadius: 7, padding: '0 8px 0 24px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: minus && parseFloat(value) > 0 ? YL.redInk : YL.ink, background: minus && parseFloat(value) > 0 ? 'rgba(255,220,220,0.5)' : 'rgba(255,255,255,0.6)', outline: 'none', boxSizing: 'border-box' }}
                               />
                             </div>
@@ -1065,7 +1079,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
                             type="number" min={0}
                             value={overrideTotalDraft !== null ? overrideTotalDraft : (overrideTotal > 0 ? String(overrideTotal) : '')}
                             onFocus={() => setOverrideTotalDraft(overrideTotal > 0 ? String(overrideTotal) : '')}
-                            onChange={e => { setOverrideTotalDraft(e.target.value); const r = recalcFromTotal(e.target.value, overrideDiscount, overrideToll); setOverrideFare(r.fare); setOverrideGst(r.gst) }}
+                            onChange={e => { setOverrideTotalDraft(e.target.value); const r = recalcFromTotal(e.target.value, overrideDiscount, overrideToll); setOverrideFare(r.fare); setOverrideGst(r.gst); setFareModified(true) }}
                             onBlur={() => setOverrideTotalDraft(null)}
                             style={{ width: '100%', height: 34, border: '1.5px solid rgba(0,0,0,0.25)', borderRadius: 7, padding: '0 8px 0 24px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, fontWeight: 600, color: YL.ink, background: 'rgba(255,255,255,0.8)', outline: 'none', boxSizing: 'border-box' }}
                           />

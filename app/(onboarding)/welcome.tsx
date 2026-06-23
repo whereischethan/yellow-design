@@ -80,11 +80,6 @@ export default function ScreenWelcome() {
         {/* Headline */}
         <Text style={styles.headline}>{'Arrive rested.\nRide Yellow.'}</Text>
 
-        {/* Kannada sub */}
-        <Text style={styles.kannadaSub}>
-          ವಿಶ್ರಾಂತಿಯಿಂದ ತಲುಪಿ · ಹಳದಿಯಲ್ಲಿ ಪ್ರಯಾಣಿಸಿ
-        </Text>
-
         {/* Description */}
         <Text style={styles.description}>
           Premium electric SUVs to & from Kempegowda International — flight-aware, zero-cancel.
@@ -153,13 +148,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: YL.ink,
     lineHeight: 46,
-  },
-  kannadaSub: {
-    fontFamily: FONTS.kannada,
-    fontSize: 15,
-    color: YL.ink,
-    opacity: 0.75,
-    marginTop: 6,
   },
   description: {
     fontSize: 14.5,

@@ -1,9 +1,17 @@
-import type { Booking, Driver, Stats } from '../types'
+import React from 'react'
+import type { Booking, Driver, Stats, BookingFilter } from '../types'
 import { YL, STATUS_STYLE, Icons, Mono, Stack, Button, Card, PageHeader, StatusBadge, Avatar, fmtDate, fmtTime, fmtINR, useIsMobile, getISTComponents } from '../components/ui'
 
-function StatCard({ label, value, hint, accent, sparkValues }: any) {
+function StatCard({ label, value, hint, accent, sparkValues, onClick }: any) {
+  const [hovered, setHovered] = React.useState(false)
+  const isClickable = !!onClick
   return (
-    <div style={{ flex: 1, minWidth: 0, background: YL.card, border: `1px solid ${YL.line}`, borderRadius: 12, padding: '18px 18px 16px', position: 'relative', overflow: 'hidden' }}>
+    <div
+      onClick={onClick}
+      onMouseEnter={() => isClickable && setHovered(true)}
+      onMouseLeave={() => isClickable && setHovered(false)}
+      style={{ flex: 1, minWidth: 0, background: YL.card, border: `1px solid ${isClickable && hovered ? YL.yellowDeep : YL.line}`, borderRadius: 12, padding: '18px 18px 16px', position: 'relative', overflow: 'hidden', cursor: isClickable ? 'pointer' : 'default', transition: 'border-color 150ms', boxShadow: isClickable && hovered ? '0 2px 8px rgba(43,39,32,0.08)' : 'none' }}
+    >
       {accent && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: accent }}/>}
       <div style={{ fontSize: 12, color: YL.ink2, fontWeight: 500 }}>{label}</div>
       <div style={{ marginTop: 10, fontSize: 32, fontWeight: 600, color: YL.ink, letterSpacing: -1, lineHeight: 1 }}>{value}</div>
@@ -21,36 +29,49 @@ function StatCard({ label, value, hint, accent, sparkValues }: any) {
           })()}
         </svg>
       )}
+      {isClickable && (
+        <div style={{ position: 'absolute', bottom: 10, right: 12, fontSize: 10.5, color: hovered ? YL.ink2 : YL.ink3, fontWeight: 500, transition: 'color 150ms' }}>
+          View →
+        </div>
+      )}
     </div>
   )
 }
 
-function Pipeline({ bookings, isMobile }: { bookings: Booking[]; isMobile: boolean }) {
+function Pipeline({ bookings, isMobile, onNavigate }: { bookings: Booking[]; isMobile: boolean; onNavigate?: (f: BookingFilter) => void }) {
   const stages = [
-    { id: 'pending',     label: 'Pending',     desc: 'Needs confirm' },
-    { id: 'confirmed',   label: 'Confirmed',   desc: 'Awaiting driver' },
-    { id: 'assigned',    label: 'Assigned',    desc: 'Driver set' },
-    { id: 'in_progress', label: 'In progress', desc: 'On the road' },
+    { id: 'pending',     label: 'Pending',     desc: 'Needs confirm',  navStatuses: ['pending'] },
+    { id: 'confirmed',   label: 'Confirmed',   desc: 'Awaiting driver', navStatuses: ['confirmed'] },
+    { id: 'assigned',    label: 'Assigned',    desc: 'Driver set',     navStatuses: ['assigned'] },
+    { id: 'in_progress', label: 'In progress', desc: 'On the road',    navStatuses: ['in_progress', 'arrived'] },
   ]
   const counts = stages.map(s => bookings.filter(b => b.status === s.id || (s.id === 'in_progress' && b.status === 'arrived')).length)
   const max = Math.max(...counts, 1)
+  const [hoveredStage, setHoveredStage] = React.useState<string | null>(null)
   return (
     <Card padding={isMobile ? 12 : 18}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isMobile ? 10 : 18 }}>
         <Stack gap={3}>
           <div style={{ fontSize: 14, fontWeight: 600, color: YL.ink }}>Today's pipeline</div>
-          {!isMobile && <div style={{ fontSize: 12, color: YL.ink2 }}>Where every active booking sits right now</div>}
+          {!isMobile && <div style={{ fontSize: 12, color: YL.ink2 }}>Where every active booking sits right now{onNavigate ? ' · Click a stage to filter' : ''}</div>}
         </Stack>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: 1, background: YL.line, borderRadius: 10, overflow: 'hidden', border: `1px solid ${YL.line}` }}>
         {stages.map((s, i) => {
           const c = counts[i]
           const intensity = c / max
+          const isHovered = hoveredStage === s.id
           return (
-            <div key={s.id} style={{ padding: isMobile ? '10px 12px' : '14px 16px', background: YL.card, borderTop: `2px solid ${STATUS_STYLE[s.id].bg}` }}>
+            <div
+              key={s.id}
+              onClick={() => onNavigate?.({ statuses: s.navStatuses, source: 'Dashboard', sourceLabel: `${s.label} bookings` })}
+              onMouseEnter={() => onNavigate && setHoveredStage(s.id)}
+              onMouseLeave={() => setHoveredStage(null)}
+              style={{ padding: isMobile ? '10px 12px' : '14px 16px', background: isHovered ? '#FCF8EE' : YL.card, borderTop: `2px solid ${STATUS_STYLE[s.id].bg}`, cursor: onNavigate ? 'pointer' : 'default', transition: 'background 100ms' }}
+            >
               <div style={{ fontSize: isMobile ? 10.5 : 11.5, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500 }}>{s.label}</div>
               <div style={{ marginTop: 4, fontSize: isMobile ? 24 : 28, fontWeight: 600, color: c === 0 ? YL.ink3 : YL.ink, lineHeight: 1 }}>{c}</div>
-              <div style={{ marginTop: isMobile ? 4 : 8, fontSize: 10.5, color: YL.ink3 }}>{s.desc}</div>
+              <div style={{ marginTop: isMobile ? 4 : 8, fontSize: 10.5, color: YL.ink3 }}>{s.desc}{onNavigate && isHovered ? ' →' : ''}</div>
               <div style={{ marginTop: 8, height: 3, background: YL.bg, borderRadius: 2, overflow: 'hidden' }}>
                 <div style={{ width: `${intensity * 100}%`, height: '100%', background: STATUS_STYLE[s.id].fg, opacity: 0.5 }}/>
               </div>
@@ -62,11 +83,12 @@ function Pipeline({ bookings, isMobile }: { bookings: Booking[]; isMobile: boole
   )
 }
 
-function UpcomingTable({ bookings, onOpen, onAssignRequest, isMobile }: { bookings: Booking[]; onOpen: (b: Booking) => void; onAssignRequest: (b: Booking) => void; isMobile: boolean }) {
+function UpcomingTable({ bookings, onOpen, onAssignRequest, isMobile, onNavigate }: { bookings: Booking[]; onOpen: (b: Booking) => void; onAssignRequest: (b: Booking) => void; isMobile: boolean; onNavigate?: (f: BookingFilter) => void }) {
   const upcoming = bookings
     .filter(b => ['pending', 'confirmed', 'assigned'].includes(b.status))
     .sort((a, b) => new Date(a.pickup?.dateTime ?? 0).getTime() - new Date(b.pickup?.dateTime ?? 0).getTime())
     .slice(0, 8)
+  const total = bookings.filter(b => ['pending', 'confirmed', 'assigned'].includes(b.status)).length
   return (
     <Card padding={0}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 18px 12px' }}>
@@ -74,6 +96,16 @@ function UpcomingTable({ bookings, onOpen, onAssignRequest, isMobile }: { bookin
           <div style={{ fontSize: 14, fontWeight: 600, color: YL.ink }}>Upcoming rides</div>
           <div style={{ fontSize: 12, color: YL.ink2 }}>Next {upcoming.length} pickups by time</div>
         </Stack>
+        {onNavigate && total > 0 && (
+          <button
+            onClick={() => onNavigate({ statuses: ['pending', 'confirmed', 'assigned'], source: 'Dashboard', sourceLabel: 'Upcoming rides' })}
+            style={{ fontSize: 12, color: YL.ink2, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6, fontFamily: '"Bricolage Grotesque", system-ui' }}
+            onMouseEnter={e => (e.currentTarget.style.color = YL.ink)}
+            onMouseLeave={e => (e.currentTarget.style.color = YL.ink2)}
+          >
+            See all {total} →
+          </button>
+        )}
       </div>
       <div style={{ borderTop: `1px solid ${YL.line}` }}>
         {upcoming.length === 0 && (
@@ -205,9 +237,10 @@ interface Props {
   onOpen: (b: Booking) => void
   onAssignRequest: (b: Booking) => void
   onNewBooking: () => void
+  onNavigateToBookings?: (f: BookingFilter) => void
 }
 
-export default function Dashboard({ bookings, drivers, stats, adminName, onOpen, onAssignRequest, onNewBooking }: Props) {
+export default function Dashboard({ bookings, drivers, stats, adminName, onOpen, onAssignRequest, onNewBooking, onNavigateToBookings }: Props) {
   const isMobile = useIsMobile()
   const todayBookings = bookings.filter(b => b.pickup?.dateTime && fmtDate(b.pickup.dateTime) === 'Today')
 
@@ -227,26 +260,32 @@ export default function Dashboard({ bookings, drivers, stats, adminName, onOpen,
       <div style={{ padding: pad }}>
         {isMobile ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, marginBottom: 14 }}>
-            <StatCard label="Rides today" value={stats?.ridesToday ?? '…'} accent={YL.yellow} hint="Confirmed + active"/>
-            <StatCard label="Revenue" value={stats ? fmtINR(stats.revenueToday) : '…'} accent={YL.leaf}/>
+            <StatCard label="Rides today" value={stats?.ridesToday ?? '…'} accent={YL.yellow} hint="Confirmed + active"
+              onClick={onNavigateToBookings ? () => onNavigateToBookings({ isToday: true, source: 'Dashboard', sourceLabel: "Today's rides" }) : undefined}/>
+            <StatCard label="Revenue" value={stats ? fmtINR(stats.revenueToday) : '…'} accent={YL.leaf}
+              onClick={onNavigateToBookings ? () => onNavigateToBookings({ isToday: true, statuses: ['completed'], source: 'Dashboard', sourceLabel: "Today's revenue" }) : undefined}/>
             <StatCard label="Drivers active" value={stats ? `${stats.driversActive}/${drivers.length}` : '…'} accent={YL.gulmohar} hint={`${drivers.filter(d => d.status === 'available').length} available`}/>
-            <StatCard label="Next 2 hours" value={stats?.nextTwoHours ?? '…'} accent={YL.ink} hint={`${stats?.pendingCount ?? 0} need confirmation`}/>
+            <StatCard label="Next 2 hours" value={stats?.nextTwoHours ?? '…'} accent={YL.ink} hint={`${stats?.pendingCount ?? 0} need confirmation`}
+              onClick={onNavigateToBookings ? () => onNavigateToBookings({ statuses: ['pending', 'confirmed', 'assigned'], source: 'Dashboard', sourceLabel: 'Next 2 hours' }) : undefined}/>
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
-            <StatCard label="Rides today" value={stats?.ridesToday ?? '…'} accent={YL.yellow} hint="Confirmed + active"/>
-            <StatCard label="Revenue today" value={stats ? fmtINR(stats.revenueToday) : '…'} accent={YL.leaf} hint="From non-cancelled rides"/>
+            <StatCard label="Rides today" value={stats?.ridesToday ?? '…'} accent={YL.yellow} hint="Confirmed + active"
+              onClick={onNavigateToBookings ? () => onNavigateToBookings({ isToday: true, source: 'Dashboard', sourceLabel: "Today's rides" }) : undefined}/>
+            <StatCard label="Revenue today" value={stats ? fmtINR(stats.revenueToday) : '…'} accent={YL.leaf} hint="From non-cancelled rides"
+              onClick={onNavigateToBookings ? () => onNavigateToBookings({ isToday: true, statuses: ['completed'], source: 'Dashboard', sourceLabel: "Today's revenue" }) : undefined}/>
             <StatCard label="Drivers active" value={stats ? `${stats.driversActive}/${drivers.length}` : '…'} accent={YL.gulmohar} hint={`${drivers.filter(d => d.status === 'available').length} available`}/>
-            <StatCard label="Next 2 hours" value={stats?.nextTwoHours ?? '…'} accent={YL.ink} hint={`${stats?.pendingCount ?? 0} need confirmation`}/>
+            <StatCard label="Next 2 hours" value={stats?.nextTwoHours ?? '…'} accent={YL.ink} hint={`${stats?.pendingCount ?? 0} need confirmation`}
+              onClick={onNavigateToBookings ? () => onNavigateToBookings({ statuses: ['pending', 'confirmed', 'assigned'], source: 'Dashboard', sourceLabel: 'Next 2 hours' }) : undefined}/>
           </div>
         )}
 
         <div style={{ marginBottom: isMobile ? 14 : 18 }}>
-          <Pipeline bookings={[...todayBookings, ...bookings.filter(b => b.pickup?.dateTime && fmtDate(b.pickup.dateTime) === 'Tomorrow')]} isMobile={isMobile}/>
+          <Pipeline bookings={[...todayBookings, ...bookings.filter(b => b.pickup?.dateTime && fmtDate(b.pickup.dateTime) === 'Tomorrow')]} isMobile={isMobile} onNavigate={onNavigateToBookings}/>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.5fr 1fr', gap: 16 }}>
-          <UpcomingTable bookings={bookings} onOpen={onOpen} onAssignRequest={onAssignRequest} isMobile={isMobile}/>
+          <UpcomingTable bookings={bookings} onOpen={onOpen} onAssignRequest={onAssignRequest} isMobile={isMobile} onNavigate={onNavigateToBookings}/>
           {!isMobile && <DriverStrip drivers={drivers} bookings={bookings}/>}
         </div>
         {isMobile && (

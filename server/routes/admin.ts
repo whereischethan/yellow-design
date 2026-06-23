@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { randomUUID, createHmac } from 'crypto'
+import { randomUUID, createHmac, randomInt } from 'crypto'
+import rateLimit from 'express-rate-limit'
 import jwt from 'jsonwebtoken'
 import prisma from '../lib/prisma'
 import { notifyBookingEvent } from '../lib/notify'
@@ -57,9 +58,20 @@ function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
 // ─── Admin OTP login (public — no auth) ──────────────────────────────────────
 
 const OTP_TTL_SECS = 10 * 60
+const SEND_WINDOW_SECS = 15 * 60
+const MAX_SENDS_PER_WINDOW = 3
+
+const verifyRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many attempts. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.body?.phone ? String(req.body.phone) : (req.ip ?? 'unknown'),
+})
 
 function genOtp(): string {
-  return String(Math.floor(1000 + Math.random() * 9000))
+  return String(randomInt(1000, 10000))
 }
 
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || '')
@@ -89,6 +101,16 @@ router.post('/login/send-otp', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Phone not authorised as admin' })
     }
 
+    const windowStart = BigInt(Math.floor(Date.now() / 1000) - SEND_WINDOW_SECS)
+    const recentCount = await prisma.otpSession.count({
+      where: { phone: mobile, createdAt: { gt: windowStart } },
+    })
+    if (recentCount >= MAX_SENDS_PER_WINDOW) {
+      return res.status(429).json({ error: 'Too many OTP requests. Please try again later.' })
+    }
+
+    await prisma.otpSession.deleteMany({ where: { phone: mobile, verified: 0 } })
+
     const otp = genOtp()
     const id = randomUUID()
     const expiresAt = BigInt(Math.floor(Date.now() / 1000) + OTP_TTL_SECS)
@@ -97,8 +119,8 @@ router.post('/login/send-otp', async (req: Request, res: Response) => {
     const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || process.env.MSG91_AUTHKEY || ''
     const MSG91_TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID || ''
     if (MSG91_AUTH_KEY && countryCode === '+91') {
-      const url = `https://control.msg91.com/api/v5/otp?template_id=${MSG91_TEMPLATE_ID}&mobile=${mobile}&otp=${otp}&authkey=${MSG91_AUTH_KEY}`
-      const r = await fetch(url)
+      const url = `https://control.msg91.com/api/v5/otp?template_id=${encodeURIComponent(MSG91_TEMPLATE_ID)}&mobile=${encodeURIComponent(mobile)}&otp=${encodeURIComponent(otp)}`
+      const r = await fetch(url, { headers: { authkey: MSG91_AUTH_KEY } })
       if (!r.ok) {
         const body = await r.text().catch(() => '')
         console.error(`[ADMIN OTP] MSG91 error for ${mobile}: ${r.status} ${body}`)
@@ -113,7 +135,7 @@ router.post('/login/send-otp', async (req: Request, res: Response) => {
   }
 })
 
-router.post('/login/verify-otp', async (req: Request, res: Response) => {
+router.post('/login/verify-otp', verifyRateLimit, async (req: Request, res: Response) => {
   try {
     const { phone, otp, countryCode = '+91' } = req.body
     if (!phone || !otp) return res.status(400).json({ error: 'phone and otp required' })
@@ -136,7 +158,7 @@ router.post('/login/verify-otp', async (req: Request, res: Response) => {
       const adminUser = await prisma.adminUser.upsert({
         where: { phone: normalizedPhone },
         update: {},
-        create: { id: randomUUID(), phone: normalizedPhone, role: 'superadmin' },
+        create: { id: randomUUID(), phone: normalizedPhone, role: 'ops' },
       })
       adminName = adminUser.name ?? null
       adminRole = adminUser.role
@@ -219,7 +241,7 @@ router.post('/impersonate', requireSuperAdmin, async (req, res) => {
 
 // ─── OTP lookup (for WhatsApp verification relay) ─────────────────────────────
 
-router.get('/otp-lookup', async (req, res) => {
+router.get('/otp-lookup', requireSuperAdmin, async (req, res) => {
   try {
     const { phone } = req.query
     if (!phone) return res.status(400).json({ error: 'phone required' })
@@ -385,15 +407,22 @@ router.patch('/bookings/:id', async (req, res) => {
     if (guestName !== undefined) data.guestName = guestName || null
     if (guestPhone !== undefined) data.guestPhone = guestPhone || null
     if (price !== undefined) {
+      if (row.razorpayPaymentId && row.paymentStatus === 'paid') {
+        return res.status(400).json({ error: 'Price cannot be edited after Razorpay payment is received' })
+      }
       data.price = Number(price)
+      // Keep pricingJson.totalPrice in sync so invoice and admin displays stay consistent
       if (fareBreakdown === undefined) {
         const existing = tryParse(row.pricingJson) ?? {}
         data.pricingJson = JSON.stringify({ ...existing, totalPrice: Number(price) })
       }
     }
     if (fareBreakdown !== undefined) {
-      const { fareBeforeTax, discount, toll, durationHours } = fareBreakdown as { fareBeforeTax: number; discount?: number; toll: number; durationHours?: number }
-      const taxable = Math.max(0, fareBeforeTax + (toll ?? 0) - (discount ?? 0))
+      if (row.razorpayPaymentId && row.paymentStatus === 'paid') {
+        return res.status(400).json({ error: 'Fare cannot be edited after Razorpay payment is received' })
+      }
+      const { fareBeforeTax, discount, durationHours } = fareBreakdown as { fareBeforeTax: number; discount?: number; durationHours?: number }
+      const taxable = Math.max(0, fareBeforeTax - (discount ?? 0))
       const gst = Math.round(taxable * 0.05)
       const total = taxable + gst
       const existing = tryParse(row.pricingJson) ?? {}
@@ -403,7 +432,7 @@ router.patch('/bookings/:id', async (req, res) => {
         basePrice: fareBeforeTax,
         discount: discount ?? 0,
         gst,
-        toll: toll ?? 0,
+        toll: 0,
         totalPrice: total,
         ...(durationHours != null ? { durationMinutes: durationHours * 60 } : {}),
       })
@@ -419,11 +448,15 @@ router.patch('/bookings/:id', async (req, res) => {
       const existingPickup = tryParse(row.pickupJson)
       if (existingPickup?.dateTime) {
         const startMs = new Date(existingPickup.dateTime).getTime()
-        // Use admin-supplied completedAt (edited end time) if provided, otherwise now
-        const endMs = completedAt ? new Date(completedAt).getTime() : Date.now()
+        // Use admin-supplied completedAt (edited end time) if provided, otherwise now.
+        // Clamp to current time so future dates can't inflate the fare.
+        const endMs = Math.min(
+          completedAt ? new Date(completedAt).getTime() : Date.now(),
+          Date.now()
+        )
         const elapsedHours = Math.max(0, (endMs - startMs) / 3_600_000)
-        // Round up to nearest 0.5 hr, minimum 0.5 hr
-        const actualHours = Math.max(0.5, Math.ceil(elapsedHours * 2) / 2)
+        // Round up to nearest 0.5 hr, minimum 0.5 hr, maximum 24 hr
+        const actualHours = Math.min(Math.max(0.5, Math.ceil(elapsedHours * 2) / 2), 24)
         const cfgRows = await prisma.pricingConfig.findMany()
         const cfgMap: Record<string, number> = cfgRows.reduce(
           (acc, r) => ({ ...acc, [r.key]: parseFloat(r.value) }),
@@ -434,14 +467,14 @@ router.patch('/bookings/:id', async (req, res) => {
         const base = Math.round(actualHours * hourlyRate)
         const gst = Math.round(base * gstRate)
         const existingPricing = tryParse(row.pricingJson) ?? {}
-        const toll = existingPricing.toll ?? 0
-        const total = base + gst + toll
+        const existingToll = existingPricing.toll ?? 0
+        const total = base + gst + existingToll
         data.pricingJson = JSON.stringify({
           ...existingPricing,
           fareBeforeTax: base,
           basePrice: base,
           gst,
-          toll,
+          toll: existingToll,
           totalPrice: total,
           durationMinutes: actualHours * 60,
           actualEndTime: new Date(endMs).toISOString(),
@@ -522,8 +555,10 @@ router.patch('/bookings/:id', async (req, res) => {
       else if (pickupDateTime !== undefined) notifyBookingEvent(updated, 'time_changed')
     }
 
-    // Increment driver and vehicle trip count on completion
-    if (status === 'completed') {
+    // Increment driver and vehicle trip count on completion — only if the booking
+    // wasn't already completed (guards against double-increment when admin patches
+    // an already-completed booking, e.g. the driver already marked it done).
+    if (status === 'completed' && row.status !== 'completed') {
       const d = tryParse(updated.assignedDriverJson ?? row.assignedDriverJson)
       if (d?.id) {
         await prisma.driver.update({ where: { id: d.id }, data: { trips: { increment: 1 } } }).catch(() => {})
@@ -1080,6 +1115,7 @@ router.get('/leads', async (req, res) => {
         user_phone: r.user?.phone ?? null,
         pickup: tryParse(r.pickupJson),
         drop: tryParse(r.dropJson),
+        stops: tryParse(r.stopsJson),
         pricing: tryParse(r.pricingJson),
       })),
     })
@@ -1234,11 +1270,11 @@ router.post('/pricing/calculate', async (req, res) => {
     const toll = cfg.airport_toll ?? 185
     const gstRate = (cfg.airport_gst ?? 5) / 100
     const kmFare = Math.round(distanceKm * perKm)
-    const fareBeforeTax = kmFare + tripCharge
+    const fareBeforeTax = kmFare + tripCharge + toll
     const gst = Math.round(fareBeforeTax * gstRate)
-    const total = fareBeforeTax + gst + toll
-    res.json({ distanceKm, durationMinutes, tripType, fareBeforeTax, gst, toll, totalPrice: total, basePrice: fareBeforeTax,
-      breakdown: { kmFare: `₹${kmFare} @ ₹${perKm}/km`, tripCharge: `₹${tripCharge}`, gst: `${cfg.airport_gst ?? 5}% on ₹${fareBeforeTax}`, toll: `₹${toll} (pass-through)` } })
+    const total = fareBeforeTax + gst
+    res.json({ distanceKm, durationMinutes, tripType, fareBeforeTax, gst, toll: 0, totalPrice: total, basePrice: fareBeforeTax,
+      breakdown: { kmFare: `₹${kmFare} @ ₹${perKm}/km`, tripCharge: `₹${tripCharge}`, toll: `+₹${toll} toll`, gst: `${cfg.airport_gst ?? 5}% on ₹${fareBeforeTax}` } })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }
@@ -1473,7 +1509,7 @@ router.patch('/team/me', async (req: Request, res: Response) => {
     const updated = await prisma.adminUser.upsert({
       where: { phone },
       update: { name: name ?? null },
-      create: { id: randomUUID(), phone, name: name ?? null, role: 'superadmin' },
+      create: { id: randomUUID(), phone, name: name ?? null, role: 'ops' },
     })
     res.json({ admin: { phone: updated.phone, name: updated.name, role: updated.role } })
   } catch (e: any) {

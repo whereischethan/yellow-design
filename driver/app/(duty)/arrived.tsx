@@ -13,6 +13,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { YL, FONTS } from '@/constants/theme'
 import { useDuty, DutyReading } from '@/context/DutyContext'
 import { saveReading, updateBookingStatus } from '@/lib/api'
+import { callPhone, openWhatsApp } from '@/lib/contact'
 
 export default function ArrivedScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -36,6 +37,29 @@ export default function ArrivedScreen() {
     handoffOdo != null && !isNaN(odoNum) && odo.trim().length > 0
       ? odoNum - handoffOdo
       : null
+
+  function goBack() {
+    if (router.canGoBack()) router.back()
+    else router.replace('/(duty)/roster')
+  }
+
+  function handleCallPassenger() {
+    if (!booking?.guestPhone) return
+    callPhone(booking.guestPhone)
+  }
+
+  function handleWhatsApp() {
+    if (!booking?.guestPhone) return
+    const pickupName = booking.pickup?.placeName ?? booking.pickup?.location
+    const v = booking.assignedVehicle
+    const vehicleDesc = v
+      ? ` Look for the ${[v.color, v.make, v.model].filter(Boolean).join(' ')}${v.licensePlate ? ` (${v.licensePlate})` : ''}.`
+      : ''
+    const msg =
+      `Hi${booking.guestName ? ` ${booking.guestName}` : ''}, this is your Yellow driver. ` +
+      `I have arrived at your pickup point${pickupName ? ` — ${pickupName}` : ''}.${vehicleDesc}`
+    openWhatsApp(booking.guestPhone, msg)
+  }
 
   async function handleStartTrip() {
     if (!bothFilled || !booking) return
@@ -65,7 +89,7 @@ export default function ArrivedScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.centerState}>
           <Text style={styles.centerText}>Trip not found.</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backLinkBtn}>
+          <TouchableOpacity onPress={() => router.replace('/(duty)/roster')} style={styles.backLinkBtn}>
             <Text style={styles.backLinkText}>← Go back</Text>
           </TouchableOpacity>
         </View>
@@ -83,7 +107,7 @@ export default function ArrivedScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity onPress={goBack} hitSlop={12}>
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
           <Text style={styles.title}>At Pickup</Text>
@@ -93,7 +117,7 @@ export default function ArrivedScreen() {
           </View>
         </View>
 
-        {/* Rider confirmation card */}
+        {/* Passenger confirmation card */}
         <View style={styles.card}>
           <Text style={styles.riderName}>{booking.guestName ?? 'Passenger'}</Text>
 
@@ -113,12 +137,41 @@ export default function ArrivedScreen() {
             </View>
           ) : null}
 
+          {booking.stops?.map((stop, i) => (
+            <View key={i} style={styles.destinationRow}>
+              <Text style={styles.destinationLabel}>STOP {i + 1}</Text>
+              <Text style={styles.destinationText} numberOfLines={2}>
+                {stop.placeName ?? stop.location}
+              </Text>
+            </View>
+          ))}
+
           <View style={styles.destinationRow}>
             <Text style={styles.destinationLabel}>DROP</Text>
             <Text style={styles.destinationText} numberOfLines={2}>
               {booking.drop?.placeName ?? booking.drop?.location ?? '—'}
             </Text>
           </View>
+        </View>
+
+        {/* Contact passenger */}
+        <View style={styles.contactRow}>
+          <TouchableOpacity
+            style={[styles.contactBtn, !booking.guestPhone && styles.contactBtnDisabled]}
+            onPress={handleCallPassenger}
+            disabled={!booking.guestPhone}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.contactBtnText}>📞 Call passenger</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.whatsappBtn, !booking.guestPhone && styles.contactBtnDisabled]}
+            onPress={handleWhatsApp}
+            disabled={!booking.guestPhone}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.whatsappBtnText}>WhatsApp "I've arrived"</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Trip start readings */}
@@ -249,6 +302,39 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.displaySemiBold,
     fontSize: 20,
     color: YL.ink,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  contactBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: YL.line,
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    backgroundColor: YL.card,
+  },
+  contactBtnDisabled: {
+    opacity: 0.4,
+  },
+  contactBtnText: {
+    fontFamily: FONTS.displaySemiBold,
+    fontSize: 14,
+    color: YL.ink2,
+  },
+  whatsappBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    backgroundColor: YL.leafSoft,
+  },
+  whatsappBtnText: {
+    fontFamily: FONTS.displaySemiBold,
+    fontSize: 14,
+    color: YL.leaf,
   },
   passengerCount: {
     fontFamily: FONTS.display,

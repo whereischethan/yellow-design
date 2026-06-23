@@ -84,19 +84,26 @@ function calcAirportPrice(distanceKm: number, cfg: Record<string, number>) {
   const meetGreet  = cfg.airport_meet_greet   ?? 100
 
   const kmFare = Math.round(distanceKm * perKm)
-  const fareBeforeTax = kmFare + tripCharge           // trip charge folded in, not shown separately
-  const gst = Math.round((fareBeforeTax + toll) * gstRate)  // GST on fare + toll
-  const total = fareBeforeTax + toll + gst
+  const fareBeforeTax = kmFare + tripCharge + toll    // toll baked in before GST
+  const gst = Math.round(fareBeforeTax * gstRate)
+  const total = fareBeforeTax + gst
 
   return {
     fareBeforeTax,
     gst,
-    toll,
+    toll: 0,
     totalPrice: total,
     // legacy compat fields
     basePrice: fareBeforeTax,
     extraKmCharge: 0,
     optionalMeetGreet: meetGreet,
+    breakdown: {
+      distanceFare: `${distanceKm} km × ₹${perKm}/km = ₹${kmFare}`,
+      tripCharge: `+₹${tripCharge} trip charge`,
+      toll: `+₹${toll} toll`,
+      fareExGst: `= ₹${fareBeforeTax} (ex-GST)`,
+      gst: `+₹${gst} GST (${(gstRate * 100).toFixed(0)}%)`,
+    },
   }
 }
 
@@ -162,7 +169,7 @@ router.post('/', async (req: Request, res: Response) => {
           type: 'manualOverride',
           savedAmount: (pricing.fareBeforeTax - newFare) + (oldGst - newGst),
           newFareBeforeTax: newFare,
-          newTotal: newFare + newGst + pricing.toll,
+          newTotal: newFare + newGst,
           message: 'Special rate · limited time',
         }
       }

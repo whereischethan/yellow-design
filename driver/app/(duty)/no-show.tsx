@@ -10,6 +10,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
+import { callPhone, normalizePhone } from '@/lib/contact';
 
 const WAIT_SECONDS = 300;
 const OPS_WHATSAPP = '918628062808';
@@ -29,7 +30,7 @@ export default function NoShowScreen() {
   const booking = bookings.find((b) => b.id === id) ?? currentBooking;
   const bookingId = booking?.id ?? id ?? '';
 
-  const riderPhone = (booking as any)?.riderPhone ?? (booking as any)?.phone ?? '';
+  const passengerPhone = booking?.guestPhone ?? '';
 
   const [secondsLeft, setSecondsLeft] = useState(WAIT_SECONDS);
   const [expired, setExpired] = useState(false);
@@ -92,23 +93,19 @@ export default function NoShowScreen() {
         <View style={styles.contactRow}>
           <TouchableOpacity
             style={styles.contactButton}
-            onPress={() =>
-              riderPhone
-                ? Linking.openURL(`tel:${riderPhone}`)
-                : undefined
-            }
+            onPress={() => (passengerPhone ? callPhone(passengerPhone) : undefined)}
           >
-            <Text style={styles.contactButtonText}>📞 Call rider</Text>
+            <Text style={styles.contactButtonText}>📞 Call passenger</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.contactButton}
             onPress={() =>
-              riderPhone
-                ? Linking.openURL(`sms:${riderPhone}`)
+              passengerPhone
+                ? Linking.openURL(`sms:+${normalizePhone(passengerPhone)}`)
                 : undefined
             }
           >
-            <Text style={styles.contactButtonText}>💬 SMS rider</Text>
+            <Text style={styles.contactButtonText}>💬 SMS passenger</Text>
           </TouchableOpacity>
         </View>
 

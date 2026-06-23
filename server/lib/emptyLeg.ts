@@ -60,13 +60,16 @@ export function checkHomeBase(
   if (haversineKm(originLat, originLng, KENGERI_LAT, KENGERI_LNG) > radius) return null
 
   const flatFare = cfgNum(cfg, 'home_base_fare', 999)
-  const newGst   = Math.round(flatFare * gstRate)
-  const newTotal = flatFare + newGst + toll
+  const cfgToll  = cfgNum(cfg, 'airport_toll', 185)
+  // home_base_fare is pre-toll; add toll before GST (consistent with calcAirportPrice)
+  const flatFareWithToll = flatFare + cfgToll
+  const newGst   = Math.round(flatFareWithToll * gstRate)
+  const newTotal = flatFareWithToll + newGst
   const oldGst   = Math.round(fareBeforeTax * gstRate)
-  const saved    = (fareBeforeTax + oldGst) - (flatFare + newGst)
+  const saved    = (fareBeforeTax + oldGst) - (flatFareWithToll + newGst)
   if (saved <= 0) return null   // home base is not cheaper
 
-  return { type: 'homeBase', savedAmount: saved, newFareBeforeTax: flatFare, newTotal, message: 'Home base rate' }
+  return { type: 'homeBase', savedAmount: saved, newFareBeforeTax: flatFareWithToll, newTotal, message: 'Home base rate' }
 }
 
 // IST date string (YYYY-MM-DD) for same-day comparison
@@ -168,7 +171,7 @@ export async function checkEmptyLeg(params: {
       type: 'emptyLeg',
       savedAmount: (fareBeforeTax - newFare) + (oldGst - newGst),
       newFareBeforeTax: newFare,
-      newTotal: newFare + newGst + toll,
+      newTotal: newFare + newGst,
       message: 'Special rate · limited time',
     }
   }

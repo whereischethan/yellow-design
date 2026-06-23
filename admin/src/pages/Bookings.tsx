@@ -1,5 +1,5 @@
 import React from 'react'
-import type { Booking, Driver, Vehicle, Customer } from '../types'
+import type { Booking, Driver, Vehicle, Customer, BookingFilter } from '../types'
 import { patchBooking, deleteBooking, generatePaymentLink, lookupFlight, getBooking, syncPaymentStatus, downloadCSV, lookupGstin, openInvoice, emailInvoice, createCustomInvoice, updateCustomInvoice, listCustomInvoices, openCustomInvoice, calcPricing } from '../api'
 import type { CustomInvoice } from '../types'
 import { PlacesInput } from './Modals'
@@ -9,7 +9,7 @@ import {
   DateTimePicker, toISTISO, fromISTISO, getISTComponents,
 } from '../components/ui'
 
-function FilterBar({ statusFilter, setStatusFilter, search, setSearch, tripType, setTripType, counts }: any) {
+function FilterBar({ statusFilter, setStatusFilter, search, setSearch, tripType, setTripType, paymentFilter, setPaymentFilter, counts }: any) {
   const isMobile = useIsMobile()
   const statuses = ['pending', 'confirmed', 'assigned', 'arrived', 'in_progress', 'completed', 'cancelled']
 
@@ -25,10 +25,17 @@ function FilterBar({ statusFilter, setStatusFilter, search, setSearch, tripType,
               {STATUS_STYLE[s].label}
             </Chip>
           ))}
-          <div style={{ width: 1, flexShrink: 0 }}/>
+          <div style={{ width: 1, height: 1, background: YL.line, flexShrink: 0, alignSelf: 'stretch' }}/>
           {(['all', 'pickup', 'drop'] as const).map(t => (
             <Chip key={t} active={tripType === t} onClick={() => setTripType(t)}>
               {t === 'all' ? 'Both' : t === 'pickup' ? '← Pick' : 'Drop →'}
+            </Chip>
+          ))}
+          <div style={{ width: 1, height: 1, background: YL.line, flexShrink: 0, alignSelf: 'stretch' }}/>
+          {(['paid', 'unpaid'] as const).map(p => (
+            <Chip key={p} active={paymentFilter === p} onClick={() => setPaymentFilter(paymentFilter === p ? '' : p)}>
+              <span style={{ width: 6, height: 6, borderRadius: 999, background: p === 'paid' ? YL.leaf : YL.gulmohar, flexShrink: 0 }}/>
+              {p === 'paid' ? 'Paid' : 'Unpaid'}
             </Chip>
           ))}
         </div>
@@ -54,6 +61,15 @@ function FilterBar({ statusFilter, setStatusFilter, search, setSearch, tripType,
         {(['all', 'pickup', 'drop'] as const).map(t => (
           <Chip key={t} active={tripType === t} onClick={() => setTripType(t)}>
             {t === 'all' ? 'Both' : t === 'pickup' ? 'Pickup ←' : 'Drop →'}
+          </Chip>
+        ))}
+      </div>
+      <div style={{ width: 1, height: 20, background: YL.line, flexShrink: 0 }}/>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {(['paid', 'unpaid'] as const).map(p => (
+          <Chip key={p} active={paymentFilter === p} onClick={() => setPaymentFilter(paymentFilter === p ? '' : p)}>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: p === 'paid' ? YL.leaf : YL.gulmohar, flexShrink: 0 }}/>
+            {p === 'paid' ? 'Paid' : 'Unpaid'}
           </Chip>
         ))}
       </div>
@@ -151,17 +167,41 @@ function BookingRow({ b, onClick }: { b: Booking; onClick: (b: Booking) => void 
   )
 }
 
+function getTripType(b: Booking): string {
+  if (b.tripType === 'hourly') return 'Hourly'
+  if (b.tripType === 'outstation') return 'Outstation'
+  if (b.tripType === 'drop') return 'Airport Drop'
+  return 'Airport Pickup'
+}
+
 interface BookingsListProps {
   bookings: Booking[]
   onOpen: (b: Booking) => void
   onNewBooking?: () => void
+  initialFilters?: BookingFilter
+  onClearFilters?: () => void
 }
 
-export function BookingsList({ bookings, onOpen, onNewBooking }: BookingsListProps) {
+export function BookingsList({ bookings, onOpen, onNewBooking, initialFilters, onClearFilters }: BookingsListProps) {
   const isMobile = useIsMobile()
-  const [statusFilter, setStatusFilter] = React.useState<string[]>([])
+  const [statusFilter, setStatusFilter] = React.useState<string[]>(initialFilters?.statuses ?? [])
   const [search, setSearch] = React.useState('')
   const [tripType, setTripType] = React.useState('all')
+  const [paymentFilter, setPaymentFilter] = React.useState<'paid' | 'unpaid' | ''>(
+    (initialFilters?.paymentStatus as 'paid' | 'unpaid' | '') ?? ''
+  )
+  const [tripCategoryFilter] = React.useState<string>(initialFilters?.tripType ?? '')
+  const [dateFrom] = React.useState<string>(initialFilters?.dateFrom ?? '')
+  const [dateTo] = React.useState<string>(initialFilters?.dateTo ?? '')
+  const [isTodayFilter] = React.useState<boolean>(initialFilters?.isToday ?? false)
+
+  const clearAllFilters = () => {
+    setStatusFilter([])
+    setPaymentFilter('')
+    setSearch('')
+    setTripType('all')
+    onClearFilters?.()
+  }
 
   const counts: Record<string, number> = React.useMemo(() => {
     const c: Record<string, number> = { total: bookings.length }
@@ -174,9 +214,15 @@ export function BookingsList({ bookings, onOpen, onNewBooking }: BookingsListPro
   const filtered = bookings.filter(b => {
     if (statusFilter.length && !statusFilter.includes(b.status)) return false
     if (tripType !== 'all' && b.tripType !== tripType) return false
+    if (paymentFilter === 'paid' && b.paymentStatus !== 'paid') return false
+    if (paymentFilter === 'unpaid' && b.paymentStatus === 'paid') return false
+    if (tripCategoryFilter && getTripType(b) !== tripCategoryFilter) return false
+    if (isTodayFilter && b.pickup?.dateTime && fmtDate(b.pickup.dateTime) !== 'Today') return false
+    if (dateFrom && b.pickup?.dateTime && b.pickup.dateTime < dateFrom) return false
+    if (dateTo && b.pickup?.dateTime && b.pickup.dateTime >= dateTo) return false
     if (search) {
       const q = search.toLowerCase()
-      const hay = [b.tripCode, b.guestName, b.guestPhone, b.assignedDriver?.name, b.flight?.flightNumber].filter(Boolean).join(' ').toLowerCase()
+      const hay = [b.tripCode, b.guestName, b.guestPhone, b.userName, b.userPhone, b.assignedDriver?.name, b.flight?.flightNumber].filter(Boolean).join(' ').toLowerCase()
       if (!hay.includes(q)) return false
     }
     return true
@@ -187,6 +233,8 @@ export function BookingsList({ bookings, onOpen, onNewBooking }: BookingsListPro
     if (pa >= 5) return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     return new Date(a.pickup?.dateTime ?? 0).getTime() - new Date(b.pickup?.dateTime ?? 0).getTime()
   })
+
+  const hasActiveFilters = initialFilters?.source || statusFilter.length > 0 || paymentFilter || tripCategoryFilter || dateFrom || isTodayFilter
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: YL.bg }}>
@@ -203,7 +251,21 @@ export function BookingsList({ bookings, onOpen, onNewBooking }: BookingsListPro
           })), `bookings-${new Date().toISOString().slice(0,10)}.csv`)}>Export CSV</Button>}
           <Button variant="primary" onClick={onNewBooking} icon={<span style={{ width: 14, height: 14, display: 'flex' }}>{Icons.plus}</span>}>{isMobile ? '+' : 'New booking'}</Button>
         </>}/>
-      <FilterBar statusFilter={statusFilter} setStatusFilter={setStatusFilter} search={search} setSearch={setSearch} tripType={tripType} setTripType={setTripType} counts={counts}/>
+      {hasActiveFilters && initialFilters?.source && (
+        <div style={{ padding: '8px 16px', background: YL.yellow, borderBottom: `1px solid ${YL.yellowDeep}`, display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: YL.ink, opacity: 0.6 }}>FROM {initialFilters.source.toUpperCase()}</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: YL.ink, flex: 1 }}>
+            {initialFilters.sourceLabel ?? 'Filtered view'}
+          </span>
+          <button
+            onClick={clearAllFilters}
+            style={{ fontSize: 12, color: YL.ink, background: 'rgba(43,39,32,0.12)', border: 'none', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontFamily: '"Bricolage Grotesque", system-ui', fontWeight: 500 }}
+          >
+            Clear ×
+          </button>
+        </div>
+      )}
+      <FilterBar statusFilter={statusFilter} setStatusFilter={setStatusFilter} search={search} setSearch={setSearch} tripType={tripType} setTripType={setTripType} paymentFilter={paymentFilter} setPaymentFilter={setPaymentFilter} counts={counts}/>
       {!isMobile && (
         <div style={{ display: 'grid', gridTemplateColumns: '110px 110px 95px 1fr 165px 145px 90px 28px', gap: 16, padding: '10px 28px', background: YL.bg, borderBottom: `1px solid ${YL.line}`, fontSize: 11, color: YL.ink2, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 0 }}>
           <div>Trip code</div><div>Status</div><div>Pickup</div><div>Route</div><div>Passenger</div><div>Driver</div><div style={{ textAlign: 'right' }}>Price</div><div/>
@@ -409,6 +471,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
   const [eFare, setEFare] = React.useState('')
   const [eDiscount, setEDiscount] = React.useState('')
   const [eTotal, setETotal] = React.useState('')
+  // Track original fare values to detect if admin actually changed them
+  const [initialFare, setInitialFare] = React.useState('')
+  const [initialDiscount, setInitialDiscount] = React.useState('')
   const [sendSms, setSendSms] = React.useState(true)
   const [smsToggling, setSmsToggling] = React.useState(false)
   const [eGuestName, setEGuestName] = React.useState('')
@@ -531,8 +596,12 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
     // Absorb stored toll into fare so edit experience is toll-free
     const absorbedFare = fareBeforeTax + storedToll
     setEHours(durationMins ? String(durationMins / 60) : '')
-    setEFare(absorbedFare ? String(absorbedFare) : '')
-    setEDiscount(discount ? String(discount) : '')
+    const fareStr = absorbedFare ? String(absorbedFare) : ''
+    const discStr = discount ? String(discount) : ''
+    setEFare(fareStr)
+    setEDiscount(discStr)
+    setInitialFare(fareStr)
+    setInitialDiscount(discStr)
     const computedTotal = absorbedFare ? Math.round((absorbedFare - discount) * 1.05) : 0
     setETotal(computedTotal ? String(computedTotal) : '')
     setEGuestName(booking.guestName ?? '')
@@ -573,10 +642,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
         stops: stopsArr,
         flight: flightObj,
         passengerCount: Number(ePax),
-        fareBreakdown: eFare ? {
+        fareBreakdown: eFare && (eFare !== initialFare || eDiscount !== initialDiscount) ? {
           fareBeforeTax: Number(eFare),
           discount: Number(eDiscount) || 0,
-          toll: 0,
           durationHours: booking.tripType === 'hourly' && eHours ? Number(eHours) : undefined,
         } : undefined,
         ...(booking.tripType === 'hourly' && eHours && !eFare ? { durationHours: Number(eHours) } : {}),
@@ -1034,65 +1102,74 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                 {/* Fare breakdown */}
                 <div>
                   <div style={{ fontSize: 10.5, color: YL.ink2, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8 }}>Fare breakdown (₹)</div>
-                  <div style={{ background: '#F6F3EB', borderRadius: 10, overflow: 'hidden', border: `1px solid ${YL.line}` }}>
-                    {/* Fare (before tax) */}
-                    <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
-                      <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>Fare (before tax)</span>
-                      <input
-                        type="number" min={0} value={eFare} placeholder="0"
-                        onChange={e => {
-                          const f = e.target.value
-                          setEFare(f)
-                          const disc = Number(eDiscount) || 0
-                          setETotal(f ? String(Math.round((Number(f) - disc) * 1.05)) : '')
-                        }}
-                        style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, background: YL.card, outline: 'none', textAlign: 'right' }}
-                      />
-                    </div>
-                    {/* Discount */}
-                    <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
-                      <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>Discount</span>
-                      <input
-                        type="number" min={0} value={eDiscount} placeholder="0"
-                        onChange={e => {
-                          const d = e.target.value
-                          setEDiscount(d)
-                          const fare = Number(eFare) || 0
-                          setETotal(fare ? String(Math.round((fare - (Number(d) || 0)) * 1.05)) : '')
-                        }}
-                        style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.redInk, background: YL.card, outline: 'none', textAlign: 'right' }}
-                      />
-                    </div>
-                    {/* GST (auto) */}
-                    {(() => {
-                      const fare = Number(eFare) || 0
-                      const disc = Number(eDiscount) || 0
-                      const taxable = Math.max(0, fare - disc)
-                      const gst = Math.round(taxable * 0.05)
-                      return (
-                        <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
-                          <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>GST (5%)</span>
-                          <span style={{ width: 90, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 10, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink3, borderLeft: `1px solid ${YL.line}` }}>
-                            {fare ? `₹${gst.toLocaleString('en-IN')}` : '—'}
-                          </span>
+                  {(() => {
+                    const fareIsLocked = !!(booking.razorpayPaymentId && booking.paymentStatus === 'paid')
+                    const inputStyle = (color = YL.ink) => ({ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color, background: YL.card, outline: 'none', textAlign: 'right' as const, opacity: fareIsLocked ? 0.5 : 1, cursor: fareIsLocked ? 'not-allowed' : 'auto' })
+                    return (
+                      <>
+                        {fareIsLocked && <div style={{ fontSize: 11.5, color: YL.ink3, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>🔒 Fare locked — Razorpay payment received</div>}
+                        <div style={{ background: '#F6F3EB', borderRadius: 10, overflow: 'hidden', border: `1px solid ${YL.line}` }}>
+                          {/* Fare (before tax) */}
+                          <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
+                            <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>Fare (before tax)</span>
+                            <input
+                              type="number" min={0} value={eFare} placeholder="0" disabled={fareIsLocked}
+                              onChange={e => {
+                                const f = e.target.value
+                                setEFare(f)
+                                const disc = Number(eDiscount) || 0
+                                setETotal(f ? String(Math.round((Number(f) - disc) * 1.05)) : '')
+                              }}
+                              style={inputStyle()}
+                            />
+                          </div>
+                          {/* Discount */}
+                          <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
+                            <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>Discount</span>
+                            <input
+                              type="number" min={0} value={eDiscount} placeholder="0" disabled={fareIsLocked}
+                              onChange={e => {
+                                const d = e.target.value
+                                setEDiscount(d)
+                                const fare = Number(eFare) || 0
+                                setETotal(fare ? String(Math.round((fare - (Number(d) || 0)) * 1.05)) : '')
+                              }}
+                              style={inputStyle(YL.redInk)}
+                            />
+                          </div>
+                          {/* GST (auto) */}
+                          {(() => {
+                            const fare = Number(eFare) || 0
+                            const disc = Number(eDiscount) || 0
+                            const taxable = Math.max(0, fare - disc)
+                            const gst = Math.round(taxable * 0.05)
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${YL.line}` }}>
+                                <span style={{ flex: 1, fontSize: 12.5, color: YL.ink2, paddingLeft: 12 }}>GST (5%)</span>
+                                <span style={{ width: 90, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 10, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink3, borderLeft: `1px solid ${YL.line}` }}>
+                                  {fare ? `₹${gst.toLocaleString('en-IN')}` : '—'}
+                                </span>
+                              </div>
+                            )
+                          })()}
+                          {/* Total — editable, back-calculates fare */}
+                          <div style={{ display: 'flex', alignItems: 'center', background: YL.card }}>
+                            <span style={{ flex: 1, fontSize: 12.5, color: YL.ink, fontWeight: 600, paddingLeft: 12 }}>Total</span>
+                            <input
+                              type="number" min={0} value={eTotal} placeholder="0" disabled={fareIsLocked}
+                              onChange={e => {
+                                const t = e.target.value
+                                setETotal(t)
+                                const disc = Number(eDiscount) || 0
+                                setEFare(t ? String(Math.max(0, Math.round(Number(t) / 1.05) + disc)) : '')
+                              }}
+                              style={inputStyle()}
+                            />
+                          </div>
                         </div>
-                      )
-                    })()}
-                    {/* Total — editable, back-calculates fare */}
-                    <div style={{ display: 'flex', alignItems: 'center', background: YL.card }}>
-                      <span style={{ flex: 1, fontSize: 12.5, color: YL.ink, fontWeight: 600, paddingLeft: 12 }}>Total</span>
-                      <input
-                        type="number" min={0} value={eTotal} placeholder="0"
-                        onChange={e => {
-                          const t = e.target.value
-                          setETotal(t)
-                          const disc = Number(eDiscount) || 0
-                          setEFare(t ? String(Math.max(0, Math.round(Number(t) / 1.05) + disc)) : '')
-                        }}
-                        style={{ width: 90, height: 36, border: 'none', borderLeft: `1px solid ${YL.line}`, padding: '0 10px', fontFamily: '"JetBrains Mono", monospace', fontSize: 13, fontWeight: 600, color: YL.ink, background: YL.card, outline: 'none', textAlign: 'right' }}
-                      />
-                    </div>
-                  </div>
+                      </>
+                    )
+                  })()}
                 </div>
                 {editError && <div style={{ padding: '8px 12px', background: YL.redSoft, color: YL.redInk, borderRadius: 8, fontSize: 12.5 }}>{editError}</div>}
               </Stack>
@@ -1278,10 +1355,9 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
               <Stack gap={9}>
                 {(() => {
                   const p = booking.pricing
-                  // Use explicit breakdown if present; otherwise try to reconstruct from basePrice + totalPrice
-                  const fareBeforeTax = p.fareBeforeTax ?? p.basePrice ?? 0
-                  const gst = p.gst ?? (p.fareBeforeTax == null ? Math.round(fareBeforeTax * 0.05) : 0)
-                  const toll = p.toll ?? (p.fareBeforeTax == null ? Math.max(0, (p.totalPrice ?? 0) - fareBeforeTax - gst) : 0)
+                  // Absorb legacy toll into fare so breakdown always adds up: fare + gst - discount = total
+                  const fareBeforeTax = (p.fareBeforeTax ?? p.basePrice ?? 0) + (p.toll ?? 0)
+                  const gst = p.gst ?? Math.round(fareBeforeTax * 0.05)
                   return (
                     <>
                       {(() => {
@@ -1294,8 +1370,8 @@ export function BookingDrawer({ booking, drivers, vehicles, customers, onClose, 
                           : `Fare (${p.distanceKm} km)`
                         return <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>{fareLabel}</span><Mono size={12.5}>{fmtINR(fareBeforeTax)}</Mono></div>
                       })()}
+                      {(p.discount ?? 0) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.redInk }}>Discount</span><Mono size={12.5} color={YL.redInk}>-{fmtINR(p.discount)}</Mono></div>}
                       {gst > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>GST (5%)</span><Mono size={12.5}>{fmtINR(gst)}</Mono></div>}
-                      {toll > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12.5, color: YL.ink2 }}>Tolls</span><Mono size={12.5}>{fmtINR(toll)}</Mono></div>}
                     </>
                   )
                 })()}

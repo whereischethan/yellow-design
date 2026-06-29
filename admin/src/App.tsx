@@ -34,6 +34,7 @@ import PricingPage from './pages/Pricing'
 import InvoicesPage from './pages/Invoices'
 import SettingsPage from './pages/Settings'
 import TeamPage from './pages/Team'
+import AvailabilityPage from './pages/Availability'
 import EmptyLegPage from './pages/EmptyLeg'
 import FinancePage from './pages/Finance'
 import { CreateBookingModal, AddDriverModal, AddVehicleModal } from './pages/Modals'
@@ -249,7 +250,8 @@ export default function App() {
         {page === 'customers'  && <CustomersPage customers={customers} onUpdate={c => setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...c } : x))} onRefresh={() => getCustomers().then(r => setCustomers(r.customers)).catch(() => {})} />}
         {page === 'leads'      && <LeadsPage leads={leads} bookings={bookings} onUpdate={l => setLeads(prev => prev.map(x => x.id === l.id ? { ...x, ...l } : x))} onBookingCreated={b => { setBookings(prev => [b, ...prev]); setPage('bookings') }} />}
         {page === 'pricing'    && <PricingPage isSuperAdmin={isSuperAdmin} />}
-        {page === 'empty-leg'  && <EmptyLegPage />}
+        {page === 'availability' && <AvailabilityPage bookings={bookings} />}
+        {page === 'empty-leg'   && <EmptyLegPage />}
         {page === 'invoices'   && <InvoicesPage />}
         {page === 'finance'    && <FinancePage onNavigateToBookings={navigateToBookings} />}
         {page === 'settings'   && <SettingsPage />}

@@ -242,7 +242,7 @@ export default function ScreenProfile() {
   React.useEffect(() => {
     if (!user) return
     getBookings()
-      .then(bookings => setRideCount(bookings.filter(b => b.status === 'completed').length))
+      .then(({ bookings }) => setRideCount(bookings.filter(b => b.status === 'completed').length))
       .catch(() => {})
     getSavedPlaces().then(setSavedPlaces).catch(() => {})
   }, [user?.phone])

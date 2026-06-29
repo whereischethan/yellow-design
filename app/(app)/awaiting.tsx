@@ -10,6 +10,7 @@ import GulmoharSpray from '../../components/GulmoharSpray'
 import RouteVisualizer from '../../components/RouteVisualizer'
 import { getBooking } from '../../lib/api'
 import { trackingRouteForBooking } from '../../lib/tracking'
+import { SUPPORT_WHATSAPP } from '../../constants/config'
 import type { Booking } from '../../types/booking'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -37,7 +38,9 @@ export default function ScreenAwaitingPartner() {
   const [booking, setBooking] = useState<Booking | null>(() => {
     try { return params.booking ? JSON.parse(params.booking) : null } catch { return null }
   })
+  const [connectionError, setConnectionError] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const failCountRef = useRef(0)
 
   useEffect(() => {
     if (!booking?.id) return
@@ -50,6 +53,8 @@ export default function ScreenAwaitingPartner() {
     pollRef.current = setInterval(async () => {
       try {
         const updated = await getBooking(booking.id)
+        failCountRef.current = 0
+        setConnectionError(false)
         setBooking(updated)
         const r = trackingRouteForBooking(updated)
         if (r.pathname !== '/(app)/awaiting') {
@@ -57,7 +62,8 @@ export default function ScreenAwaitingPartner() {
           router.replace(r as any)
         }
       } catch {
-        // silent
+        failCountRef.current += 1
+        if (failCountRef.current >= 3) setConnectionError(true)
       }
     }, 8000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
@@ -86,6 +92,14 @@ export default function ScreenAwaitingPartner() {
           </View>
         }
       />
+
+      {connectionError && (
+        <View style={{ backgroundColor: '#FEF9C3', borderBottomWidth: 1, borderBottomColor: '#FDE68A', paddingHorizontal: 20, paddingVertical: 8, zIndex: 1 }}>
+          <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: '#92400E', textAlign: 'center' }}>
+            Trouble connecting — updates may be delayed
+          </Text>
+        </View>
+      )}
 
       <View style={{ paddingHorizontal: 20, paddingTop: 4, zIndex: 1 }}>
         <View style={{
@@ -164,7 +178,7 @@ export default function ScreenAwaitingPartner() {
         <YButton variant="outline" full={false} style={{ flex: 1 }} onPress={() => router.replace('/(app)/home')}>
           Home
         </YButton>
-        <YButton variant="ink" full={false} style={{ flex: 1.3 }} onPress={() => Linking.openURL('https://wa.me/918628062808')}>
+        <YButton variant="ink" full={false} style={{ flex: 1.3 }} onPress={() => Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP}`)}>
           WhatsApp support
         </YButton>
       </View>

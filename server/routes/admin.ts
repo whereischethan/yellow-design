@@ -210,6 +210,76 @@ router.get('/me', (_req, res) => {
   res.json({ ok: true })
 })
 
+// ─── Availability blocks ──────────────────────────────────────────────────────
+
+router.get('/availability/blocks', async (_req, res) => {
+  try {
+    const blocks = await prisma.availabilityBlock.findMany({ orderBy: { startAt: 'asc' } })
+    return res.json({ blocks })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+router.post('/availability/blocks', async (req, res) => {
+  try {
+    const { startAt, endAt, reason } = req.body
+    if (!startAt || !endAt) return res.status(400).json({ error: 'startAt and endAt required' })
+    const start = new Date(startAt)
+    const end = new Date(endAt)
+    if (end <= start) return res.status(400).json({ error: 'endAt must be after startAt' })
+
+    const block = await prisma.availabilityBlock.create({
+      data: { startAt: start, endAt: end, reason: reason?.trim() || null },
+    })
+
+    // Warn about confirmed bookings that fall inside this block
+    const affected = await prisma.$queryRaw<{ id: string; trip_code: string; pickup_json: string }[]>`
+      SELECT id, trip_code, pickup_json FROM bookings
+      WHERE status NOT IN ('cancelled','completed')
+      AND pickup_json::json->>'dateTime' BETWEEN ${start.toISOString()} AND ${end.toISOString()}
+    `
+    return res.json({ block, affectedBookings: affected.map(b => ({ id: b.id, tripCode: b.trip_code, pickup: JSON.parse(b.pickup_json) })) })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+router.delete('/availability/blocks/:id', async (req, res) => {
+  try {
+    await prisma.availabilityBlock.delete({ where: { id: Number(req.params.id) } })
+    return res.json({ ok: true })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+router.get('/availability/notifications', async (req, res) => {
+  try {
+    const skip = Number(req.query.skip ?? 0)
+    const take = Math.min(Number(req.query.take ?? 100), 200)
+    const [notifications, total] = await Promise.all([
+      prisma.availabilityNotification.findMany({ orderBy: { createdAt: 'desc' }, skip, take }),
+      prisma.availabilityNotification.count(),
+    ])
+    return res.json({ notifications, total, skip, take })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+router.patch('/availability/notifications/:id/notify', async (req, res) => {
+  try {
+    const updated = await prisma.availabilityNotification.update({
+      where: { id: Number(req.params.id) },
+      data: { notifiedAt: new Date() },
+    })
+    return res.json({ notification: updated })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Impersonation (superadmin) ───────────────────────────────────────────────
 // Issues a short-lived customer/driver token so ops can see the app exactly as
 // that person does. The token expires in 1h and never touches their real session.

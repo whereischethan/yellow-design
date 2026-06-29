@@ -14,6 +14,9 @@ export async function seedPricingDefaults() {
     ['outstation_driver_bata', '500'],
     ['outstation_night_halt', '1000'],
     ['outstation_gst', '5'],
+    ['first_ride_discount_pct', '10'],
+    ['first_ride_discount_high_pct', '20'],
+    ['first_ride_discount_threshold', '1000'],
   ]
   // upsert so new keys are always added even if DB already has rows
   await Promise.all(

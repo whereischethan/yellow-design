@@ -25,6 +25,7 @@ export default function InTripScreen() {
 
   const [nearDrop, setNearDrop] = useState(false);
   const [gpsUnavailable, setGpsUnavailable] = useState(false);
+  const [gpsWeak, setGpsWeak] = useState(false);
   const gotFixRef = useRef(false);
 
   const distanceKm: number = (booking?.pricing as any)?.distanceKm ?? 0;
@@ -49,7 +50,10 @@ export default function InTripScreen() {
         (loc) => {
           gotFixRef.current = true;
           setGpsUnavailable(false);
-          if (Date.now() - lastPost >= 10_000) {
+          const accuracy = loc.coords.accuracy ?? 0;
+          const weak = accuracy > 50;
+          setGpsWeak(weak);
+          if (!weak && Date.now() - lastPost >= 10_000) {
             lastPost = Date.now();
             postDriverLocation({
               lat: loc.coords.latitude,
@@ -105,6 +109,12 @@ export default function InTripScreen() {
             <Text style={styles.tripCodeText}>{tripCode}</Text>
           </View>
         </View>
+
+        {gpsWeak && (
+          <View style={{ backgroundColor: '#FEF9C3', borderRadius: 10, padding: 10, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: '#92400E' }}>GPS weak — location not being shared</Text>
+          </View>
+        )}
 
         {/* Route card */}
         <View style={styles.card}>

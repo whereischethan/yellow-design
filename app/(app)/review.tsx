@@ -7,7 +7,7 @@ import { YL, FONTS } from '../../constants/theme'
 import YAppChrome from '../../components/YAppChrome'
 import YButton from '../../components/YButton'
 import RouteVisualizer from '../../components/RouteVisualizer'
-import { createPaymentOrder, verifyPaymentAndCreateBooking, logLead } from '../../lib/api'
+import { createPaymentOrder, verifyPaymentAndCreateBooking, logLead, getApiBase } from '../../lib/api'
 import { pixelInitiateCheckout, pixelPurchase } from '../../lib/pixel'
 import { useAuth } from '../../context/AuthContext'
 import type { PricingResponse, BookingLocation, FlightInfo, VehicleType, CreateBookingRequest } from '../../types/booking'
@@ -73,13 +73,27 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
   const isNewUser = (user?.bookingCount ?? 0) === 0
   const hasEmptyLeg = !!pricing?.emptyLeg
 
+  const [firstRideConfig, setFirstRideConfig] = useState({ pct: 10, highPct: 20, threshold: 1000 })
+  useEffect(() => {
+    fetch(`${getApiBase()}/pricing/config`)
+      .then(r => r.json())
+      .then(d => {
+        if (d?.firstRideDiscountPct != null) setFirstRideConfig({
+          pct: d.firstRideDiscountPct,
+          highPct: d.firstRideDiscountHighPct ?? 20,
+          threshold: d.firstRideDiscountThreshold ?? 1000,
+        })
+      })
+      .catch(() => {})
+  }, [])
+
   // Empty leg is exclusive — no first-ride or referral discount stacks with it
   function calcFirstRideDiscount(fare: number): number {
-    if (fare >= 1000) return Math.min(Math.round(fare * 0.20), fare - 1000)
-    return Math.round(fare * 0.10)
+    if (fare >= firstRideConfig.threshold) return Math.min(Math.round(fare * firstRideConfig.highPct / 100), fare - firstRideConfig.threshold)
+    return Math.round(fare * firstRideConfig.pct / 100)
   }
   const newUserDiscount = !hasEmptyLeg && isNewUser ? calcFirstRideDiscount(baseTotal) : 0
-  const newUserPct = baseTotal >= 1000 ? 20 : 10
+  const newUserPct = baseTotal >= firstRideConfig.threshold ? firstRideConfig.highPct : firstRideConfig.pct
 
   const availableCredits = user?.referralCredits ?? 0
   const hasReferralPromo = !!(user?.referredById && availableCredits === 0)

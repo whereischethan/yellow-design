@@ -36,6 +36,7 @@ export default function PaymentScreen() {
 
   const [qrData, setQrData] = useState<QrData | null>(null);
   const [loadingQr, setLoadingQr] = useState(true);
+  const [qrError, setQrError] = useState(false);
   const [paid, setPaid] = useState(false);
   const [handlingCash, setHandlingCash] = useState(false);
   const [pollExpired, setPollExpired] = useState(false);
@@ -45,18 +46,26 @@ export default function PaymentScreen() {
   // Poll for ~5 minutes, then pause until the driver taps "Check again"
   const MAX_POLLS = 60;
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await createPaymentQr(bookingId);
+  async function loadQr() {
+    setLoadingQr(true);
+    setQrError(false);
+    try {
+      const data = await createPaymentQr(bookingId);
+      if (data?.dev_mode) {
         setQrData(data);
-      } catch (_) {
-        setQrData({ dev_mode: true, upi_string: `upi://pay?pa=yellow@upi&am=${totalPrice}&tn=${tripCode}` });
-      } finally {
-        setLoadingQr(false);
+      } else if (data?.image_url) {
+        setQrData(data);
+      } else {
+        setQrError(true);
       }
-    })();
-  }, [bookingId]);
+    } catch (_) {
+      setQrError(true);
+    } finally {
+      setLoadingQr(false);
+    }
+  }
+
+  useEffect(() => { loadQr(); }, [bookingId]);
 
   useEffect(() => {
     if (paid) return;
@@ -105,8 +114,8 @@ export default function PaymentScreen() {
     }
   }
 
-  const showRealQr = !loadingQr && qrData?.image_url && !qrData?.dev_mode;
-  const showMockQr = !loadingQr && (qrData?.dev_mode || (!qrData?.image_url && qrData !== null));
+  const showRealQr = !loadingQr && !qrError && qrData?.image_url && !qrData?.dev_mode;
+  const showMockQr = !loadingQr && !qrError && qrData?.dev_mode;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -133,6 +142,17 @@ export default function PaymentScreen() {
               <View style={styles.qrPlaceholder}>
                 <ActivityIndicator size="large" color={YL.ink2} />
                 <Text style={styles.qrLoadingText}>Generating QR…</Text>
+              </View>
+            )}
+
+            {qrError && (
+              <View style={styles.qrPlaceholder}>
+                <Text style={[styles.qrLoadingText, { color: '#DC2626', marginBottom: 12 }]}>
+                  Could not generate QR code
+                </Text>
+                <TouchableOpacity onPress={loadQr} style={{ paddingHorizontal: 20, paddingVertical: 10, backgroundColor: YL.ink, borderRadius: 10 }}>
+                  <Text style={{ fontFamily: FONTS.mono, fontSize: 13, color: YL.bg }}>Retry</Text>
+                </TouchableOpacity>
               </View>
             )}
 

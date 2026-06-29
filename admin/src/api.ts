@@ -129,6 +129,12 @@ export const syncPaymentStatus = (id: string) =>
 
 export const getStats = () => adminFetch('/stats')
 
+export const getAvailabilityBlocks        = ()                          => adminFetch('/availability/blocks')
+export const createAvailabilityBlock      = (body: object)              => adminFetch('/availability/blocks', { method: 'POST', body: JSON.stringify(body) })
+export const deleteAvailabilityBlock      = (id: number)                => adminFetch(`/availability/blocks/${id}`, { method: 'DELETE' })
+export const getAvailabilityNotifications = (skip = 0, take = 100)      => adminFetch(`/availability/notifications?skip=${skip}&take=${take}`)
+export const markNotificationNotified     = (id: number)                => adminFetch(`/availability/notifications/${id}/notify`, { method: 'PATCH' })
+
 export const getFinanceSummary = (from?: string, to?: string) => {
   const params = new URLSearchParams()
   if (from) params.set('from', from)

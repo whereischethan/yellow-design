@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
@@ -16,8 +17,9 @@ import { YL, FONTS } from '../../constants/theme'
 import YAppChrome from '../../components/YAppChrome'
 import YButton from '../../components/YButton'
 import { IconPerson } from '../../components/icons'
-import { checkAvailability, logLead } from '../../lib/api'
+import { checkAvailability, notifyAvailability, logLead, getApiBase } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
+import { SUPPORT_WHATSAPP } from '../../constants/config'
 import { pixelViewContent, pixelLead, pixelInitiateCheckout } from '../../lib/pixel'
 import type { PricingResponse, BookingLocation, FlightInfo } from '../../types/booking'
 
@@ -145,17 +147,31 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
 
   const distanceKm = pricing?.distanceKm
 
+  const [firstRideConfig, setFirstRideConfig] = useState({ pct: 10, highPct: 20, threshold: 1000 })
+  useEffect(() => {
+    fetch(`${getApiBase()}/pricing/config`)
+      .then(r => r.json())
+      .then(d => {
+        if (d?.firstRideDiscountPct != null) setFirstRideConfig({
+          pct: d.firstRideDiscountPct,
+          highPct: d.firstRideDiscountHighPct ?? 20,
+          threshold: d.firstRideDiscountThreshold ?? 1000,
+        })
+      })
+      .catch(() => {})
+  }, [])
+
   const { user } = useAuth()
   const isNewUser = (user?.bookingCount ?? 0) === 0
   const hasEmptyLeg = !!pricing?.emptyLeg
   const originalFare = hasEmptyLeg ? yellowSkyPrice + (pricing?.emptyLeg?.savedAmount ?? 0) : yellowSkyPrice
   function calcFirstRideDiscount(fare: number): number {
-    if (fare >= 1000) return Math.min(Math.round(fare * 0.20), fare - 1000)
-    return Math.round(fare * 0.10)
+    if (fare >= firstRideConfig.threshold) return Math.min(Math.round(fare * firstRideConfig.highPct / 100), fare - firstRideConfig.threshold)
+    return Math.round(fare * firstRideConfig.pct / 100)
   }
   // Empty leg is exclusive — no first-ride discount stacks with it
   const newUserDiscount = !hasEmptyLeg && isNewUser ? calcFirstRideDiscount(yellowSkyPrice) : 0
-  const newUserPct = yellowSkyPrice >= 1000 ? 20 : 10
+  const newUserPct = yellowSkyPrice >= firstRideConfig.threshold ? firstRideConfig.highPct : firstRideConfig.pct
   const effectivePrice = yellowSkyPrice - newUserDiscount
   const totalSaved = (hasEmptyLeg ? pricing!.emptyLeg!.savedAmount : 0) + newUserDiscount
   const showDiscount = hasEmptyLeg || isNewUser
@@ -163,21 +179,41 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
   const [availability, setAvailability] = useState<{
     checked: boolean
     available: boolean
-  }>({ checked: false, available: true })
+    blocked: boolean
+    checkFailed?: boolean
+    reason?: string
+  }>({ checked: false, available: true, blocked: false })
+  const [notifyDone, setNotifyDone] = useState(false)
+  const [notifying, setNotifying]   = useState(false)
+  const [notifyError, setNotifyError] = useState(false)
 
   useEffect(() => {
     if (!pickup?.dateTime) {
-      setAvailability({ checked: true, available: true })
+      setAvailability({ checked: true, available: true, blocked: false })
       return
     }
     checkAvailability(pickup.dateTime)
       .then((result) => {
-        setAvailability({ checked: true, available: result.available })
+        setAvailability({ checked: true, available: result.available, blocked: !!result.blocked, checkFailed: !!result.checkFailed, reason: result.reason })
       })
       .catch(() => {
-        setAvailability({ checked: true, available: true })
+        setAvailability({ checked: true, available: false, blocked: false, checkFailed: true })
       })
   }, [pickup?.dateTime])
+
+  const handleNotifyMe = async () => {
+    if (!pickup?.dateTime || notifying) return
+    setNotifying(true)
+    setNotifyError(false)
+    try {
+      await notifyAvailability(pickup.dateTime)
+      setNotifyDone(true)
+    } catch {
+      setNotifyError(true)
+    } finally {
+      setNotifying(false)
+    }
+  }
 
   // Log this pricing view as a lead and fire browser pixel events
   useEffect(() => {
@@ -259,9 +295,45 @@ tripType: params.tripType,
 
         {availability.checked && !availability.available && (
           <View style={[styles.unavailableBanner, { marginHorizontal: 20 }]}>
-            <Text style={styles.unavailableText}>
-              No vehicles available at this time. Please go back and choose a different pickup time.
+            <Text style={styles.unavailableTitle}>
+              {availability.checkFailed ? 'Availability check failed' : 'Not available at this time'}
             </Text>
+            <Text style={styles.unavailableText}>
+              {availability.checkFailed
+                ? 'Couldn\'t confirm availability right now. Please try again or reach out to us.'
+                : availability.blocked
+                  ? 'We\'re not operating during your selected pickup time.'
+                  : 'Our vehicle is already scheduled around your pickup time.'}
+              {!availability.checkFailed && '\nContact us — we'll do our best to accommodate you.'}
+            </Text>
+            <View style={styles.unavailableActions}>
+              <Pressable
+                style={styles.unavailableBtn}
+                onPress={() => Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent('Hi, I tried booking a Yellow ride but the slot isn\'t available. Can you help?')}`)}
+              >
+                <Text style={styles.unavailableBtnText}>WhatsApp us</Text>
+              </Pressable>
+              {!availability.checkFailed && (
+                notifyDone ? (
+                  <Text style={styles.notifyDoneText}>We'll reach out when this slot opens up.</Text>
+                ) : (
+                  <Pressable
+                    style={[styles.unavailableBtn, styles.unavailableBtnSecondary]}
+                    onPress={handleNotifyMe}
+                    disabled={notifying}
+                  >
+                    <Text style={[styles.unavailableBtnText, styles.unavailableBtnTextSecondary]}>
+                      {notifying ? 'Saving…' : 'Notify me when free'}
+                    </Text>
+                  </Pressable>
+                )
+              )}
+            </View>
+            {notifyError && (
+              <Text style={[styles.unavailableText, { color: '#c0392b', marginTop: 6 }]}>
+                Couldn't save your request. Please use WhatsApp instead.
+              </Text>
+            )}
           </View>
         )}
 
@@ -369,10 +441,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E8B4B4',
     borderRadius: 12,
-    padding: 14,
+    padding: 16,
     marginBottom: 16,
+    gap: 6,
   },
-  unavailableText: { fontSize: 13.5, color: '#C0392B', lineHeight: 20 },
+  unavailableTitle: { fontSize: 15, fontWeight: '700', color: '#C0392B', fontFamily: FONTS.ui, marginBottom: 2 },
+  unavailableText: { fontSize: 13.5, color: '#C0392B', lineHeight: 20, fontFamily: FONTS.ui },
+  unavailableActions: { flexDirection: 'row', gap: 10, marginTop: 12, flexWrap: 'wrap' },
+  unavailableBtn: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: '#C0392B', borderRadius: 8,
+  },
+  unavailableBtnText: { fontSize: 13, fontWeight: '600', color: '#fff', fontFamily: FONTS.ui },
+  unavailableBtnSecondary: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#C0392B' },
+  unavailableBtnTextSecondary: { color: '#C0392B' },
+  notifyDoneText: { fontSize: 13, color: '#C0392B', fontFamily: FONTS.ui, alignSelf: 'center', fontStyle: 'italic' },
   recommendedBadge: {
     position: 'absolute',
     top: -10,

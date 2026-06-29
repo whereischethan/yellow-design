@@ -7,6 +7,7 @@ import { YL, FONTS } from '../../constants/theme'
 import YButton from '../../components/YButton'
 import LiveMap from '../../components/LiveMap'
 import { useBookingTracking } from '../../lib/useBookingTracking'
+import { SUPPORT_WHATSAPP } from '../../constants/config'
 import type { Booking } from '../../types/booking'
 
 function getInitials(name: string): string {
@@ -53,7 +54,7 @@ export default function ScreenPartnerEnRoute() {
     try { return params.booking ? JSON.parse(params.booking) : null } catch { return null }
   })()
 
-  const { booking: liveBooking, trackingInfo, secondsAgo, isLive } = useBookingTracking(initialBooking)
+  const { booking: liveBooking, trackingInfo, secondsAgo, isLive, connectionError } = useBookingTracking(initialBooking)
   const booking = liveBooking ?? initialBooking
 
   // Auto-advance when the trip status moves on (driver/admin updates)
@@ -133,6 +134,14 @@ export default function ScreenPartnerEnRoute() {
         ) : null}
       </View>
 
+      {connectionError && (
+        <View style={{ backgroundColor: '#FEF9C3', borderBottomWidth: 1, borderBottomColor: '#FDE68A', paddingHorizontal: 20, paddingVertical: 8 }}>
+          <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: '#92400E', textAlign: 'center' }}>
+            Trouble connecting — tracking may be delayed
+          </Text>
+        </View>
+      )}
+
       <View style={{
         backgroundColor: YL.card, borderTopWidth: 1, borderTopColor: YL.line,
         paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20,
@@ -156,7 +165,7 @@ export default function ScreenPartnerEnRoute() {
           <ActionCircle onPress={() => { if (driver?.phone) Linking.openURL(`tel:${driver.phone}`) }}>
             <PhoneIcon />
           </ActionCircle>
-          <ActionCircle onPress={() => Linking.openURL('https://wa.me/918628062808')}>
+          <ActionCircle onPress={() => Linking.openURL(`https://wa.me/${SUPPORT_WHATSAPP}`)}>
             <MailIcon />
           </ActionCircle>
         </View>

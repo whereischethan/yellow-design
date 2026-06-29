@@ -39,6 +39,15 @@ const SECTIONS: { title: string; color: string; fields: Field[] }[] = [
       { key: 'hourly_base_rate',  label: 'Hourly rate',    prefix: '₹', suffix: '/hr', hint: 'Base rate per hour' },
     ],
   },
+  {
+    title: 'First Ride Discount',
+    color: '#FFE8C4',
+    fields: [
+      { key: 'first_ride_discount_pct',      label: 'Standard discount',  suffix: '%', hint: 'For fares below the threshold' },
+      { key: 'first_ride_discount_high_pct', label: 'Premium discount',   suffix: '%', hint: 'For fares at or above the threshold' },
+      { key: 'first_ride_discount_threshold', label: 'Fare threshold',    prefix: '₹', hint: 'Switches to premium discount; also minimum post-discount fare' },
+    ],
+  },
 ]
 
 function PriceCard({ field, config, onChange, readOnly }: {

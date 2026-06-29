@@ -206,7 +206,7 @@ export function useIsMobile(breakpoint = 768): boolean {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────
 
-export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'empty-leg' | 'team' | 'invoices' | 'finance' | 'settings'
+export type Page = 'dashboard' | 'bookings' | 'drivers' | 'vehicles' | 'customers' | 'leads' | 'pricing' | 'availability' | 'empty-leg' | 'team' | 'invoices' | 'finance' | 'settings'
 
 /** Pages only super admins can access */
 export const SUPERADMIN_PAGES: Page[] = ['empty-leg', 'team', 'settings']
@@ -232,8 +232,9 @@ export const Sidebar = ({ active, setActive, counts, adminName, adminPhone, isSu
     { id: 'vehicles',  label: 'Vehicles',  icon: Icons.vehicles },
     { id: 'customers', label: 'Customers', icon: Icons.customers },
     { id: 'leads',     label: 'Leads',     icon: Icons.funnel },
-    { id: 'pricing',   label: 'Pricing',   icon: Icons.pricing },
-    { id: 'empty-leg', label: 'Empty Leg', icon: Icons.pricing,   superAdminOnly: true },
+    { id: 'pricing',      label: 'Pricing',       icon: Icons.pricing },
+    { id: 'availability', label: 'Availability',   icon: Icons.bookings },
+    { id: 'empty-leg',    label: 'Empty Leg',      icon: Icons.pricing,   superAdminOnly: true },
     { id: 'invoices',  label: 'Invoices',  icon: Icons.invoice },
     { id: 'finance',   label: 'Finance',   icon: Icons.trending },
     { id: 'team',      label: 'Admin users', icon: Icons.drivers, superAdminOnly: true },
@@ -372,8 +373,9 @@ export const MobileNav = ({ active, setActive, counts, adminName, adminPhone, is
   const allSecondary: { id: Page; label: string; icon: React.ReactNode; superAdminOnly?: boolean }[] = [
     { id: 'vehicles',  label: 'Vehicles',    icon: Icons.vehicles },
     { id: 'customers', label: 'Customers',   icon: Icons.customers },
-    { id: 'pricing',   label: 'Pricing',     icon: Icons.pricing },
-    { id: 'invoices',  label: 'Invoices',    icon: Icons.invoice },
+    { id: 'pricing',      label: 'Pricing',       icon: Icons.pricing },
+    { id: 'availability', label: 'Availability',   icon: Icons.bookings },
+    { id: 'invoices',     label: 'Invoices',       icon: Icons.invoice },
     { id: 'finance',   label: 'Finance',     icon: Icons.trending },
     { id: 'team',      label: 'Admin users', icon: Icons.drivers,   superAdminOnly: true },
     { id: 'settings',  label: 'Settings',    icon: Icons.settings,  superAdminOnly: true },

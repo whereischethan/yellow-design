@@ -280,3 +280,27 @@ model SavedPlace {
 
   @@map("saved_places")
 }
+
+model AvailabilityBlock {
+  id        Int      @id @default(autoincrement())
+  startAt   DateTime @map("start_at")
+  endAt     DateTime @map("end_at")
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([startAt, endAt])
+  @@map("availability_blocks")
+}
+
+model AvailabilityNotification {
+  id          Int       @id @default(autoincrement())
+  userId      String?   @map("user_id")
+  phone       String
+  requestedAt DateTime  @map("requested_at")
+  notifiedAt  DateTime? @map("notified_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("availability_notifications")
+}

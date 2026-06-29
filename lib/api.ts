@@ -292,17 +292,25 @@ export async function fetchPricing(request: PricingRequest): Promise<PricingResp
 
 export async function checkAvailability(
   pickupDateTime: string
-): Promise<{ available: boolean; busyCount: number; totalVehicles: number; checkFailed?: boolean }> {
+): Promise<{ available: boolean; blocked?: boolean; reason?: string; busyCount?: number; totalVehicles?: number; checkFailed?: boolean }> {
   try {
     const res = await authenticatedFetch(
       `${getApiBase()}/bookings/availability?pickupDateTime=${encodeURIComponent(pickupDateTime)}`
     )
-    if (!res.ok) return { available: true, busyCount: 0, totalVehicles: 0, checkFailed: true }
+    if (!res.ok) return { available: false, checkFailed: true }
     const data = await res.json()
-    return { available: data.available, busyCount: data.busyCount, totalVehicles: data.totalVehicles }
+    return { available: data.available, blocked: data.blocked, reason: data.reason, busyCount: data.busyCount, totalVehicles: data.totalVehicles }
   } catch {
-    return { available: true, busyCount: 0, totalVehicles: 0, checkFailed: true }
+    return { available: false, checkFailed: true }
   }
+}
+
+export async function notifyAvailability(requestedAt: string): Promise<void> {
+  await authenticatedFetch(`${getApiBase()}/bookings/availability/notify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestedAt }),
+  })
 }
 
 // ─── Bookings API ─────────────────────────────────────────────────────────────
@@ -331,14 +339,14 @@ export async function getBooking(bookingId: string): Promise<Booking> {
   return data.booking
 }
 
-export async function getBookings(): Promise<Booking[]> {
-  const res = await authenticatedFetch(`${getApiBase()}/bookings`)
+export async function getBookings(skip = 0, take = 20): Promise<{ bookings: Booking[]; total: number }> {
+  const res = await authenticatedFetch(`${getApiBase()}/bookings?skip=${skip}&take=${take}`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Failed to fetch bookings' }))
     throw new Error(err.error || 'Failed to fetch bookings')
   }
   const data = await res.json()
-  return data.bookings || []
+  return { bookings: data.bookings || [], total: data.total ?? 0 }
 }
 
 // ─── Payment API ─────────────────────────────────────────────────────────────

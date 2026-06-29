@@ -187,20 +187,24 @@ function EmptyState({ tab }: { tab: Tab }) {
   )
 }
 
+const PAGE_SIZE = 20
+
 export default function ScreenRideHistory() {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('upcoming')
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    getBookings()
-      .then((data) => {
-        if (!cancelled) setBookings(data)
+    getBookings(0, PAGE_SIZE)
+      .then(({ bookings: data, total: t }) => {
+        if (!cancelled) { setBookings(data); setTotal(t) }
       })
       .catch((err) => {
         if (!cancelled) setError(err?.message || 'Could not load rides.')
@@ -211,9 +215,20 @@ export default function ScreenRideHistory() {
     return () => { cancelled = true }
   }, [])
 
+  async function loadMore() {
+    setLoadingMore(true)
+    try {
+      const { bookings: more, total: t } = await getBookings(bookings.length, PAGE_SIZE)
+      setBookings(prev => [...prev, ...more])
+      setTotal(t)
+    } catch {}
+    finally { setLoadingMore(false) }
+  }
+
   const upcomingBookings = bookings.filter((b) => UPCOMING_STATUSES.has(b.status))
   const pastBookings = bookings.filter((b) => PAST_STATUSES.has(b.status))
   const shown = tab === 'upcoming' ? upcomingBookings : pastBookings
+  const hasMore = bookings.length < total
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: YL.bg, overflow: 'hidden' }}>
@@ -289,30 +304,48 @@ export default function ScreenRideHistory() {
         ) : shown.length === 0 ? (
           <EmptyState tab={tab} />
         ) : (
-          <View
-            style={{
-              backgroundColor: YL.card,
-              borderWidth: 1,
-              borderColor: YL.line,
-              borderRadius: 20,
-              paddingHorizontal: 16,
-            }}
-          >
-            {shown.map((booking, i) => (
-              <View
-                key={booking.id}
-                style={{
-                  borderBottomWidth: i < shown.length - 1 ? 1 : 0,
-                  borderBottomColor: YL.lineSoft,
-                }}
+          <>
+            <View
+              style={{
+                backgroundColor: YL.card,
+                borderWidth: 1,
+                borderColor: YL.line,
+                borderRadius: 20,
+                paddingHorizontal: 16,
+              }}
+            >
+              {shown.map((booking, i) => (
+                <View
+                  key={booking.id}
+                  style={{
+                    borderBottomWidth: i < shown.length - 1 ? 1 : 0,
+                    borderBottomColor: YL.lineSoft,
+                  }}
+                >
+                  <BookingRow
+                    booking={booking}
+                    onPress={() => router.push(trackingRouteForBooking(booking) as any)}
+                  />
+                </View>
+              ))}
+            </View>
+            {tab === 'past' && hasMore && (
+              <Pressable
+                onPress={loadMore}
+                disabled={loadingMore}
+                style={({ pressed }) => ({
+                  alignItems: 'center',
+                  paddingVertical: 16,
+                  opacity: pressed || loadingMore ? 0.6 : 1,
+                })}
               >
-                <BookingRow
-                  booking={booking}
-                  onPress={() => router.push(trackingRouteForBooking(booking) as any)}
-                />
-              </View>
-            ))}
-          </View>
+                {loadingMore
+                  ? <ActivityIndicator size="small" color={YL.ink3} />
+                  : <Text style={{ fontFamily: FONTS.display, fontSize: 13, color: YL.ink3 }}>Load more</Text>
+                }
+              </Pressable>
+            )}
+          </>
         )}
       </ScrollView>
 

@@ -10,26 +10,155 @@ import { slimAssignedDriver, fixAirportStop } from '../lib/shape'
 
 const router = Router()
 
+// ─── Shared booking creation ──────────────────────────────────────────────────
+
+interface BookingCreateParams {
+  tripType: string
+  vehicleType?: string
+  passengers?: number
+  pickup: any
+  drop: any
+  stops?: any[]
+  flight?: any
+  pricing: any
+  guestName?: string
+  guestPhone?: string
+  razorpayOrderId?: string
+  razorpayPaymentId?: string
+  paymentStatus?: string
+  reqMeta?: { userAgent?: string; fbp?: string }
+}
+
+async function createBookingRecord(userId: string, p: BookingCreateParams) {
+  const vehicleType = p.vehicleType ?? 'yellowSky'
+  const passengers = p.passengers ?? 1
+
+  // Deduct referral credits if applied
+  const creditsApplied = Number(p.pricing.creditsApplied ?? 0)
+  if (creditsApplied > 0) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { referralCredits: true } })
+    const safeDeduct = Math.min(creditsApplied, user?.referralCredits ?? 0)
+    if (safeDeduct > 0) {
+      await prisma.user.update({ where: { id: userId }, data: { referralCredits: { decrement: safeDeduct } } })
+    }
+  }
+
+  const id = randomUUID()
+  const tripCode = await genTripCode()
+
+  const booking = await prisma.booking.create({
+    data: {
+      id,
+      tripCode,
+      userId,
+      tripType: p.tripType,
+      vehicleType,
+      price: p.pricing.totalPrice ?? p.pricing.basePrice ?? 0,
+      passengerCount: passengers,
+      pickupJson: JSON.stringify(p.pickup),
+      dropJson: JSON.stringify(p.drop),
+      stopsJson: p.stops?.length ? JSON.stringify(p.stops) : null,
+      flightJson: p.flight ? JSON.stringify(p.flight) : null,
+      pricingJson: JSON.stringify(p.pricing),
+      guestName: p.guestName ?? null,
+      guestPhone: p.guestPhone ?? null,
+      razorpayOrderId: p.razorpayOrderId ?? null,
+      razorpayPaymentId: p.razorpayPaymentId ?? null,
+      paymentStatus: p.paymentStatus ?? 'paid',
+      status: 'confirmed',
+    },
+  })
+
+  // Meta Conversions API — Purchase (fire-and-forget)
+  ;(async () => {
+    try {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { phone: true, email: true } })
+      sendMetaEvent('Purchase', {
+        phone:          user?.phone,
+        email:          user?.email,
+        value:          booking.price ?? 0,
+        userAgent:      p.reqMeta?.userAgent,
+        fbp:            p.reqMeta?.fbp,
+        eventId:        `purchase_${booking.id}`,
+        eventSourceUrl: `https://book.ridewithyellow.com`,
+      })
+    } catch {}
+  })()
+
+  // Referrer reward: 10% of first booking price if referee
+  ;(async () => {
+    try {
+      const referredUser = await prisma.user.findUnique({ where: { id: userId }, select: { referredById: true } })
+      if (referredUser?.referredById) {
+        const prevCount = await prisma.booking.count({ where: { userId, id: { not: booking.id } } })
+        if (prevCount === 0) {
+          const reward = Math.round((booking.price ?? 0) * 0.1)
+          if (reward > 0) await prisma.user.update({ where: { id: referredUser.referredById }, data: { referralCredits: { increment: reward } } })
+        }
+      }
+    } catch {}
+  })()
+
+  // Auto-close any open leads for this user
+  await prisma.lead.updateMany({
+    where: { userId, status: { in: ['new', 'open'] } },
+    data: { status: 'converted', tripCode: booking.tripCode },
+  }).catch(() => {})
+
+  // Confirmation SMS + push (non-blocking)
+  notifyBookingEvent(booking, 'confirmed')
+
+  return booking
+}
+
+async function checkSlotAvailable(pickupDateTime: string): Promise<{ available: boolean; blocked?: boolean; reason?: string; busyCount?: number; totalVehicles?: number }> {
+  const dt = new Date(pickupDateTime)
+  const lo = new Date(dt.getTime() - 2 * 3600000)
+  const hi = new Date(dt.getTime() + 2 * 3600000)
+
+  // Manual admin blocks take priority
+  const block = await prisma.availabilityBlock.findFirst({
+    where: { startAt: { lte: hi }, endAt: { gte: lo } },
+  })
+  if (block) {
+    return { available: false, blocked: true, reason: block.reason || undefined }
+  }
+
+  // Fleet size: count active vehicles so 2+ vehicles can take concurrent bookings
+  const totalVehicles = await prisma.vehicle.count({ where: { status: { not: 'retired' } } })
+  const capacity = Math.max(totalVehicles, 1)
+
+  const busy = await prisma.$queryRaw<[{ cnt: bigint }]>`
+    SELECT COUNT(*) as cnt FROM bookings
+    WHERE status NOT IN ('cancelled','completed')
+    AND pickup_json::json->>'dateTime' BETWEEN ${lo.toISOString()} AND ${hi.toISOString()}
+  `
+  const busyCount = Number(busy[0]?.cnt ?? 0)
+  return { available: busyCount < capacity, busyCount, totalVehicles: capacity }
+}
+
 router.get('/availability', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { pickupDateTime } = req.query as { pickupDateTime: string }
     if (!pickupDateTime) return res.status(400).json({ error: 'pickupDateTime required' })
-
-    const dt = new Date(pickupDateTime)
-    const lo = new Date(dt.getTime() - 2 * 3600000).toISOString()
-    const hi = new Date(dt.getTime() + 2 * 3600000).toISOString()
-
-    const busy = await prisma.$queryRaw<[{ cnt: bigint }]>`
-      SELECT COUNT(*) as cnt FROM bookings
-      WHERE status NOT IN ('cancelled','completed')
-      AND pickup_json::json->>'dateTime' BETWEEN ${lo} AND ${hi}
-    `
-    const busyCount = Number(busy[0]?.cnt ?? 0)
-
-    const totalVehicles = 5
-    return res.json({ available: busyCount < totalVehicles, busyCount, totalVehicles })
+    const result = await checkSlotAvailable(pickupDateTime)
+    return res.json(result)
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Availability check failed' })
+  }
+})
+
+router.post('/availability/notify', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { requestedAt } = req.body
+    if (!requestedAt) return res.status(400).json({ error: 'requestedAt required' })
+    const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { phone: true } })
+    await prisma.availabilityNotification.create({
+      data: { userId: req.userId!, phone: user?.phone ?? '', requestedAt: new Date(requestedAt) },
+    })
+    return res.json({ ok: true })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
   }
 })
 
@@ -125,80 +254,24 @@ router.post('/payment/verify', requireAuth, async (req: AuthRequest, res: Respon
       return res.status(400).json({ error: 'pickup, drop, and pricing are required' })
     }
 
-    // Deduct referral credits if applied
-    const creditsApplied = Number(pricing.creditsApplied ?? 0)
-    if (creditsApplied > 0) {
-      const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referralCredits: true } })
-      const safeDeduct = Math.min(creditsApplied, user?.referralCredits ?? 0)
-      if (safeDeduct > 0) {
-        await prisma.user.update({ where: { id: req.userId! }, data: { referralCredits: { decrement: safeDeduct } } })
+    // Availability guard — prevent double-booking the single vehicle
+    if (pickup?.dateTime) {
+      const slot = await checkSlotAvailable(pickup.dateTime)
+      if (!slot.available) {
+        return res.status(409).json({
+          error: slot.blocked
+            ? 'We are not available at this time. Please reach out to support.'
+            : 'Another booking already exists at this time. Please choose a different time.',
+          unavailable: true,
+        })
       }
     }
 
-    const id = randomUUID()
-    const tripCode = await genTripCode()
-
-    const booking = await prisma.booking.create({
-      data: {
-        id,
-        tripCode,
-        userId: req.userId!,
-        tripType,
-        vehicleType,
-        price: pricing.totalPrice ?? pricing.basePrice ?? 0,
-        passengerCount: passengers,
-        pickupJson: JSON.stringify(pickup),
-        dropJson: JSON.stringify(drop),
-        stopsJson: stops?.length ? JSON.stringify(stops) : null,
-        flightJson: flight ? JSON.stringify(flight) : null,
-        pricingJson: JSON.stringify(pricing),
-        guestName: guestName ?? null,
-        guestPhone: guestPhone ?? null,
-        razorpayOrderId,
-        razorpayPaymentId,
-        paymentStatus: 'paid',
-        status: 'confirmed',
-      },
+    const booking = await createBookingRecord(req.userId!, {
+      tripType, vehicleType, passengers, pickup, drop, stops, flight, pricing,
+      guestName, guestPhone, razorpayOrderId, razorpayPaymentId, paymentStatus: 'paid',
+      reqMeta: { userAgent: req.headers['user-agent'], fbp: req.cookies?.['_fbp'] },
     })
-
-    // Meta Conversions API — Purchase (fire-and-forget)
-    ;(async () => {
-      try {
-        const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { phone: true, email: true } })
-        sendMetaEvent('Purchase', {
-          phone:          user?.phone,
-          email:          user?.email,
-          value:          booking.price ?? 0,
-          userAgent:      req.headers['user-agent'],
-          fbp:            req.cookies?.['_fbp'],
-          eventId:        `purchase_${booking.id}`,
-          eventSourceUrl: `https://book.ridewithyellow.com`,
-        })
-      } catch {}
-    })()
-
-    // Referrer reward: 10% of first booking price if referee
-    ;(async () => {
-      try {
-        const referredUser = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referredById: true } })
-        if (referredUser?.referredById) {
-          const prevCount = await prisma.booking.count({ where: { userId: req.userId!, id: { not: booking.id } } })
-          if (prevCount === 0) {
-            const reward = Math.round((booking.price ?? 0) * 0.1)
-            if (reward > 0) await prisma.user.update({ where: { id: referredUser.referredById }, data: { referralCredits: { increment: reward } } })
-          }
-        }
-      } catch {}
-    })()
-
-    // Auto-close any open leads for this user
-    await prisma.lead.updateMany({
-      where: { userId: req.userId!, status: { in: ['new', 'open'] } },
-      data: { status: 'converted', tripCode: booking.tripCode },
-    }).catch(() => {})
-
-    // Confirmation SMS + push (non-blocking)
-    notifyBookingEvent(booking, 'confirmed')
 
     return res.json({ booking: buildBookingResponse(booking) })
   } catch (e: any) {
@@ -297,71 +370,24 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
     if (!pickup || !drop || !pricing) return res.status(400).json({ error: 'pickup, drop, and pricing are required' })
 
-    // Deduct referral credits if applied
-    const creditsApplied = Number(pricing.creditsApplied ?? 0)
-    if (creditsApplied > 0) {
-      const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referralCredits: true } })
-      const safeDeduct = Math.min(creditsApplied, user?.referralCredits ?? 0)
-      if (safeDeduct > 0) {
-        await prisma.user.update({ where: { id: req.userId! }, data: { referralCredits: { decrement: safeDeduct } } })
+    // Availability guard — prevent double-booking the single vehicle
+    if (pickup?.dateTime) {
+      const slot = await checkSlotAvailable(pickup.dateTime)
+      if (!slot.available) {
+        return res.status(409).json({
+          error: slot.blocked
+            ? 'We are not available at this time. Please reach out to support.'
+            : 'Another booking already exists at this time. Please choose a different time.',
+          unavailable: true,
+        })
       }
     }
 
-    const id = randomUUID()
-    const tripCode = await genTripCode()
-
-    const booking = await prisma.booking.create({
-      data: {
-        id,
-        tripCode,
-        userId: req.userId!,
-        tripType,
-        vehicleType,
-        price: pricing.totalPrice ?? pricing.basePrice ?? 0,
-        passengerCount: passengers,
-        pickupJson: JSON.stringify(pickup),
-        dropJson: JSON.stringify(drop),
-        stopsJson: stops?.length ? JSON.stringify(stops) : null,
-        flightJson: flight ? JSON.stringify(flight) : null,
-        pricingJson: JSON.stringify(pricing),
-        guestName: guestName ?? null,
-        guestPhone: guestPhone ?? null,
-        paymentStatus: 'paid',
-      },
+    const booking = await createBookingRecord(req.userId!, {
+      tripType, vehicleType, passengers, pickup, drop, stops, flight, pricing,
+      guestName, guestPhone, paymentStatus: 'paid',
+      reqMeta: { userAgent: req.headers['user-agent'], fbp: req.cookies?.['_fbp'] },
     })
-
-    // Meta Conversions API — Purchase (fire-and-forget)
-    ;(async () => {
-      try {
-        const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { phone: true, email: true } })
-        sendMetaEvent('Purchase', {
-          phone:          user?.phone,
-          email:          user?.email,
-          value:          booking.price ?? 0,
-          userAgent:      req.headers['user-agent'],
-          fbp:            req.cookies?.['_fbp'],
-          eventId:        `purchase_${booking.id}`,
-          eventSourceUrl: `https://book.ridewithyellow.com`,
-        })
-      } catch {}
-    })()
-
-    // Referrer reward: 10% of first booking price if referee
-    ;(async () => {
-      try {
-        const referredUser = await prisma.user.findUnique({ where: { id: req.userId! }, select: { referredById: true } })
-        if (referredUser?.referredById) {
-          const prevCount = await prisma.booking.count({ where: { userId: req.userId!, id: { not: booking.id } } })
-          if (prevCount === 0) {
-            const reward = Math.round((booking.price ?? 0) * 0.1)
-            if (reward > 0) await prisma.user.update({ where: { id: referredUser.referredById }, data: { referralCredits: { increment: reward } } })
-          }
-        }
-      } catch {}
-    })()
-
-    // Confirmation SMS + push (non-blocking)
-    notifyBookingEvent(booking, 'confirmed')
 
     return res.json({ booking: buildBookingResponse(booking) })
   } catch (e: any) {
@@ -374,11 +400,18 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
 router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const rows = await prisma.booking.findMany({
-      where: { userId: req.userId! },
-      orderBy: { createdAt: 'desc' },
-    })
-    return res.json({ bookings: rows.map(buildBookingResponse) })
+    const take = Math.min(Number(req.query.take ?? 20), 100)
+    const skip = Number(req.query.skip ?? 0)
+    const [rows, total] = await Promise.all([
+      prisma.booking.findMany({
+        where: { userId: req.userId! },
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+      }),
+      prisma.booking.count({ where: { userId: req.userId! } }),
+    ])
+    return res.json({ bookings: rows.map(buildBookingResponse), total, skip, take })
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Failed to fetch bookings' })
   }
@@ -400,14 +433,15 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
 
 const TRACKABLE_STATUSES = ['assigned', 'arrived', 'in_progress']
 const LOCATION_STALE_MS = 60_000
-const geocodeCache = new Map<string, { lat: number; lng: number }>()
+const GEOCODE_CACHE_MAX = 500
+const geocodeCache = new Map<string, { lat: number; lng: number; ts: number }>()
 
 async function resolveCoords(point: any): Promise<{ lat: number; lng: number } | null> {
   if (point?.lat != null && point?.lng != null) return { lat: Number(point.lat), lng: Number(point.lng) }
   const placeId = point?.placeId
   if (!placeId) return null
   const cached = geocodeCache.get(placeId)
-  if (cached) return cached
+  if (cached && Date.now() - cached.ts < 86_400_000) return cached
   const key = process.env.GOOGLE_MAPS_KEY || ''
   if (!key) return null
   try {
@@ -415,7 +449,8 @@ async function resolveCoords(point: any): Promise<{ lat: number; lng: number } |
     const data = await res.json() as any
     const loc = data?.results?.[0]?.geometry?.location
     if (loc?.lat != null && loc?.lng != null) {
-      const coords = { lat: loc.lat, lng: loc.lng }
+      const coords = { lat: loc.lat, lng: loc.lng, ts: Date.now() }
+      if (geocodeCache.size >= GEOCODE_CACHE_MAX) geocodeCache.delete(geocodeCache.keys().next().value!)
       geocodeCache.set(placeId, coords)
       return coords
     }

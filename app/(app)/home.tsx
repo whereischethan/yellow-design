@@ -236,7 +236,7 @@ export default function ScreenHome() {
     React.useCallback(() => {
       let cancelled = false
       getBookings()
-        .then(list => { if (!cancelled) setActiveBooking(pickActiveBooking(list)) })
+        .then(({ bookings: list }) => { if (!cancelled) setActiveBooking(pickActiveBooking(list)) })
         .catch(() => {}) // home renders fine without the card
       return () => { cancelled = true }
     }, [])

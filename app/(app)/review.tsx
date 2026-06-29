@@ -73,14 +73,13 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
   const isNewUser = (user?.bookingCount ?? 0) === 0
   const hasEmptyLeg = !!pricing?.emptyLeg
 
-  const [firstRideConfig, setFirstRideConfig] = useState({ pct: 10, highPct: 20, threshold: 1000 })
+  const [firstRideConfig, setFirstRideConfig] = useState({ pct: 10, threshold: 1000 })
   useEffect(() => {
     fetch(`${getApiBase()}/pricing/config`)
       .then(r => r.json())
       .then(d => {
         if (d?.firstRideDiscountPct != null) setFirstRideConfig({
           pct: d.firstRideDiscountPct,
-          highPct: d.firstRideDiscountHighPct ?? 20,
           threshold: d.firstRideDiscountThreshold ?? 1000,
         })
       })
@@ -89,11 +88,11 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
 
   // Empty leg is exclusive — no first-ride or referral discount stacks with it
   function calcFirstRideDiscount(fare: number): number {
-    if (fare >= firstRideConfig.threshold) return Math.min(Math.round(fare * firstRideConfig.highPct / 100), fare - firstRideConfig.threshold)
+    if (fare < firstRideConfig.threshold) return 0
     return Math.round(fare * firstRideConfig.pct / 100)
   }
   const newUserDiscount = !hasEmptyLeg && isNewUser ? calcFirstRideDiscount(baseTotal) : 0
-  const newUserPct = baseTotal >= firstRideConfig.threshold ? firstRideConfig.highPct : firstRideConfig.pct
+  const newUserPct = firstRideConfig.pct
 
   const availableCredits = user?.referralCredits ?? 0
   const hasReferralPromo = !!(user?.referredById && availableCredits === 0)

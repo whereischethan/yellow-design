@@ -147,14 +147,13 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
 
   const distanceKm = pricing?.distanceKm
 
-  const [firstRideConfig, setFirstRideConfig] = useState({ pct: 10, highPct: 20, threshold: 1000 })
+  const [firstRideConfig, setFirstRideConfig] = useState({ pct: 10, threshold: 1000 })
   useEffect(() => {
     fetch(`${getApiBase()}/pricing/config`)
       .then(r => r.json())
       .then(d => {
         if (d?.firstRideDiscountPct != null) setFirstRideConfig({
           pct: d.firstRideDiscountPct,
-          highPct: d.firstRideDiscountHighPct ?? 20,
           threshold: d.firstRideDiscountThreshold ?? 1000,
         })
       })
@@ -166,12 +165,12 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
   const hasEmptyLeg = !!pricing?.emptyLeg
   const originalFare = hasEmptyLeg ? yellowSkyPrice + (pricing?.emptyLeg?.savedAmount ?? 0) : yellowSkyPrice
   function calcFirstRideDiscount(fare: number): number {
-    if (fare >= firstRideConfig.threshold) return Math.min(Math.round(fare * firstRideConfig.highPct / 100), fare - firstRideConfig.threshold)
+    if (fare < firstRideConfig.threshold) return 0
     return Math.round(fare * firstRideConfig.pct / 100)
   }
   // Empty leg is exclusive — no first-ride discount stacks with it
   const newUserDiscount = !hasEmptyLeg && isNewUser ? calcFirstRideDiscount(yellowSkyPrice) : 0
-  const newUserPct = yellowSkyPrice >= firstRideConfig.threshold ? firstRideConfig.highPct : firstRideConfig.pct
+  const newUserPct = firstRideConfig.pct
   const effectivePrice = yellowSkyPrice - newUserDiscount
   const totalSaved = (hasEmptyLeg ? pricing!.emptyLeg!.savedAmount : 0) + newUserDiscount
   const showDiscount = hasEmptyLeg || isNewUser

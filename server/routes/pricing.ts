@@ -229,7 +229,6 @@ router.get('/config', async (_req: Request, res: Response) => {
       hourlyRate: cfg.hourly_base_rate ?? 500,
       hourlyGst: cfg.hourly_gst ?? 5,
       firstRideDiscountPct: cfg.first_ride_discount_pct ?? 10,
-      firstRideDiscountHighPct: cfg.first_ride_discount_high_pct ?? 20,
       firstRideDiscountThreshold: cfg.first_ride_discount_threshold ?? 1000,
     })
   } catch (e: any) {

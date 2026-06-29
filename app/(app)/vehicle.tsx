@@ -304,7 +304,7 @@ tripType: params.tripType,
                 : availability.blocked
                   ? 'We\'re not operating during your selected pickup time.'
                   : 'Our vehicle is already scheduled around your pickup time.'}
-              {!availability.checkFailed && '\nContact us — we'll do our best to accommodate you.'}
+              {!availability.checkFailed && "\nContact us — we'll do our best to accommodate you."}
             </Text>
             <View style={styles.unavailableActions}>
               <Pressable

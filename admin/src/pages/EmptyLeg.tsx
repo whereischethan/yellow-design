@@ -44,6 +44,8 @@ const PARAM_FIELDS: { key: string; label: string; hint: string; prefix?: string;
   { key: 'empty_leg_post_radius_km', label: 'Radius from endpoint', suffix: 'km',     hint: 'Customer origin must be within',       group: 'post' },
   { key: 'home_base_fare',           label: 'Home base fare',   prefix: '₹',          hint: 'Flat fare from Kengeri area (+ toll & GST)', group: 'home' },
   { key: 'home_base_radius_km',      label: 'Radius',           suffix: 'km',         hint: 'From Kengeri garage',                  group: 'home' },
+  { key: 'first_ride_discount_pct',       label: 'Discount',     suffix: '%',         hint: "New user's first ride",                group: 'firstride' },
+  { key: 'first_ride_discount_threshold', label: 'Minimum fare', prefix: '₹',         hint: 'No discount below this fare',          group: 'firstride' },
 ]
 
 const DEFAULTS: Record<string, number> = {
@@ -56,6 +58,8 @@ const DEFAULTS: Record<string, number> = {
   empty_leg_post_radius_km: 15,
   home_base_fare:            999,
   home_base_radius_km:       10,
+  first_ride_discount_pct:       10,
+  first_ride_discount_threshold: 1000,
 }
 
 function fmtISTTime(iso: string): string {
@@ -567,6 +571,29 @@ export default function EmptyLegPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 16 }}>
                 {PARAM_FIELDS.filter(f => f.group === 'home').map(f => (
+                  <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{f.label}</span>
+                      <span style={{ fontSize: 12, color: YL.ink3, marginLeft: 6 }}>{f.hint}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                      {f.prefix && <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink2 }}>{f.prefix}</span>}
+                      <input value={localCfg[f.key] ?? String(DEFAULTS[f.key])} onChange={e => setLocalCfg(p => ({ ...p, [f.key]: e.target.value }))} style={inp} type="number" min="0" />
+                      {f.suffix && <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11, color: YL.ink3, whiteSpace: 'nowrap' }}>{f.suffix}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* First ride discount (moved here from Pricing) */}
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${YL.line}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <div style={{ width: 8, height: 8, borderRadius: 4, background: '#B8860B', flexShrink: 0 }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#B8860B', letterSpacing: 0.3, textTransform: 'uppercase' }}>First Ride Discount</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 16 }}>
+                {PARAM_FIELDS.filter(f => f.group === 'firstride').map(f => (
                   <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: 13, fontWeight: 500, color: YL.ink }}>{f.label}</span>

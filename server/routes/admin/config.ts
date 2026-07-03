@@ -272,6 +272,7 @@ router.patch('/empty-leg/config', requireSuperAdmin, async (req, res) => {
       'empty_leg_post_start_min', 'empty_leg_post_end_min',
       'empty_leg_pre_radius_km', 'empty_leg_post_radius_km',
       'home_base_fare', 'home_base_radius_km',
+      'first_ride_discount_pct', 'first_ride_discount_threshold',
     ]
     const entries = Object.entries(req.body).filter(([k]) => allowed.includes(k))
     await Promise.all(entries.map(([key, value]) =>

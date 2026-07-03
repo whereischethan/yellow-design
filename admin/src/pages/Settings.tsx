@@ -118,50 +118,55 @@ export default function SettingsPage() {
         </>}
       />
 
-      <div style={{ padding: isMobile ? '16px 14px' : '24px 28px', maxWidth: 640 }}>
+      <div style={{ padding: isMobile ? '16px 14px' : '20px 28px', maxWidth: 1100 }}>
         <Stack gap={20}>
-          {/* Company section */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ padding: '3px 12px', borderRadius: 20, background: YL.yellowSoft, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
-                Company
+          {/* Sections side by side on wide screens */}
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px 32px', alignItems: 'start' }}>
+            {/* Company section */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div style={{ padding: '3px 12px', borderRadius: 20, background: YL.yellowSoft, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
+                  Company
+                </div>
+                <div style={{ flex: 1, height: 1, background: YL.line }}/>
               </div>
-              <div style={{ flex: 1, height: 1, background: YL.line }}/>
+              <Stack gap={14}>
+                {FIELDS.slice(0, 6).map(f => (
+                  <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
+                ))}
+              </Stack>
             </div>
-            <Stack gap={16}>
-              {FIELDS.slice(0, 6).map(f => (
-                <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
-              ))}
-            </Stack>
-          </div>
 
-          {/* Invoice section */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ padding: '3px 12px', borderRadius: 20, background: YL.blueSoft, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
-                Invoice
+            <Stack gap={20}>
+              {/* Invoice section */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                  <div style={{ padding: '3px 12px', borderRadius: 20, background: YL.blueSoft, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
+                    Invoice
+                  </div>
+                  <div style={{ flex: 1, height: 1, background: YL.line }}/>
+                </div>
+                <Stack gap={14}>
+                  {FIELDS.slice(6, 8).map(f => (
+                    <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
+                  ))}
+                </Stack>
               </div>
-              <div style={{ flex: 1, height: 1, background: YL.line }}/>
-            </div>
-            <Stack gap={16}>
-              {FIELDS.slice(6, 8).map(f => (
-                <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
-              ))}
-            </Stack>
-          </div>
 
-          {/* Payments section */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ padding: '3px 12px', borderRadius: 20, background: YL.greenSoft, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
-                Payments
+              {/* Payments section */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                  <div style={{ padding: '3px 12px', borderRadius: 20, background: YL.greenSoft, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
+                    Payments
+                  </div>
+                  <div style={{ flex: 1, height: 1, background: YL.line }}/>
+                </div>
+                <Stack gap={14}>
+                  {FIELDS.slice(8).map(f => (
+                    <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
+                  ))}
+                </Stack>
               </div>
-              <div style={{ flex: 1, height: 1, background: YL.line }}/>
-            </div>
-            <Stack gap={16}>
-              {FIELDS.slice(8).map(f => (
-                <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
-              ))}
             </Stack>
           </div>
 

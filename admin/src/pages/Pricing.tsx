@@ -39,15 +39,8 @@ const SECTIONS: { title: string; color: string; fields: Field[] }[] = [
       { key: 'hourly_base_rate',  label: 'Hourly rate',    prefix: '₹', suffix: '/hr', hint: 'Base rate per hour' },
     ],
   },
-  {
-    title: 'First Ride Discount',
-    color: '#FFE8C4',
-    fields: [
-      { key: 'first_ride_discount_pct',       label: 'Discount',          suffix: '%', hint: 'Applied to new user\'s first ride' },
-      { key: 'first_ride_discount_threshold', label: 'Minimum fare',      prefix: '₹', hint: 'No discount if fare is below this amount' },
-    ],
-  },
 ]
+// First Ride Discount config lives on the Empty Leg page (with the other promo levers).
 
 function PriceCard({ field, config, onChange, readOnly }: {
   field: Field
@@ -56,12 +49,12 @@ function PriceCard({ field, config, onChange, readOnly }: {
   readOnly?: boolean
 }) {
   return (
-    <div style={{ background: YL.card, border: `1.5px solid ${YL.line}`, borderRadius: 14, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ background: YL.card, border: `1.5px solid ${YL.line}`, borderRadius: 12, padding: '11px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div>
         <div style={{ fontSize: 13, fontWeight: 600, color: YL.ink, marginBottom: 2 }}>{field.label}</div>
         <div style={{ fontSize: 11.5, color: YL.ink3 }}>{field.hint}</div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', height: 40, padding: '0 12px', background: readOnly ? YL.bg : YL.bg, border: `1.5px solid ${YL.line}`, borderRadius: 10, opacity: readOnly ? 0.7 : 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: 36, padding: '0 12px', background: YL.bg, border: `1.5px solid ${YL.line}`, borderRadius: 9, opacity: readOnly ? 0.7 : 1 }}>
         {field.prefix && <Mono size={13} color={YL.ink2} style={{ marginRight: 4 }}>{field.prefix}</Mono>}
         <input
           value={config[field.key] ?? ''}
@@ -235,16 +228,16 @@ export default function PricingPage({ isSuperAdmin }: { isSuperAdmin?: boolean }
         </> : undefined}
       />
 
-      <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <div style={{ padding: '18px 28px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '18px 24px', alignItems: 'start' }}>
         {SECTIONS.map(section => (
           <div key={section.title}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
               <div style={{ padding: '3px 12px', borderRadius: 20, background: section.color, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
                 {section.title}
               </div>
               <div style={{ flex: 1, height: 1, background: YL.line }} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
               {section.fields.map(f => (
                 <PriceCard key={f.key} field={f} config={config} onChange={handleChange} readOnly={!isSuperAdmin} />
               ))}
@@ -253,7 +246,7 @@ export default function PricingPage({ isSuperAdmin }: { isSuperAdmin?: boolean }
         ))}
 
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <div style={{ padding: '3px 12px', borderRadius: 20, background: '#F0EDE8', border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
               Calculator
             </div>
@@ -263,7 +256,7 @@ export default function PricingPage({ isSuperAdmin }: { isSuperAdmin?: boolean }
         </div>
 
         {saved && (
-          <div style={{ padding: '12px 16px', background: '#D4F4CD', color: YL.greenInk, borderRadius: 10, fontSize: 13, fontWeight: 500 }}>
+          <div style={{ gridColumn: '1 / -1', padding: '12px 16px', background: '#D4F4CD', color: YL.greenInk, borderRadius: 10, fontSize: 13, fontWeight: 500 }}>
             ✓ Pricing saved — customer app will use updated fares immediately.
           </div>
         )}

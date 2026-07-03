@@ -88,6 +88,11 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
   const [startAt, setStartAt] = React.useState(defaultStartIST)
   const [endAt,   setEndAt]   = React.useState(defaultEndIST)
   const [reason,  setReason]  = React.useState('')
+  // 'slot' = specific from/to datetimes; 'days' = whole-day range (start date → end date inclusive)
+  const [mode, setMode]           = React.useState<'slot' | 'days'>('slot')
+  const todayIST = toISTISO(new Date()).slice(0, 10)
+  const [startDate, setStartDate] = React.useState(todayIST)
+  const [endDate,   setEndDate]   = React.useState(todayIST)
 
   React.useEffect(() => { load() }, [])
 
@@ -106,15 +111,25 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
-    if (!startAt || !endAt) return
+    let blockStart: Date, blockEnd: Date
+    if (mode === 'days') {
+      if (!startDate || !endDate) return
+      if (endDate < startDate) { setError('End date must be on or after the start date'); return }
+      blockStart = fromISTISO(`${startDate}T00:00`)
+      blockEnd   = fromISTISO(`${endDate}T23:59`)
+    } else {
+      if (!startAt || !endAt) return
+      blockStart = fromISTISO(startAt)
+      blockEnd   = fromISTISO(endAt)
+    }
     setSaving(true)
     setError('')
     setSuccess('')
     setAffectedBookings([])
     try {
       const res = await createAvailabilityBlock({
-        startAt: fromISTISO(startAt).toISOString(),
-        endAt:   fromISTISO(endAt).toISOString(),
+        startAt: blockStart.toISOString(),
+        endAt:   blockEnd.toISOString(),
         reason:  reason.trim() || null,
       })
       setReason('')
@@ -160,17 +175,44 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
         subtitle="Block time slots and see customers who want to be notified"
       />
 
-      <div style={{ maxWidth: 760, padding: '0 24px', margin: '0 auto' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 420px) 1fr', gap: 24, padding: '20px 28px', alignItems: 'start' }}>
 
-        {/* ── Add block form ── */}
-        <div style={{ background: YL.card, border: `1px solid ${YL.line}`, borderRadius: 14, padding: 24, marginBottom: 28 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: YL.ink2, letterSpacing: 0.5, marginBottom: 18 }}>BLOCK A TIME SLOT</div>
+        {/* ── Add block form (left column) ── */}
+        <div style={{ background: YL.card, border: `1px solid ${YL.line}`, borderRadius: 14, padding: 20, position: 'sticky', top: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: YL.ink2, letterSpacing: 0.5 }}>BLOCK AVAILABILITY</div>
+            <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: `1.5px solid ${YL.line}` }}>
+              {([['slot', 'Time slot'], ['days', 'Full days']] as const).map(([m, l]) => (
+                <button key={m} type="button" onClick={() => setMode(m)} style={{
+                  padding: '5px 12px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                  background: mode === m ? YL.ink : YL.bg, color: mode === m ? YL.yellow : YL.ink2,
+                  fontFamily: '"Bricolage Grotesque", system-ui',
+                }}>{l}</button>
+              ))}
+            </div>
+          </div>
           <form onSubmit={handleCreate}>
             <Stack gap={16}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <DateTimePicker label="From (IST)" value={startAt} onChange={setStartAt} required />
-                <DateTimePicker label="To (IST)"   value={endAt}   onChange={setEndAt}   required />
-              </div>
+              {mode === 'slot' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <DateTimePicker label="From (IST)" value={startAt} onChange={setStartAt} required />
+                  <DateTimePicker label="To (IST)"   value={endAt}   onChange={setEndAt}   required />
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>Start date</div>
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} required style={inp} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>End date (inclusive)</div>
+                    <input type="date" value={endDate} min={startDate} onChange={e => setEndDate(e.target.value)} required style={inp} />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', fontSize: 11.5, color: YL.ink3, marginTop: -6 }}>
+                    Blocks whole days, midnight to midnight IST.
+                  </div>
+                </div>
+              )}
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: YL.ink2, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>Reason (optional)</div>
                 <input
@@ -194,11 +236,16 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <Button variant="primary" disabled={saving} type="submit">{saving ? 'Saving…' : 'Block this time'}</Button>
+                <Button variant="primary" disabled={saving} type="submit">
+                  {saving ? 'Saving…' : mode === 'days' ? 'Block these days' : 'Block this time'}
+                </Button>
               </div>
             </Stack>
           </form>
         </div>
+
+        {/* ── Right column: blocks + requests ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, minWidth: 0 }}>
 
         {/* ── Active blocks ── */}
         <Section title={`ACTIVE (${active.length})`}>
@@ -216,7 +263,7 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
         </Section>
 
         {/* ── Notify requests ── */}
-        <Section title={`NOTIFY REQUESTS (${notifications.length})`} style={{ marginTop: 28 }}>
+        <Section title={`NOTIFY REQUESTS (${notifications.length})`}>
           {loading ? (
             <div style={{ padding: '20px 0', color: YL.ink3, fontSize: 13, textAlign: 'center' }}>Loading…</div>
           ) : notifications.length === 0 ? (
@@ -238,7 +285,7 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
 
         {/* ── Past blocks ── */}
         {past.length > 0 && (
-          <Section title={`PAST (${past.length})`} style={{ marginTop: 28, opacity: 0.55 }}>
+          <Section title={`PAST (${past.length})`} style={{ opacity: 0.55 }}>
             {past.map((slot, i) =>
               slot.kind === 'block'
                 ? <BlockRow key={`b-${slot.block!.id}`} block={slot.block!} onDelete={handleDelete} last={i === past.length - 1} />
@@ -246,6 +293,7 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
             )}
           </Section>
         )}
+        </div>{/* end right column */}
       </div>
     </div>
   )

@@ -69,18 +69,24 @@ export interface DutyBooking {
 interface DutyState {
   clockInTime: string | null
   bookings: DutyBooking[]
-  currentTripIndex: number
+  currentBookingId: string | null
   readings: DutyReading[]
   date: string // YYYY-MM-DD
 }
 
+// Statuses a driver can still act on. 'in_progress' included so an interrupted
+// trip can be resumed after an app restart.
+export const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'arrived', 'in_progress']
+export const DONE_STATUSES = ['completed', 'cancelled', 'no_show']
+
 interface DutyContextType extends DutyState {
   setBookings: (bookings: DutyBooking[]) => void
   clockIn: () => void
-  advanceTrip: () => void
-  setCurrentTripIndex: (idx: number) => void
+  setCurrentBooking: (id: string | null) => void
+  completeTrip: () => void
   addReading: (r: DutyReading) => void
   currentBooking: DutyBooking | null
+  nextBooking: DutyBooking | null
   readingByType: (type: DutyReading['type'], bookingId?: string) => DutyReading | undefined
   clearDuty: () => void
   refreshBooking: (updated: DutyBooking) => void
@@ -91,7 +97,7 @@ const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kol
 const defaultState: DutyState = {
   clockInTime: null,
   bookings: [],
-  currentTripIndex: 0,
+  currentBookingId: null,
   readings: [],
   date: today(),
 }
@@ -99,15 +105,25 @@ const defaultState: DutyState = {
 const DutyContext = createContext<DutyContextType>({
   ...defaultState,
   currentBooking: null,
+  nextBooking: null,
   setBookings: () => {},
   clockIn: () => {},
-  advanceTrip: () => {},
-  setCurrentTripIndex: () => {},
+  setCurrentBooking: () => {},
+  completeTrip: () => {},
   addReading: () => {},
   readingByType: () => undefined,
   clearDuty: () => {},
   refreshBooking: () => {},
 })
+
+// First actionable booking, in pickup-time order.
+function deriveNextBooking(bookings: DutyBooking[], excludeId?: string | null): DutyBooking | null {
+  return (
+    [...bookings]
+      .filter((b) => ACTIVE_STATUSES.includes(b.status) && b.id !== excludeId)
+      .sort((a, b) => (a.pickup?.dateTime ?? '').localeCompare(b.pickup?.dateTime ?? ''))[0] ?? null
+  )
+}
 
 export function DutyProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<DutyState>(defaultState)
@@ -117,11 +133,16 @@ export function DutyProvider({ children }: { children: React.ReactNode }) {
       try {
         const raw = await AsyncStorage.getItem(DUTY_KEY)
         if (raw) {
-          const saved: DutyState = JSON.parse(raw)
+          const saved = JSON.parse(raw)
           // Reset if it's a new day
           if (saved.date !== today()) {
             await AsyncStorage.removeItem(DUTY_KEY)
           } else {
+            // Migrate pre-id duty state (currentTripIndex) to currentBookingId
+            if (saved.currentBookingId === undefined) {
+              saved.currentBookingId = saved.bookings?.[saved.currentTripIndex]?.id ?? null
+              delete saved.currentTripIndex
+            }
             setState(saved)
           }
         }
@@ -148,12 +169,14 @@ export function DutyProvider({ children }: { children: React.ReactNode }) {
     persist({ ...state, clockInTime: new Date().toISOString(), date: today() })
   }
 
-  function advanceTrip() {
-    persist({ ...state, currentTripIndex: state.currentTripIndex + 1 })
+  function setCurrentBooking(id: string | null) {
+    persist({ ...state, currentBookingId: id })
   }
 
-  function setCurrentTripIndex(idx: number) {
-    persist({ ...state, currentTripIndex: idx })
+  // Current trip is done — hand focus to the next actionable booking.
+  function completeTrip() {
+    const next = deriveNextBooking(state.bookings, state.currentBookingId)
+    persist({ ...state, currentBookingId: next?.id ?? null })
   }
 
   function addReading(r: DutyReading) {
@@ -174,17 +197,19 @@ export function DutyProvider({ children }: { children: React.ReactNode }) {
     setState({ ...defaultState, date: today() })
   }
 
-  const currentBooking = state.bookings[state.currentTripIndex] ?? null
+  const currentBooking = state.bookings.find((b) => b.id === state.currentBookingId) ?? null
+  const nextBooking = deriveNextBooking(state.bookings, state.currentBookingId)
 
   return (
     <DutyContext.Provider
       value={{
         ...state,
         currentBooking,
+        nextBooking,
         setBookings,
         clockIn,
-        advanceTrip,
-        setCurrentTripIndex,
+        setCurrentBooking,
+        completeTrip,
         addReading,
         readingByType,
         clearDuty,

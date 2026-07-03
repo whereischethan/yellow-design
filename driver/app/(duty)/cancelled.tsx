@@ -15,14 +15,11 @@ export default function CancelledScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { bookings, currentBooking, currentTripIndex } = useDuty();
+  const { bookings, currentBooking, nextBooking, completeTrip } = useDuty();
 
   const booking = bookings.find((b) => b.id === id) ?? currentBooking;
 
   const cancellationNote = 'This trip was cancelled. You are not at fault.';
-
-  const hasMoreTrips = currentTripIndex < bookings.length - 1;
-  const nextBooking = hasMoreTrips ? bookings[currentTripIndex + 1] : null;
 
   const nextPickupTime = nextBooking
     ? new Date((nextBooking.pickup as any)?.dateTime ?? Date.now()).toLocaleTimeString(
@@ -62,7 +59,7 @@ export default function CancelledScreen() {
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
         <TouchableOpacity
           style={styles.rosterButton}
-          onPress={() => router.replace('/(duty)/roster')}
+          onPress={() => { completeTrip(); router.replace('/(duty)/roster'); }}
         >
           <Text style={styles.rosterButtonText}>Back to roster</Text>
         </TouchableOpacity>

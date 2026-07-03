@@ -15,6 +15,20 @@ export async function clearToken() {
   return AsyncStorage.removeItem(TOKEN_KEY)
 }
 
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+// Called by DriverAuthContext so an expired token anywhere forces re-login.
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn
+}
+
 async function driverFetch(path: string, opts: RequestInit = {}): Promise<any> {
   const token = await getToken()
   const headers: Record<string, string> = {
@@ -25,8 +39,12 @@ async function driverFetch(path: string, opts: RequestInit = {}): Promise<any> {
 
   const res = await fetch(`${BASE}/driver${path}`, { ...opts, headers })
   if (!res.ok) {
+    if (res.status === 401 && token && !path.startsWith('/auth/')) {
+      await clearToken()
+      onUnauthorized?.()
+    }
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || `HTTP ${res.status}`)
+    throw new ApiError(body.error || `HTTP ${res.status}`, res.status)
   }
   return res.json()
 }
@@ -105,7 +123,7 @@ export function postPushToken(token: string, platform: string) {
 
 // ── Payment ───────────────────────────────────────────────────────────────────
 
-export async function createPaymentQr(bookingId: string) {
+export async function createPaymentQr(bookingId: string): Promise<{ upi_string: string; vpa: string; amount: number }> {
   return driverFetch(`/bookings/${bookingId}/create-qr`, { method: 'POST' })
 }
 
@@ -113,7 +131,7 @@ export async function getPaymentStatus(bookingId: string) {
   return driverFetch(`/bookings/${bookingId}/payment-status`)
 }
 
-export async function markPaid(bookingId: string, method: 'cash' | 'direct' | 'upi' = 'direct') {
+export async function markPaid(bookingId: string, method: 'cash' | 'upi') {
   return driverFetch(`/bookings/${bookingId}/mark-paid`, {
     method: 'POST',
     body: JSON.stringify({ method }),

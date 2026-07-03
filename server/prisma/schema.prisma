@@ -82,6 +82,7 @@ model Booking {
   customerGstName     String? @map("customer_gst_name")
   sendSms             Boolean @default(true) @map("send_sms")
   driverCollect       Boolean @default(false) @map("driver_collect")
+  driverReported      Boolean @default(false) @map("driver_reported")
   createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
   user           User?           @relation(fields: [userId], references: [id])
@@ -158,6 +159,9 @@ model Driver {
   bankIfsc    String? @map("bank_ifsc")
   bankAccount String? @map("bank_account")
   bankUpi     String? @map("bank_upi")
+  employmentStatus String  @default("active") @map("employment_status")
+  exitedAt         String? @map("exited_at")
+  exitNote         String? @map("exit_note")
 
   vehicles Vehicle[]
   readings DriverReading[]

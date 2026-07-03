@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { getToken, setToken, clearToken, getDriverMe } from '@/lib/api'
+import { getToken, setToken, clearToken, getDriverMe, setUnauthorizedHandler } from '@/lib/api'
 import { registerPushToken } from '@/lib/push'
 
 const DRIVER_KEY = 'yellow_driver_profile'
@@ -70,6 +70,18 @@ export function DriverAuthProvider({ children }: { children: React.ReactNode }) 
   const [driver, setDriver] = useState<DriverProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isImpersonating, setIsImpersonating] = useState(false)
+
+  // Expired/invalid token anywhere in the app → drop the session so the
+  // root redirect sends the driver back to the login screen.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      AsyncStorage.removeItem(DRIVER_KEY).catch(() => {})
+      AsyncStorage.removeItem(IMPERSONATION_FLAG).catch(() => {})
+      setDriver(null)
+      setIsImpersonating(false)
+    })
+    return () => setUnauthorizedHandler(null)
+  }, [])
 
   useEffect(() => {
     ;(async () => {

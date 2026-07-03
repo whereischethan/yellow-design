@@ -52,6 +52,7 @@ export const COMPANY_KEYS = [
   'company_name', 'company_gstin', 'company_address',
   'company_sac_code', 'company_phone', 'company_email',
   'invoice_base_url', 'invoice_start_seq',
+  'business_upi_vpa', 'business_upi_name',
 ]
 
 export async function getCompanyConfig(prisma: PrismaClient): Promise<Record<string, string>> {

@@ -19,6 +19,8 @@ const FIELDS: SettingField[] = [
   { key: 'company_email',   label: 'Support Email',      hint: 'Shown on invoice footer', placeholder: 'support@yellowcabs.in' },
   { key: 'invoice_base_url',label: 'Invoice Public URL', hint: 'Base URL for invoice links sent via SMS (no trailing slash)', placeholder: 'https://api.yellowcabs.in' },
   { key: 'invoice_start_seq', label: 'Starting Invoice Sequence', hint: 'First invoice will be this number + 1. Set before first use only.', placeholder: '0' },
+  { key: 'business_upi_vpa',  label: 'Business UPI ID',   hint: 'BHIM / Google Pay for Business VPA — drivers show a QR to this ID for driver-collect fares', placeholder: 'yellowcabs@okhdfcbank' },
+  { key: 'business_upi_name', label: 'UPI Payee Name',    hint: 'Name shown in the customer\'s UPI app when they scan the QR', placeholder: 'Yellow Cabs' },
 ]
 
 function Field({ field, value, onChange }: { field: SettingField; value: string; onChange: (v: string) => void }) {
@@ -142,7 +144,22 @@ export default function SettingsPage() {
               <div style={{ flex: 1, height: 1, background: YL.line }}/>
             </div>
             <Stack gap={16}>
-              {FIELDS.slice(6).map(f => (
+              {FIELDS.slice(6, 8).map(f => (
+                <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
+              ))}
+            </Stack>
+          </div>
+
+          {/* Payments section */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{ padding: '3px 12px', borderRadius: 20, background: YL.greenSoft, border: `1px solid ${YL.line}`, fontSize: 12, fontWeight: 700, color: YL.ink, letterSpacing: 0.2 }}>
+                Payments
+              </div>
+              <div style={{ flex: 1, height: 1, background: YL.line }}/>
+            </div>
+            <Stack gap={16}>
+              {FIELDS.slice(8).map(f => (
                 <Field key={f.key} field={f} value={config[f.key] ?? ''} onChange={v => handleChange(f.key, v)} />
               ))}
             </Stack>

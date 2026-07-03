@@ -11,9 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
 import { callPhone, normalizePhone } from '@/lib/contact';
-
-const WAIT_SECONDS = 300;
-const OPS_WHATSAPP = '918628062808';
+import { updateBookingStatus, getDriverBooking } from '@/lib/api';
+import { NO_SHOW_WAIT_SECS as WAIT_SECONDS, OPS_WHATSAPP_NUMBER as OPS_WHATSAPP } from '@/lib/config';
 
 function formatCountdown(s: number) {
   const m = Math.floor(s / 60);
@@ -25,7 +24,8 @@ export default function NoShowScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { bookings, currentBooking, advanceTrip } = useDuty();
+  const { bookings, currentBooking, completeTrip, refreshBooking } = useDuty();
+  const [error, setError] = useState('');
 
   const booking = bookings.find((b) => b.id === id) ?? currentBooking;
   const bookingId = booking?.id ?? id ?? '';
@@ -56,15 +56,25 @@ export default function NoShowScreen() {
 
   const progress = secondsLeft / WAIT_SECONDS;
 
-  // Cancellations are admin-only — the driver reports the no-show to ops,
-  // who cancel the trip from the dashboard.
-  function handleReportNoShow() {
+  // Marks the booking no_show on the server, then also pings ops on WhatsApp.
+  async function handleReportNoShow() {
     setMarking(true);
+    setError('');
     const tripCode = (booking as any)?.tripCode ?? bookingId.slice(-6).toUpperCase();
-    const msg = encodeURIComponent(`No-show report: rider not at pickup for trip ${tripCode} after 5 min wait. Please cancel.`);
-    Linking.openURL(`https://wa.me/${OPS_WHATSAPP}?text=${msg}`).catch(() => {});
-    advanceTrip();
-    router.replace('/(duty)/roster');
+    try {
+      await updateBookingStatus(bookingId, 'no_show');
+      try {
+        const updated = await getDriverBooking(bookingId);
+        if (updated?.booking) refreshBooking(updated.booking);
+      } catch {}
+      const msg = encodeURIComponent(`No-show report: rider not at pickup for trip ${tripCode} after 5 min wait.`);
+      Linking.openURL(`https://wa.me/${OPS_WHATSAPP}?text=${msg}`).catch(() => {});
+      completeTrip();
+      router.replace('/(duty)/roster');
+    } catch (e: any) {
+      setError(e?.message || 'Could not report no-show — check your connection and retry.');
+      setMarking(false);
+    }
   }
 
   return (
@@ -112,9 +122,15 @@ export default function NoShowScreen() {
         {/* Policy note */}
         <View style={styles.policyNote}>
           <Text style={styles.policyText}>
-            If the rider doesn't show within 5 minutes, report it to ops — they'll cancel the trip.
+            If the rider doesn&apos;t show within 5 minutes, you can mark the trip as a no-show. Ops will be notified.
           </Text>
         </View>
+
+        {error ? (
+          <View style={[styles.policyNote, { backgroundColor: '#FEE2E2' }]}>
+            <Text style={[styles.policyText, { color: '#DC2626' }]}>{error}</Text>
+          </View>
+        ) : null}
 
         {/* Mark no-show (visible after expiry) */}
         {expired && (

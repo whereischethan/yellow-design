@@ -234,6 +234,15 @@ export default function ArrivedScreen() {
             <Text style={styles.primaryBtnText}>Start trip →</Text>
           )}
         </TouchableOpacity>
+
+        {/* Rider missing → no-show wait timer flow */}
+        <TouchableOpacity
+          style={styles.noShowLink}
+          onPress={() => router.push(`/(duty)/no-show?id=${booking.id}`)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.noShowLinkText}>Rider not at pickup?</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   )
@@ -453,6 +462,16 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.displaySemiBold,
     fontSize: 16,
     color: '#FFFFFF',
+  },
+  noShowLink: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  noShowLinkText: {
+    fontFamily: FONTS.display,
+    fontSize: 14,
+    color: YL.ink2,
+    textDecorationLine: 'underline',
   },
   centerState: {
     flex: 1,

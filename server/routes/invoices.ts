@@ -6,11 +6,14 @@ import { sendInvoiceEmail } from '../lib/email'
 
 const router = Router()
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_prod'
-const ADMIN_KEY  = process.env.ADMIN_KEY  || 'yellow-ops-dev'
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET env var is required in production')
+  return 'dev_secret_change_in_prod'
+})()
+const ADMIN_KEY = process.env.ADMIN_KEY || (process.env.NODE_ENV === 'production' ? null : 'yellow-ops-dev')
 
 function extractToken(req: Request): string | null {
-  if (req.headers['x-admin-key'] === ADMIN_KEY) return '__admin_key__'
+  if (ADMIN_KEY && req.headers['x-admin-key'] === ADMIN_KEY) return '__admin_key__'
   if (req.headers.authorization?.startsWith('Bearer ')) return req.headers.authorization.slice(7)
   if (typeof req.query.token === 'string') return req.query.token
   return null

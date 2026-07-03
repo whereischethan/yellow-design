@@ -22,9 +22,6 @@ const verifyRateLimit = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => req.body?.phone ? String(req.body.phone) : (req.ip ?? 'unknown'),
 })
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || ''
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''
-
 function generateOtp(): string {
   return String(randomInt(1000, 10000))
 }
@@ -44,13 +41,16 @@ function tryParse(s: string | null | undefined) {
   try { return JSON.parse(s) } catch { return null }
 }
 
-// Strip financial breakdown from driver-facing pricing.
-// Drivers only see the total when they're responsible for collecting it (driverCollect).
+// Drivers see only an explicit allowlist of pricing fields — never the fare
+// breakdown. The total is included only when they collect it (driverCollect).
 function driverPricing(pricingJson: string | null | undefined, driverCollect: boolean) {
   const p = tryParse(pricingJson)
   if (!p) return null
-  const { totalPrice, fareBeforeTax, basePrice, gst, discount, ...rest } = p
-  return driverCollect ? { totalPrice, ...rest } : rest
+  const visible: Record<string, unknown> = {}
+  if (p.distanceKm != null) visible.distanceKm = p.distanceKm
+  if (p.toll != null) visible.toll = p.toll
+  if (driverCollect && p.totalPrice != null) visible.totalPrice = p.totalPrice
+  return visible
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -77,6 +77,9 @@ router.post('/auth/send-otp', async (req: Request, res: Response) => {
     })
     if (!driver) {
       return res.status(404).json({ error: 'No driver account found for this number' })
+    }
+    if (driver.employmentStatus === 'exited') {
+      return res.status(403).json({ error: 'This driver account is deactivated. Contact ops if this is a mistake.' })
     }
 
     const windowStart = BigInt(Math.floor(Date.now() / 1000) - SEND_WINDOW_SECS)
@@ -141,6 +144,9 @@ router.post('/auth/verify-otp', verifyRateLimit, async (req: Request, res: Respo
     // Find driver by phone (try all formats)
     const driver = await prisma.driver.findFirst({ where: { phone: { in: candidates } } })
     if (!driver) return res.status(404).json({ error: 'Driver not found' })
+    if (driver.employmentStatus === 'exited') {
+      return res.status(403).json({ error: 'This driver account is deactivated. Contact ops if this is a mistake.' })
+    }
 
     const token = signDriverToken(driver.id, driver.phone)
 
@@ -350,10 +356,16 @@ router.get('/bookings/:id', requireDriver, async (req: DriverRequest, res: Respo
 router.patch('/bookings/:id/status', requireDriver, async (req: DriverRequest, res: Response) => {
   try {
     const { status } = req.body
-    // Cancellations are admin-only — drivers report no-shows to ops
-    const allowed = ['arrived', 'in_progress', 'completed']
-    if (!allowed.includes(status)) {
-      return res.status(400).json({ error: `Status must be one of: ${allowed.join(', ')}` })
+    // Cancellations are admin-only. Legal driver transitions (from → to):
+    const DRIVER_TRANSITIONS: Record<string, string[]> = {
+      arrived:     ['pending', 'confirmed', 'assigned'],
+      in_progress: ['arrived'],
+      completed:   ['arrived', 'in_progress'],
+      no_show:     ['pending', 'confirmed', 'assigned', 'arrived'],
+    }
+    const allowedFrom = DRIVER_TRANSITIONS[status]
+    if (!allowedFrom) {
+      return res.status(400).json({ error: `Status must be one of: ${Object.keys(DRIVER_TRANSITIONS).join(', ')}` })
     }
 
     const b = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
@@ -364,6 +376,11 @@ router.patch('/bookings/:id/status', requireDriver, async (req: DriverRequest, r
       return res.status(403).json({ error: 'Not authorized' })
     }
 
+    if (b.status === status) return res.json({ status: b.status }) // idempotent
+    if (!allowedFrom.includes(b.status)) {
+      return res.status(409).json({ error: `Cannot move booking from '${b.status}' to '${status}'` })
+    }
+
     const updated = await prisma.booking.update({
       where: { id: String(req.params.id) },
       data: { status },
@@ -372,6 +389,8 @@ router.patch('/bookings/:id/status', requireDriver, async (req: DriverRequest, r
     // Update driver status
     if (['in_progress', 'arrived'].includes(status)) {
       await prisma.driver.update({ where: { id: req.driverId }, data: { status: 'on-trip' } })
+    } else if (status === 'no_show') {
+      await prisma.driver.update({ where: { id: req.driverId }, data: { status: 'available' } })
     } else if (status === 'completed') {
       await prisma.driver.update({
         where: { id: req.driverId },
@@ -490,6 +509,9 @@ router.get('/readings/today', requireDriver, async (req: DriverRequest, res: Res
 
 // ── Payment ───────────────────────────────────────────────────────────────────
 
+// Direct UPI collection (BHIM / Google Pay for Business VPA) — no gateway fee.
+// Returns a upi:// intent string; the app renders the QR locally. The business
+// VPA is configured in Settings (pricing_config); driver's own UPI is the fallback.
 router.post('/bookings/:id/create-qr', requireDriver, async (req: DriverRequest, res: Response) => {
   try {
     const b = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
@@ -501,53 +523,33 @@ router.post('/bookings/:id/create-qr', requireDriver, async (req: DriverRequest,
     }
 
     const pricing = tryParse(b.pricingJson)
-    const amountPaise = (pricing?.totalPrice ?? b.price ?? 0) * 100
+    const amount = Number(pricing?.totalPrice ?? b.price ?? 0)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'Booking has no fare amount — ask ops to set the price before collecting' })
+    }
 
-    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
-      // Dev fallback: return a UPI deep-link QR
+    const cfg = await prisma.pricingConfig.findMany({ where: { key: { in: ['business_upi_vpa', 'business_upi_name'] } } })
+    const kv = Object.fromEntries(cfg.map((r) => [r.key, r.value]))
+    let vpa = kv.business_upi_vpa?.trim()
+    let payee = kv.business_upi_name?.trim() || 'Yellow'
+    if (!vpa) {
       const driver = await prisma.driver.findUnique({ where: { id: req.driverId } })
-      const upiId = driver?.bankUpi || 'yellow@upi'
-      const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(driver?.name || 'Yellow Driver')}&am=${pricing?.totalPrice ?? b.price ?? 0}&cu=INR&tn=${encodeURIComponent(`Yellow Trip ${b.tripCode}`)}`
-      return res.json({ qr_id: null, image_url: null, upi_string: upiString, amount: pricing?.totalPrice ?? b.price ?? 0, dev_mode: true })
+      vpa = driver?.bankUpi?.trim() || ''
+      payee = driver?.name || payee
+    }
+    if (!vpa) {
+      return res.status(400).json({ error: 'No UPI ID configured — set the business UPI in admin Settings' })
     }
 
-    const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')
-    const rpRes = await fetch('https://api.razorpay.com/v1/payments/qr-codes', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify({
-        type: 'upi_qr',
-        name: `Yellow Trip ${b.tripCode}`,
-        usage: 'single_use',
-        fixed_amount: true,
-        payment_amount: amountPaise,
-        description: `Yellow cab fare for ${b.tripCode}`,
-        close_by: Math.floor(Date.now() / 1000) + 60 * 60, // 1 hour
-      }),
-    })
-
-    if (!rpRes.ok) {
-      const err = await rpRes.text()
-      return res.status(500).json({ error: `Razorpay error: ${err}` })
-    }
-
-    const qr = (await rpRes.json()) as any
-
-    // Store QR id on booking
-    await prisma.booking.update({
-      where: { id: String(req.params.id) },
-      data: { razorpayLinkId: qr.id, razorpayLinkUrl: qr.image_url },
-    })
-
-    return res.json({ qr_id: qr.id, image_url: qr.image_url, amount: qr.payment_amount / 100 })
+    const upiString = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(payee)}&am=${amount}&cu=INR&tn=${encodeURIComponent(`Yellow Trip ${b.tripCode}`)}`
+    return res.json({ upi_string: upiString, vpa, amount })
   } catch (e: any) {
     return res.status(500).json({ error: e.message })
   }
 })
 
+// Payment state is driver-reported (verified later by ops in Finance) — this
+// only reflects what's on the booking record.
 router.get('/bookings/:id/payment-status', requireDriver, async (req: DriverRequest, res: Response) => {
   try {
     const b = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
@@ -558,36 +560,7 @@ router.get('/bookings/:id/payment-status', requireDriver, async (req: DriverRequ
       return res.status(403).json({ error: 'Not authorized' })
     }
 
-    // If already marked paid
-    if (b.paymentStatus === 'paid') {
-      return res.json({ paid: true, method: b.paymentMethod })
-    }
-
-    // If no QR created yet
-    if (!b.razorpayLinkId || !RAZORPAY_KEY_ID) {
-      return res.json({ paid: false })
-    }
-
-    // Check Razorpay QR payment
-    const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')
-    const rpRes = await fetch(`https://api.razorpay.com/v1/payments/qr-codes/${b.razorpayLinkId}/payments`, {
-      headers: { Authorization: `Basic ${auth}` },
-    })
-
-    if (!rpRes.ok) return res.json({ paid: false })
-
-    const data = (await rpRes.json()) as any
-    const payments = data.items || []
-
-    if (payments.length > 0 && payments[0].status === 'captured') {
-      await prisma.booking.update({
-        where: { id: b.id },
-        data: { paymentStatus: 'paid', paymentMethod: 'upi', razorpayPaymentId: payments[0].id },
-      })
-      return res.json({ paid: true, method: 'upi' })
-    }
-
-    return res.json({ paid: false })
+    return res.json({ paid: b.paymentStatus === 'paid', method: b.paymentMethod })
   } catch (e: any) {
     return res.status(500).json({ error: e.message })
   }
@@ -595,7 +568,10 @@ router.get('/bookings/:id/payment-status', requireDriver, async (req: DriverRequ
 
 router.post('/bookings/:id/mark-paid', requireDriver, async (req: DriverRequest, res: Response) => {
   try {
-    const { method = 'direct' } = req.body
+    const { method } = req.body
+    if (!['cash', 'upi'].includes(method)) {
+      return res.status(400).json({ error: 'method must be cash or upi' })
+    }
     const b = await prisma.booking.findUnique({ where: { id: String(req.params.id) } })
     if (!b) return res.status(404).json({ error: 'Booking not found' })
 
@@ -606,7 +582,8 @@ router.post('/bookings/:id/mark-paid', requireDriver, async (req: DriverRequest,
 
     await prisma.booking.update({
       where: { id: b.id },
-      data: { paymentStatus: 'paid', paymentMethod: method },
+      // driverReported: ops verifies these against the bank/UPI statement in Finance
+      data: { paymentStatus: 'paid', paymentMethod: method, driverReported: true },
     })
 
     return res.json({ ok: true })

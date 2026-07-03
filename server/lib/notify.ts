@@ -8,11 +8,11 @@ import { sendPushToOwner, type PushMessage } from './push'
 
 export type BookingEvent =
   // Customer status events (SMS + push, gated on booking.sendSms)
-  | 'confirmed' | 'assigned' | 'arrived' | 'in_progress' | 'completed' | 'cancelled'
+  | 'confirmed' | 'assigned' | 'arrived' | 'in_progress' | 'completed' | 'cancelled' | 'no_show'
   // Driver-directed events (push only)
   | 'driver_assigned' | 'driver_unassigned' | 'driver_cancelled' | 'time_changed'
 
-const CUSTOMER_EVENTS = ['confirmed', 'assigned', 'arrived', 'in_progress', 'completed', 'cancelled']
+const CUSTOMER_EVENTS = ['confirmed', 'assigned', 'arrived', 'in_progress', 'completed', 'cancelled', 'no_show']
 
 function tryParse(json: string | null | undefined): any {
   if (!json) return null
@@ -46,6 +46,8 @@ function customerPushCopy(event: string, b: Booking): PushMessage | null {
       return { title: 'Trip complete', body: `Trip ${b.tripCode} is complete. Thanks for riding with Yellow!` }
     case 'cancelled':
       return { title: 'Booking cancelled', body: `Trip ${b.tripCode} was cancelled. Contact support for queries.` }
+    case 'no_show':
+      return { title: 'Trip marked as no-show', body: `We couldn't find you at pickup for trip ${b.tripCode}. Contact support if this is a mistake.` }
     default:
       return null
   }

@@ -14,6 +14,8 @@ import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
 import { isWithinKm } from '@/lib/geo';
 import { postDriverLocation } from '@/lib/api';
+import { ARRIVAL_RADIUS_KM, GPS_TIMEOUT_MS, LOCATION_POST_MS, SOS_NUMBER } from '@/lib/config';
+import { useCancellationWatch } from '@/lib/useCancellationWatch';
 
 export default function InTripScreen() {
   const router = useRouter();
@@ -35,9 +37,11 @@ export default function InTripScreen() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!gotFixRef.current) setGpsUnavailable(true);
-    }, 60_000);
+    }, GPS_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, []);
+
+  useCancellationWatch(booking?.id);
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -53,7 +57,7 @@ export default function InTripScreen() {
           const accuracy = loc.coords.accuracy ?? 0;
           const weak = accuracy > 50;
           setGpsWeak(weak);
-          if (!weak && Date.now() - lastPost >= 10_000) {
+          if (!weak && Date.now() - lastPost >= LOCATION_POST_MS) {
             lastPost = Date.now();
             postDriverLocation({
               lat: loc.coords.latitude,
@@ -68,7 +72,7 @@ export default function InTripScreen() {
               isWithinKm(
                 { lat: loc.coords.latitude, lng: loc.coords.longitude },
                 { lat: drop.lat, lng: drop.lng },
-                2,
+                ARRIVAL_RADIUS_KM,
               ),
             );
           } else {
@@ -206,7 +210,7 @@ export default function InTripScreen() {
         <View style={styles.bottomRow}>
           <TouchableOpacity
             style={styles.sosButton}
-            onPress={() => Linking.openURL('tel:112')}
+            onPress={() => Linking.openURL(`tel:${SOS_NUMBER}`)}
           >
             <Text style={styles.sosText}>🆘 SOS</Text>
           </TouchableOpacity>

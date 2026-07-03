@@ -16,13 +16,14 @@ import { useDuty } from '@/context/DutyContext';
 import { useDriverAuth } from '@/context/DriverAuthContext';
 import { saveReading } from '@/lib/api';
 import { calcKwh, calcEfficiency, calcCo2Grams } from '@/lib/energy';
+import { DEFAULT_BATTERY_KWH } from '@/lib/config';
 
 export default function CloseDutyScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { bookings, readings, addReading, readingByType } = useDuty()
   const { driver } = useDriverAuth()
-  const batteryKwh = driver?.assignedVehicle?.isEv ? 42 : 0;
+  const batteryKwh = driver?.assignedVehicle?.isEv ? DEFAULT_BATTERY_KWH : 0;
 
   const [odometer, setOdometer] = useState('');
   const [soc, setSoc] = useState('');
@@ -84,9 +85,13 @@ export default function CloseDutyScreen() {
   }, [endSoc]);
 
   const canSubmit = odometer.length > 0 && soc.length > 0;
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   async function handleSignOff() {
-    if (!canSubmit) return;
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
+    setError('');
     const reading = {
       type: 'close_duty' as const,
       odometer: endOdo,
@@ -94,8 +99,13 @@ export default function CloseDutyScreen() {
     };
     try {
       await saveReading(reading);
-    } catch (_) {}
+    } catch (e: any) {
+      setError(e?.message || 'Could not save closing readings — check your connection and retry.');
+      setSubmitting(false);
+      return;
+    }
     addReading({ ...reading, timestamp: new Date().toISOString() });
+    setSubmitting(false);
     router.replace('/(duty)/signed-off');
   }
 
@@ -200,18 +210,23 @@ export default function CloseDutyScreen() {
 
       {/* CTA */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
+        {error ? (
+          <Text style={{ fontFamily: FONTS.display, fontSize: 13, color: '#DC2626', textAlign: 'center', marginBottom: 10 }}>
+            {error}
+          </Text>
+        ) : null}
         <TouchableOpacity
-          style={[styles.signOffButton, !canSubmit && styles.signOffButtonDisabled]}
-          disabled={!canSubmit}
+          style={[styles.signOffButton, (!canSubmit || submitting) && styles.signOffButtonDisabled]}
+          disabled={!canSubmit || submitting}
           onPress={handleSignOff}
         >
           <Text
             style={[
               styles.signOffButtonText,
-              !canSubmit && styles.signOffButtonTextDisabled,
+              (!canSubmit || submitting) && styles.signOffButtonTextDisabled,
             ]}
           >
-            Sign off
+            {submitting ? 'Saving…' : error ? 'Retry sign off' : 'Sign off'}
           </Text>
         </TouchableOpacity>
       </View>

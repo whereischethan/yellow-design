@@ -20,6 +20,15 @@
       ::-webkit-scrollbar { width: 10px; height: 10px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: #E2DDD7; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+      ::-webkit-scrollbar-thumb:hover { background: #CFC8BE; background-clip: content-box; }
+      ::selection { background: #FFD84A; color: #2B2720; }
+      /* Keyboard focus ring (components set outline:none inline, so use !important) */
+      :focus-visible { outline: 2px solid #C9A227 !important; outline-offset: 1px; }
+      /* Focused text fields get a visible border even with inline border styles */
+      input:focus, textarea:focus, select:focus { border-color: #C9A227 !important; }
+      button:not(:disabled):active { transform: translateY(0.5px); }
+      button, input, textarea { transition: border-color 120ms ease, background 120ms ease, opacity 120ms ease; }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
     </style>
   </head>
   <body>

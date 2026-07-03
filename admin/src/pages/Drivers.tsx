@@ -1,6 +1,6 @@
 import React from 'react'
 import type { Driver } from '../types'
-import { patchDriver, getDriverBookings, impersonate, DRIVER_APP_URL } from '../api'
+import { patchDriver, getDriverBookings, impersonate, exitDriver, reactivateDriver, DRIVER_APP_URL } from '../api'
 import type { Booking } from '../types'
 import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, formatPhone, useIsMobile, ModalShell, ModalHeader } from '../components/ui'
 
@@ -9,6 +9,7 @@ interface Props {
   onUpdate: (d: Driver) => void
   onAddDriver: () => void
   onAddVehicle: () => void
+  isSuperAdmin?: boolean
 }
 
 function DocImage({ label, value }: { label: string; value?: string | null }) {
@@ -33,7 +34,7 @@ function DocImage({ label, value }: { label: string; value?: string | null }) {
   )
 }
 
-function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; onClose: () => void; onUpdate: (d: Driver) => void }) {
+function DriverDrawer({ driver, onClose, onUpdate, isSuperAdmin }: { driver: Driver | null; onClose: () => void; onUpdate: (d: Driver) => void; isSuperAdmin?: boolean }) {
   const [tab, setTab] = React.useState<'details' | 'trips'>('details')
   const [trips, setTrips] = React.useState<Booking[]>([])
   const [tripsLoading, setTripsLoading] = React.useState(false)
@@ -60,6 +61,28 @@ function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; on
   }
 
   if (!driver) return null
+
+  const isExited = driver.employmentStatus === 'exited'
+
+  const handleExit = async () => {
+    const note = window.prompt(`Mark ${driver.name} as exited?\n\nThey will no longer be able to log in or receive trips. Their history stays intact.\n\nOptional note (reason):`)
+    if (note === null) return
+    try {
+      const res = await exitDriver(driver.id, note.trim() || undefined)
+      onUpdate(res.driver)
+    } catch (e: any) {
+      alert(e.message)
+    }
+  }
+  const handleReactivate = async () => {
+    if (!window.confirm(`Re-activate ${driver.name}? They will be able to log in and receive trips again.`)) return
+    try {
+      const res = await reactivateDriver(driver.id)
+      onUpdate(res.driver)
+    } catch (e: any) {
+      alert(e.message)
+    }
+  }
 
   const cycleStatus = async () => {
     const next: Record<string, Driver['status']> = { available: 'offline', 'on-trip': 'available', offline: 'available' }
@@ -97,6 +120,12 @@ function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; on
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         {tab === 'details' && (
           <Stack gap={24}>
+            {isExited && (
+              <div style={{ padding: '12px 16px', background: YL.redSoft, borderRadius: 10, fontSize: 13, color: YL.redInk }}>
+                <b>Exited</b>{driver.exitedAt ? ` on ${fmtDate(driver.exitedAt)}` : ''} — login blocked, hidden from assignment.
+                {driver.exitNote ? <div style={{ marginTop: 4, fontSize: 12 }}>Note: {driver.exitNote}</div> : null}
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               {driver.photoUrl
                 ? <img src={driver.photoUrl} alt={driver.name} style={{ width: 64, height: 64, borderRadius: 999, objectFit: 'cover', border: `2px solid ${YL.line}` }} />
@@ -107,13 +136,22 @@ function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; on
                   <span style={{ width: 7, height: 7, borderRadius: 999, background: statusColor, flexShrink: 0 }} />
                   <span style={{ fontSize: 12, color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <Button size="sm" variant="ghost" onClick={cycleStatus}>
-                    {driver.status === 'offline' ? 'Set active' : driver.status === 'on-trip' ? 'Mark available' : 'Set offline'}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={handleViewAs} disabled={opening} title="Open the driver app signed in as this driver (1h session)">
-                    {opening ? 'Opening…' : '👤 View as driver'}
-                  </Button>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {!isExited && (
+                    <>
+                      <Button size="sm" variant="ghost" onClick={cycleStatus}>
+                        {driver.status === 'offline' ? 'Set active' : driver.status === 'on-trip' ? 'Mark available' : 'Set offline'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={handleViewAs} disabled={opening} title="Open the driver app signed in as this driver">
+                        {opening ? 'Opening…' : '👤 View as driver'}
+                      </Button>
+                    </>
+                  )}
+                  {isSuperAdmin && (
+                    isExited
+                      ? <Button size="sm" variant="ghost" onClick={handleReactivate}>Re-activate</Button>
+                      : <Button size="sm" variant="ghost" onClick={handleExit} title="Driver has quit — block login, keep history">Mark as exited</Button>
+                  )}
                 </div>
               </Stack>
             </div>
@@ -187,16 +225,21 @@ function DriverDrawer({ driver, onClose, onUpdate }: { driver: Driver | null; on
   )
 }
 
-export default function DriversPage({ drivers, onUpdate, onAddDriver, onAddVehicle }: Props) {
+export default function DriversPage({ drivers, onUpdate, onAddDriver, onAddVehicle, isSuperAdmin }: Props) {
   const isMobile = useIsMobile()
-  const [filter, setFilter] = React.useState<'all' | 'available' | 'on-trip' | 'offline'>('all')
+  const [filter, setFilter] = React.useState<'all' | 'available' | 'on-trip' | 'offline' | 'exited'>('all')
   const [selected, setSelected] = React.useState<Driver | null>(null)
-  const filtered = filter === 'all' ? drivers : drivers.filter(d => d.status === filter)
+  const active = drivers.filter(d => d.employmentStatus !== 'exited')
+  const exited = drivers.filter(d => d.employmentStatus === 'exited')
+  const filtered = filter === 'all' ? active
+    : filter === 'exited' ? exited
+    : active.filter(d => d.status === filter)
   const counts = {
-    all: drivers.length,
-    available: drivers.filter(d => d.status === 'available').length,
-    'on-trip': drivers.filter(d => d.status === 'on-trip').length,
-    offline: drivers.filter(d => d.status === 'offline').length,
+    all: active.length,
+    available: active.filter(d => d.status === 'available').length,
+    'on-trip': active.filter(d => d.status === 'on-trip').length,
+    offline: active.filter(d => d.status === 'offline').length,
+    exited: exited.length,
   }
 
   const handleUpdate = (d: Driver) => {
@@ -218,7 +261,7 @@ export default function DriversPage({ drivers, onUpdate, onAddDriver, onAddVehic
       />
 
       <div style={{ padding: isMobile ? '10px 16px' : '14px 28px', background: YL.bg, borderBottom: `1px solid ${YL.line}`, display: 'flex', gap: 6, overflowX: 'auto' }}>
-        {([['all', 'All'], ['available', 'Available'], ['on-trip', 'On trip'], ['offline', 'Offline']] as const).map(([k, l]) => (
+        {([['all', 'All'], ['available', 'Available'], ['on-trip', 'On trip'], ['offline', 'Offline'], ...(counts.exited > 0 ? [['exited', 'Exited']] : [])] as [typeof filter, string][]).map(([k, l]) => (
           <Chip key={k} active={filter === k} onClick={() => setFilter(k)}>
             {k !== 'all' && statusDot(k)}
             {l} <Mono size={11} color={filter === k ? YL.yellow : YL.ink2}>{counts[k]}</Mono>
@@ -305,6 +348,7 @@ export default function DriversPage({ drivers, onUpdate, onAddDriver, onAddVehic
         driver={selected}
         onClose={() => setSelected(null)}
         onUpdate={handleUpdate}
+        isSuperAdmin={isSuperAdmin}
       />
     </div>
   )

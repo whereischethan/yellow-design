@@ -1,23 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import QRCode from 'react-native-qrcode-svg';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
-import { createPaymentQr, getPaymentStatus, markPaid, getDriverBooking, updateBookingStatus } from '@/lib/api';
+import { createPaymentQr, markPaid, getDriverBooking, updateBookingStatus } from '@/lib/api';
 
 type QrData = {
-  image_url?: string;
-  upi_string?: string;
-  dev_mode?: boolean;
+  upi_string: string;
+  vpa: string;
+  amount: number;
 };
 
 const UPI_APPS = ['GPay', 'PhonePe', 'Paytm', 'BHIM'];
@@ -36,30 +36,20 @@ export default function PaymentScreen() {
 
   const [qrData, setQrData] = useState<QrData | null>(null);
   const [loadingQr, setLoadingQr] = useState(true);
-  const [qrError, setQrError] = useState(false);
+  const [qrError, setQrError] = useState('');
   const [paid, setPaid] = useState(false);
-  const [handlingCash, setHandlingCash] = useState(false);
-  const [pollExpired, setPollExpired] = useState(false);
-  const [pollRound, setPollRound] = useState(0);
-
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Poll for ~5 minutes, then pause until the driver taps "Check again"
-  const MAX_POLLS = 60;
+  const [confirming, setConfirming] = useState<'upi' | 'cash' | null>(null);
+  const [confirmError, setConfirmError] = useState('');
 
   async function loadQr() {
     setLoadingQr(true);
-    setQrError(false);
+    setQrError('');
     try {
       const data = await createPaymentQr(bookingId);
-      if (data?.dev_mode) {
-        setQrData(data);
-      } else if (data?.image_url) {
-        setQrData(data);
-      } else {
-        setQrError(true);
-      }
-    } catch (_) {
-      setQrError(true);
+      if (data?.upi_string) setQrData(data);
+      else setQrError('Could not generate QR code');
+    } catch (e: any) {
+      setQrError(e?.message || 'Could not generate QR code');
     } finally {
       setLoadingQr(false);
     }
@@ -67,55 +57,28 @@ export default function PaymentScreen() {
 
   useEffect(() => { loadQr(); }, [bookingId]);
 
-  useEffect(() => {
-    if (paid) return;
-    let polls = 0;
-    setPollExpired(false);
-    pollRef.current = setInterval(async () => {
-      polls += 1;
-      if (polls > MAX_POLLS) {
-        clearInterval(pollRef.current!);
-        setPollExpired(true);
-        return;
-      }
-      try {
-        const status = await getPaymentStatus(bookingId);
-        if (status?.paid) {
-          setPaid(true);
-          clearInterval(pollRef.current!);
-          try { await updateBookingStatus(bookingId, 'completed'); } catch (_) {}
-          try {
-            const updated = await getDriverBooking(bookingId);
-            if (updated?.booking) refreshBooking(updated.booking);
-          } catch (_) {}
-          setTimeout(() => {
-            router.replace(`/(duty)/review-request?id=${bookingId}`);
-          }, 500);
-        }
-      } catch (_) {}
-    }, 5000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [bookingId, paid, pollRound]);
-
-  async function handleCash() {
-    setHandlingCash(true);
+  // Driver confirms the money landed (UPI notification on their phone, or cash
+  // in hand). Ops later verifies these against the bank statement in Finance.
+  async function handleConfirm(method: 'upi' | 'cash') {
+    if (confirming || paid) return;
+    setConfirming(method);
+    setConfirmError('');
     try {
-      await markPaid(bookingId, 'direct');
-      try { await updateBookingStatus(bookingId, 'completed'); } catch (_) {}
+      await markPaid(bookingId, method);
+      await updateBookingStatus(bookingId, 'completed');
+      setPaid(true);
       try {
         const updated = await getDriverBooking(bookingId);
         if (updated?.booking) refreshBooking(updated.booking);
-      } catch (_) {}
-      router.replace(`/(duty)/review-request?id=${bookingId}`);
-    } catch (_) {
-      setHandlingCash(false);
+      } catch {}
+      setTimeout(() => {
+        router.replace(`/(duty)/review-request?id=${bookingId}`);
+      }, 500);
+    } catch (e: any) {
+      setConfirmError(e?.message || 'Could not confirm payment — check your connection and retry.');
+      setConfirming(null);
     }
   }
-
-  const showRealQr = !loadingQr && !qrError && qrData?.image_url && !qrData?.dev_mode;
-  const showMockQr = !loadingQr && !qrError && qrData?.dev_mode;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -145,10 +108,10 @@ export default function PaymentScreen() {
               </View>
             )}
 
-            {qrError && (
+            {!loadingQr && !!qrError && (
               <View style={styles.qrPlaceholder}>
-                <Text style={[styles.qrLoadingText, { color: '#DC2626', marginBottom: 12 }]}>
-                  Could not generate QR code
+                <Text style={[styles.qrLoadingText, { color: '#DC2626', marginBottom: 12, textAlign: 'center' }]}>
+                  {qrError}
                 </Text>
                 <TouchableOpacity onPress={loadQr} style={{ paddingHorizontal: 20, paddingVertical: 10, backgroundColor: YL.ink, borderRadius: 10 }}>
                   <Text style={{ fontFamily: FONTS.mono, fontSize: 13, color: YL.bg }}>Retry</Text>
@@ -156,26 +119,8 @@ export default function PaymentScreen() {
               </View>
             )}
 
-            {showRealQr && (
-              <Image
-                source={{ uri: qrData!.image_url }}
-                style={styles.qrImage}
-                resizeMode="contain"
-              />
-            )}
-
-            {showMockQr && (
-              <View style={styles.mockQr}>
-                <View style={styles.mockQrInner}>
-                  <Text style={styles.mockQrLabel}>QR</Text>
-                </View>
-                <Text style={styles.mockQrTitle}>Scan via UPI app</Text>
-                {qrData?.upi_string ? (
-                  <Text style={styles.mockQrString} numberOfLines={2}>
-                    {qrData.upi_string}
-                  </Text>
-                ) : null}
-              </View>
+            {!loadingQr && !qrError && qrData && (
+              <QRCode value={qrData.upi_string} size={220} backgroundColor="transparent" />
             )}
 
             {/* Success overlay */}
@@ -188,6 +133,8 @@ export default function PaymentScreen() {
             )}
           </View>
 
+          {qrData?.vpa ? <Text style={styles.vpaText}>{qrData.vpa}</Text> : null}
+
           {/* UPI app pills */}
           <View style={styles.upiRow}>
             {UPI_APPS.map((app) => (
@@ -198,26 +145,28 @@ export default function PaymentScreen() {
           </View>
         </View>
 
-        {/* Polling paused notice */}
-        {pollExpired && !paid && (
-          <TouchableOpacity
-            style={styles.checkAgainButton}
-            onPress={() => setPollRound((r) => r + 1)}
-          >
-            <Text style={styles.checkAgainText}>
-              Still waiting for payment — Check again
-            </Text>
-          </TouchableOpacity>
-        )}
+        {confirmError ? (
+          <Text style={styles.errorText}>{confirmError}</Text>
+        ) : null}
 
-        {/* Cash button */}
+        {/* Confirm buttons */}
+        <TouchableOpacity
+          style={styles.upiButton}
+          onPress={() => handleConfirm('upi')}
+          disabled={!!confirming || paid}
+        >
+          <Text style={styles.upiButtonText}>
+            {confirming === 'upi' ? 'Confirming…' : 'UPI payment received ✓'}
+          </Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.cashButton}
-          onPress={handleCash}
-          disabled={handlingCash || paid}
+          onPress={() => handleConfirm('cash')}
+          disabled={!!confirming || paid}
         >
           <Text style={styles.cashButtonText}>
-            {handlingCash ? 'Processing…' : 'Accept direct payment'}
+            {confirming === 'cash' ? 'Confirming…' : 'Collected cash'}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -286,43 +235,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: YL.ink3,
   },
-  qrImage: {
-    width: 220,
-    height: 220,
-    borderRadius: 8,
-  },
-  mockQr: {
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  mockQrInner: {
-    width: 160,
-    height: 160,
-    borderWidth: 2,
-    borderColor: YL.line,
-    borderStyle: 'dashed',
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: YL.bg2,
-  },
-  mockQrLabel: {
+  vpaText: {
     fontFamily: FONTS.mono,
-    fontSize: 28,
-    color: YL.ink3,
-  },
-  mockQrTitle: {
-    fontFamily: FONTS.display,
-    fontSize: 14,
+    fontSize: 12,
     color: YL.ink2,
-  },
-  mockQrString: {
-    fontFamily: FONTS.mono,
-    fontSize: 9,
-    color: YL.ink3,
-    textAlign: 'center',
-    paddingHorizontal: 8,
+    marginBottom: 10,
   },
   successOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -359,18 +276,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: YL.ink2,
   },
-  checkAgainButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+  errorText: {
+    fontFamily: FONTS.display,
+    fontSize: 13,
+    color: '#DC2626',
+    textAlign: 'center',
+  },
+  upiButton: {
+    paddingVertical: 15,
+    paddingHorizontal: 24,
     borderRadius: 12,
-    backgroundColor: YL.gulmoharSoft,
+    backgroundColor: YL.ink,
     alignItems: 'center',
     width: '100%',
   },
-  checkAgainText: {
+  upiButtonText: {
     fontFamily: FONTS.displaySemiBold,
-    fontSize: 14,
-    color: YL.gulmohar,
+    fontSize: 15,
+    color: YL.yellow,
   },
   cashButton: {
     paddingVertical: 14,

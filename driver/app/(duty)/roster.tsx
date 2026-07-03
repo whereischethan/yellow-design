@@ -10,12 +10,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { YL, FONTS } from '@/constants/theme'
-import { useDuty, DutyBooking } from '@/context/DutyContext'
+import { useDuty, DutyBooking, ACTIVE_STATUSES, DONE_STATUSES } from '@/context/DutyContext'
 import { getDriverBookings } from '@/lib/api'
+import { ROSTER_POLL_MS } from '@/lib/config'
 import DriverBottomNav from '@/components/DriverBottomNav'
 
-const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'arrived']
-const DONE_STATUSES = ['completed', 'cancelled']
+// Resume an interrupted trip at the right screen for its server status.
+export function screenForStatus(status: string): string {
+  switch (status) {
+    case 'arrived': return '/(duty)/arrived'
+    case 'in_progress': return '/(duty)/in-trip'
+    default: return '/(duty)/enroute'
+  }
+}
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-IN', {
@@ -68,6 +75,21 @@ function StatusPill({ status, isCurrent }: StatusPillProps) {
     return (
       <View style={pillStyles.gulmoharPill}>
         <Text style={pillStyles.gulmoharText}>CANCELLED</Text>
+      </View>
+    )
+  }
+  if (status === 'no_show') {
+    return (
+      <View style={pillStyles.gulmoharPill}>
+        <Text style={pillStyles.gulmoharText}>NO-SHOW</Text>
+      </View>
+    )
+  }
+  if (status === 'in_progress') {
+    return (
+      <View style={pillStyles.nextPill}>
+        <View style={pillStyles.nextDot} />
+        <Text style={pillStyles.nextText}>IN TRIP</Text>
       </View>
     )
   }
@@ -131,21 +153,19 @@ function tripTypeLabel(b: DutyBooking): string {
 
 interface TripCardProps {
   booking: DutyBooking
-  index: number
   isCurrent: boolean
   masked: boolean
-  onSetTripIndex: (index: number) => void
+  onSelect: (booking: DutyBooking) => void
 }
 
-function TripCard({ booking, index, isCurrent, masked, onSetTripIndex }: TripCardProps) {
+function TripCard({ booking, isCurrent, masked, onSelect }: TripCardProps) {
   const isActive = ACTIVE_STATUSES.includes(booking.status)
   const collectFare =
     booking.driverCollect && booking.paymentStatus !== 'paid' ? booking.pricing?.totalPrice : null
 
   function handlePress() {
     if (!isActive || masked) return
-    onSetTripIndex(index)
-    router.push(`/(duty)/enroute?id=${booking.id}`)
+    onSelect(booking)
   }
 
   return (
@@ -208,8 +228,13 @@ function TripCard({ booking, index, isCurrent, masked, onSetTripIndex }: TripCar
 }
 
 export default function RosterScreen() {
-  const { bookings, currentTripIndex, clearDuty, setCurrentTripIndex, setBookings } = useDuty()
+  const { bookings, currentBookingId, setCurrentBooking, setBookings } = useDuty()
   const [refreshing, setRefreshing] = useState(false)
+
+  const handleSelect = useCallback((booking: DutyBooking) => {
+    setCurrentBooking(booking.id)
+    router.push(`${screenForStatus(booking.status)}?id=${booking.id}` as any)
+  }, [setCurrentBooking])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -229,7 +254,7 @@ export default function RosterScreen() {
       getDriverBookings()
         .then((trips) => setBookings(trips?.bookings ?? trips ?? []))
         .catch(() => {})
-    }, 60_000)
+    }, ROSTER_POLL_MS)
     return () => clearInterval(t)
   }, [setBookings])
 
@@ -242,9 +267,9 @@ export default function RosterScreen() {
   const allDone =
     sorted.length > 0 && sorted.every((b) => DONE_STATUSES.includes(b.status))
 
-  async function handleCloseDuty() {
-    await clearDuty()
-    router.replace('/(duty)/clock-in')
+  // Route through close-duty so closing odometer/SoC readings are captured
+  function handleCloseDuty() {
+    router.push('/(duty)/close-duty')
   }
 
   return (
@@ -280,16 +305,14 @@ export default function RosterScreen() {
             // Only the next pending trip shows full details; later ones stay summary-only
             const nextId = sorted.find((b) => !DONE_STATUSES.includes(b.status))?.id
             return sorted.map((booking) => {
-              const originalIndex = bookings.findIndex((b) => b.id === booking.id)
               const masked = !DONE_STATUSES.includes(booking.status) && booking.id !== nextId
               return (
                 <TripCard
                   key={booking.id}
                   booking={booking}
-                  index={originalIndex}
-                  isCurrent={originalIndex === currentTripIndex}
+                  isCurrent={booking.id === (currentBookingId ?? nextId)}
                   masked={masked}
-                  onSetTripIndex={setCurrentTripIndex}
+                  onSelect={handleSelect}
                 />
               )
             })

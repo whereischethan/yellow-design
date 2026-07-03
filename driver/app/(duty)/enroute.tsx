@@ -16,6 +16,8 @@ import { useDuty } from '@/context/DutyContext'
 import { haversineKm, isWithinKm } from '@/lib/geo'
 import { postDriverLocation, updateBookingStatus } from '@/lib/api'
 import { callPhone } from '@/lib/contact'
+import { ARRIVAL_RADIUS_KM, GPS_TIMEOUT_MS, LOCATION_POST_MS } from '@/lib/config'
+import { useCancellationWatch } from '@/lib/useCancellationWatch'
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
@@ -39,6 +41,8 @@ export default function EnRouteScreen() {
   const booking = bookings.find((b) => b.id === id) ?? null
 
   const [distanceKm, setDistanceKm] = useState<number | null>(null)
+  const [arriving, setArriving] = useState(false)
+  const [arriveError, setArriveError] = useState('')
   const [permissionGranted, setPermissionGranted] = useState(false)
   const [locationLoading, setLocationLoading] = useState(true)
   const [gpsUnavailable, setGpsUnavailable] = useState(false)
@@ -51,9 +55,11 @@ export default function EnRouteScreen() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!gotFixRef.current) setGpsUnavailable(true)
-    }, 60_000)
+    }, GPS_TIMEOUT_MS)
     return () => clearTimeout(timer)
   }, [])
+
+  useCancellationWatch(booking?.id)
 
   const pickupLat = booking?.pickup?.lat
   const pickupLng = booking?.pickup?.lng
@@ -81,7 +87,7 @@ export default function EnRouteScreen() {
         },
         (loc: Location.LocationObject) => {
           if (!mounted) return
-          if (Date.now() - lastPostRef.current >= 10_000) {
+          if (Date.now() - lastPostRef.current >= LOCATION_POST_MS) {
             lastPostRef.current = Date.now()
             postDriverLocation({
               lat: loc.coords.latitude,
@@ -109,7 +115,7 @@ export default function EnRouteScreen() {
     }
   }, [hasCoords, pickupLat, pickupLng])
 
-  const withinRange = hasCoords && distanceKm !== null && distanceKm <= 2
+  const withinRange = hasCoords && distanceKm !== null && distanceKm <= ARRIVAL_RADIUS_KM
   const canMarkArrived = !hasCoords || withinRange || gpsUnavailable
   const tripCode = booking?.tripCode ?? id?.slice(-6).toUpperCase() ?? '—'
 
@@ -137,12 +143,21 @@ export default function EnRouteScreen() {
     callPhone(booking.guestPhone)
   }
 
-  function handleArrived() {
-    // Tell the server (and the passenger's app) the driver has arrived;
-    // never block the driver on a flaky network
+  async function handleArrived() {
+    // The server enforces status order, so 'arrived' must land before the
+    // driver can start the trip — surface failures instead of swallowing them.
     if (booking && !['arrived', 'in_progress', 'completed'].includes(booking.status)) {
-      updateBookingStatus(String(id), 'arrived').catch(() => {})
-      refreshBooking({ ...booking, status: 'arrived' })
+      setArriving(true)
+      setArriveError('')
+      try {
+        await updateBookingStatus(String(id), 'arrived')
+        refreshBooking({ ...booking, status: 'arrived' })
+      } catch (e: any) {
+        setArriveError(e?.message || 'Could not update trip status — check your connection and retry.')
+        setArriving(false)
+        return
+      }
+      setArriving(false)
     }
     router.push(`/(duty)/arrived?id=${id}`)
   }
@@ -287,6 +302,12 @@ export default function EnRouteScreen() {
           </View>
         )}
 
+        {arriveError ? (
+          <Text style={{ fontFamily: FONTS.display, fontSize: 13, color: '#DC2626', textAlign: 'center' }}>
+            {arriveError}
+          </Text>
+        ) : null}
+
         {/* Action buttons */}
         <View style={styles.actionRow}>
           <TouchableOpacity
@@ -299,12 +320,16 @@ export default function EnRouteScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.primaryBtn, !canMarkArrived && styles.primaryBtnDisabled]}
+            style={[styles.primaryBtn, (!canMarkArrived || arriving) && styles.primaryBtnDisabled]}
             onPress={handleArrived}
-            disabled={!canMarkArrived}
+            disabled={!canMarkArrived || arriving}
             activeOpacity={0.85}
           >
-            <Text style={styles.primaryBtnText}>I've arrived ✓</Text>
+            {arriving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryBtnText}>{arriveError ? 'Retry — I\'ve arrived' : 'I\'ve arrived ✓'}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </ScrollView>

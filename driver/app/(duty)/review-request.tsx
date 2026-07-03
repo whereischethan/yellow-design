@@ -20,16 +20,14 @@ export default function ReviewRequestScreen() {
   const {
     bookings,
     currentBooking,
-    currentTripIndex,
-    readings,
-    advanceTrip,
+    completeTrip,
+    nextBooking,
   } = useDuty();
 
   const booking = bookings.find((b) => b.id === id) ?? currentBooking;
   const bookingId = booking?.id ?? id ?? '';
 
-  const hasMoreTrips = currentTripIndex < bookings.length - 1;
-  const nextBooking = hasMoreTrips ? bookings[currentTripIndex + 1] : null;
+  const hasMoreTrips = nextBooking != null;
 
   const distanceKm: number =
     (booking?.pricing as any)?.distanceKm ?? 0;
@@ -45,7 +43,7 @@ export default function ReviewRequestScreen() {
   const googleReviewUrl = process.env.EXPO_PUBLIC_GOOGLE_REVIEW_URL ?? '';
 
   async function handleNextTrip() {
-    advanceTrip();
+    completeTrip();
     router.replace('/(duty)/roster');
   }
 
@@ -169,26 +167,6 @@ const styles = StyleSheet.create({
     color: YL.ink2,
     textAlign: 'center',
     lineHeight: 22,
-  },
-  reviewQr: {
-    alignItems: 'center',
-  },
-  reviewQrBox: {
-    width: 160,
-    height: 160,
-    borderWidth: 2,
-    borderColor: YL.line,
-    borderStyle: 'dashed',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: YL.bg2,
-  },
-  reviewQrBoxText: {
-    fontFamily: FONTS.mono,
-    fontSize: 12,
-    color: YL.ink3,
-    textAlign: 'center',
   },
   shareLinkButton: {
     paddingVertical: 8,

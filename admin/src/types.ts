@@ -1,10 +1,13 @@
-export type BookingStatus = 'pending' | 'confirmed' | 'assigned' | 'arrived' | 'in_progress' | 'completed' | 'cancelled'
+export type BookingStatus = 'pending' | 'confirmed' | 'assigned' | 'arrived' | 'in_progress' | 'completed' | 'cancelled' | 'no_show'
 
 export interface Driver {
   id: string
   name: string
   phone: string
-  status: 'available' | 'on-trip' | 'offline'
+  status: 'available' | 'on-trip' | 'offline' | 'unavailable'
+  employmentStatus?: 'active' | 'exited'
+  exitedAt?: string | null
+  exitNote?: string | null
   rating: number
   plate: string
   vehicle: string
@@ -107,6 +110,7 @@ export interface Booking {
   invoiceNo?: string | null
   sendSms?: boolean
   driverCollect?: boolean
+  driverReported?: boolean
   createdAt: string
 }
 

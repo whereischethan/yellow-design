@@ -24,12 +24,8 @@ export function setStoredAdminUser(user: AdminProfile) {
   localStorage.setItem(USER_KEY, JSON.stringify(user))
 }
 
-// Legacy key helpers kept for backward compat
-export function getStoredAdminKey(): string { return getStoredAdminToken() }
-export function setStoredAdminKey(key: string) { setStoredAdminToken(key) }
-export function clearAdminKey() { clearAdminToken() }
-
-async function adminFetch(path: string, init?: RequestInit) {
+// Shared authenticated fetch — used for both /admin and /invoices endpoints.
+async function authedFetch(url: string, init?: RequestInit) {
   const token = getStoredAdminToken()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -41,11 +37,11 @@ async function adminFetch(path: string, init?: RequestInit) {
   const isGet = !init?.method || init.method === 'GET'
   let res: globalThis.Response
   try {
-    res = await fetch(`/admin${path}`, { ...init, headers })
+    res = await fetch(url, { ...init, headers })
   } catch (e) {
     if (!isGet) throw e
     await new Promise(r => setTimeout(r, 1500))
-    res = await fetch(`/admin${path}`, { ...init, headers })
+    res = await fetch(url, { ...init, headers })
   }
   if (res.status === 401) throw new Error('UNAUTHORIZED')
   if (!res.ok) {
@@ -53,6 +49,27 @@ async function adminFetch(path: string, init?: RequestInit) {
     try { throw new Error(JSON.parse(body).error || body) } catch (e: any) { throw e.message === body ? new Error(body) : e }
   }
   return res.json()
+}
+
+const adminFetch = (path: string, init?: RequestInit) => authedFetch(`/admin${path}`, init)
+const invoiceFetch = (path: string, init?: RequestInit) => authedFetch(`/invoices${path}`, init)
+
+// Opens an authenticated invoice page in a new tab using a 5-minute token so
+// the long-lived admin JWT never lands in a URL. The tab is opened
+// synchronously (before the await) to dodge pop-up blockers.
+async function openAuthedTab(buildUrl: (token: string) => string): Promise<void> {
+  const win = window.open('about:blank', '_blank')
+  if (!win) {
+    alert('Pop-up blocked — please allow pop-ups for this site and try again.')
+    return
+  }
+  try {
+    const { token } = await adminFetch('/invoice-token', { method: 'POST' })
+    win.location.href = buildUrl(token)
+  } catch (e: any) {
+    win.close()
+    alert(e?.message || 'Could not open invoice')
+  }
 }
 
 // ─── Admin OTP login ──────────────────────────────────────────────────────────
@@ -77,10 +94,6 @@ export const verifyAdminOtp = (phone: string, otp: string, countryCode = '+91') 
     return r.json() as Promise<{ token: string; admin: AdminProfile }>
   })
 
-// Legacy key verify (kept so existing sessions survive)
-export const verifyAdminKey = (key: string) =>
-  fetch('/admin/me', { headers: { 'x-admin-key': key } }).then(r => r.ok)
-
 export const getBookings   = ()             => adminFetch('/bookings')
 export const getBooking    = (id: string)   => adminFetch(`/bookings/${id}`)
 export const patchBooking  = (id: string, body: object) =>
@@ -95,6 +108,10 @@ export const createDriver = (body: object) => adminFetch('/drivers', { method: '
 export const patchDriver  = (id: string, body: object) =>
   adminFetch(`/drivers/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const getDriverBookings = (id: string) => adminFetch(`/drivers/${id}/bookings`)
+export const exitDriver       = (id: string, note?: string) =>
+  adminFetch(`/drivers/${id}/exit`, { method: 'POST', body: JSON.stringify({ note }) })
+export const reactivateDriver = (id: string) =>
+  adminFetch(`/drivers/${id}/reactivate`, { method: 'POST' })
 
 export const getVehicles   = ()             => adminFetch('/vehicles')
 export const createVehicle = (body: object) => adminFetch('/vehicles', { method: 'POST', body: JSON.stringify(body) })
@@ -143,6 +160,10 @@ export const getFinanceSummary = (from?: string, to?: string) => {
   return adminFetch(`/finance/summary${qs ? `?${qs}` : ''}`)
 }
 
+export const getUnverifiedCollections = () => adminFetch('/finance/unverified')
+export const verifyPayment = (bookingId: string) =>
+  adminFetch(`/bookings/${bookingId}/verify-payment`, { method: 'POST' })
+
 export function downloadCSV(rows: object[], filename: string) {
   if (!rows.length) return
   const escape = (v: unknown) => {
@@ -165,26 +186,14 @@ export const getInvoices = (offset = 0, search = '') =>
   adminFetch(`/invoices?offset=${offset}&limit=50${search ? `&search=${encodeURIComponent(search)}` : ''}`)
 
 export function openInvoice(tripCode: string): void {
-  const token = getStoredAdminToken()
-  const url = `/invoices/${encodeURIComponent(tripCode)}${token ? `?token=${encodeURIComponent(token)}` : ''}`
-  const win = window.open(url, '_blank')
-  if (!win) alert('Pop-up blocked — please allow pop-ups for this site and try again.')
+  void openAuthedTab(token => `/invoices/${encodeURIComponent(tripCode)}?token=${encodeURIComponent(token)}`)
 }
 
 export async function emailInvoice(tripCode: string, to: string[]): Promise<void> {
-  const token = getStoredAdminToken()
-  const res = await fetch(`/invoices/${encodeURIComponent(tripCode)}/email`, {
+  await invoiceFetch(`/${encodeURIComponent(tripCode)}/email`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: JSON.stringify({ to }),
   })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || 'Failed to send email')
-  }
 }
 
 export type CustomInvoiceBody = {
@@ -198,52 +207,21 @@ export type CustomInvoiceBody = {
 export const createCustomInvoice = (
   tripCode: string,
   body: CustomInvoiceBody,
-): Promise<{ id: string; invoiceNo: string }> => {
-  const token = getStoredAdminToken()
-  return fetch(`/invoices/${encodeURIComponent(tripCode)}/custom`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-  }).then(async r => {
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Failed')
-    return r.json()
-  })
-}
+): Promise<{ id: string; invoiceNo: string }> =>
+  invoiceFetch(`/${encodeURIComponent(tripCode)}/custom`, { method: 'POST', body: JSON.stringify(body) })
 
 export const updateCustomInvoice = (
   tripCode: string,
   id: string,
   body: Partial<CustomInvoiceBody>,
-): Promise<{ id: string; invoiceNo: string }> => {
-  const token = getStoredAdminToken()
-  return fetch(`/invoices/${encodeURIComponent(tripCode)}/custom/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-  }).then(async r => {
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Failed')
-    return r.json()
-  })
-}
+): Promise<{ id: string; invoiceNo: string }> =>
+  invoiceFetch(`/${encodeURIComponent(tripCode)}/custom/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })
 
-export const listCustomInvoices = (tripCode: string): Promise<any[]> => {
-  const token = getStoredAdminToken()
-  return fetch(`/invoices/${encodeURIComponent(tripCode)}/custom`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  }).then(r => r.json())
-}
+export const listCustomInvoices = (tripCode: string): Promise<any[]> =>
+  invoiceFetch(`/${encodeURIComponent(tripCode)}/custom`)
 
 export function openCustomInvoice(tripCode: string, id: string): void {
-  const token = getStoredAdminToken()
-  const url = `/invoices/${encodeURIComponent(tripCode)}/custom/${encodeURIComponent(id)}${token ? `?token=${encodeURIComponent(token)}` : ''}`
-  const win = window.open(url, '_blank')
-  if (!win) alert('Pop-up blocked — please allow pop-ups for this site and try again.')
+  void openAuthedTab(token => `/invoices/${encodeURIComponent(tripCode)}/custom/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`)
 }
 
 export const getSettings  = ()               => adminFetch('/settings')

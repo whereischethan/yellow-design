@@ -1,7 +1,7 @@
 import React from 'react'
-import { getFinanceSummary } from '../api'
-import { YL, Icons, Mono, Stack, Card, PageHeader, Button, fmtINR, useIsMobile, getISTComponents, fromISTISO } from '../components/ui'
-import type { BookingFilter } from '../types'
+import { getFinanceSummary, getUnverifiedCollections, verifyPayment } from '../api'
+import { YL, Icons, Mono, Stack, Card, PageHeader, Button, fmtINR, fmtDate, useIsMobile, getISTComponents, fromISTISO } from '../components/ui'
+import type { Booking, BookingFilter } from '../types'
 
 interface MonthRow  { month: string; revenue: number; collected: number; upcoming: number; gst: number; rides: number }
 interface TypeRow   { type: string;  revenue: number; gst: number; rides: number }
@@ -246,6 +246,60 @@ function ByMethodCard({ byMethod }: { byMethod: Record<string, number> }) {
   )
 }
 
+// Driver-reported UPI/cash collections awaiting a match against the bank
+// or GPay-for-Business statement.
+function UnverifiedCard() {
+  const [rows, setRows] = React.useState<Booking[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [busyId, setBusyId] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    getUnverifiedCollections()
+      .then((r: any) => setRows(r.bookings ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleVerify = async (id: string) => {
+    setBusyId(id)
+    try {
+      await verifyPayment(id)
+      setRows(prev => prev.filter(b => b.id !== id))
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (loading || rows.length === 0) return null
+
+  return (
+    <Card padding={0}>
+      <div style={{ padding: '16px 18px 12px', borderBottom: `1px solid ${YL.line}` }}>
+        <Stack gap={3}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: YL.ink }}>Unverified collections ({rows.length})</div>
+          <div style={{ fontSize: 12, color: YL.ink2 }}>Marked paid by drivers (direct UPI / cash) — confirm against your bank or GPay statement</div>
+        </Stack>
+      </div>
+      <div>
+        {rows.map(b => (
+          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '11px 18px', borderTop: `1px solid ${YL.line}` }}>
+            <Mono size={12} weight={600}>{b.tripCode}</Mono>
+            <span style={{ fontSize: 12, color: YL.ink2, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {b.assignedDriver?.name ?? 'Driver'} · {b.paymentMethod === 'cash' ? 'Cash' : 'UPI'} · {b.pickup?.dateTime ? fmtDate(b.pickup.dateTime) : ''}
+            </span>
+            <Mono size={13} weight={600}>{fmtINR(b.pricing?.totalPrice ?? 0)}</Mono>
+            <Button size="sm" variant="secondary" onClick={() => handleVerify(b.id)} disabled={busyId === b.id}>
+              {busyId === b.id ? 'Verifying…' : 'Verify ✓'}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 const RANGES = [
   { label: 'This month',   months: 0 },
   { label: 'Last 3 months', months: 3 },
@@ -377,6 +431,9 @@ export default function FinancePage({ onNavigateToBookings }: FinancePageProps) 
                   : undefined}
               />
             </div>
+
+            {/* Driver-reported collections awaiting verification */}
+            <UnverifiedCard />
 
             {/* Monthly revenue table */}
             <RevenueChart monthly={summary.monthly} onNavigate={onNavigateToBookings} />

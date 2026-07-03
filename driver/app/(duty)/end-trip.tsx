@@ -17,6 +17,7 @@ import { useDuty } from '@/context/DutyContext';
 import { useDriverAuth } from '@/context/DriverAuthContext';
 import { saveReading, updateBookingStatus } from '@/lib/api';
 import { calcKwh, calcEfficiency, calcCo2Grams } from '@/lib/energy';
+import { DEFAULT_BATTERY_KWH } from '@/lib/config';
 
 export default function EndTripScreen() {
   const router = useRouter();
@@ -46,9 +47,8 @@ export default function EndTripScreen() {
     (booking?.pricing as any)?.distanceKm ?? tripDistanceKm ?? 0;
   const displayDistanceKm = tripDistanceKm > 0 ? tripDistanceKm : pricingDistanceKm;
 
-  // Battery kWh: use vehicle data if available, fallback to Kia Carens EV (42 kWh)
   const { driver } = useDriverAuth()
-  const batteryKwh = driver?.assignedVehicle?.isEv ? 42 : 0
+  const batteryKwh = driver?.assignedVehicle?.isEv ? DEFAULT_BATTERY_KWH : 0
 
   const kwh = useMemo(
     () => batteryKwh > 0 ? calcKwh(startSoc, endSoc > 0 ? endSoc : startSoc, batteryKwh) : 0,
@@ -73,9 +73,12 @@ export default function EndTripScreen() {
 
   const canSubmit = odometer.length > 0 && soc.length > 0;
   const [completing, setCompleting] = useState(false);
+  const [error, setError] = useState('');
 
   async function handleSubmit() {
     if (!canSubmit || completing) return;
+    setCompleting(true);
+    setError('');
     const reading = {
       type: 'trip_end' as const,
       bookingId,
@@ -84,17 +87,24 @@ export default function EndTripScreen() {
     };
     try {
       await saveReading(reading);
-    } catch (_) {}
+    } catch (_) {
+      // reading is best-effort; the status transition below is the source of truth
+    }
     addReading({ ...reading, timestamp: new Date().toISOString() });
     if (driverCollects) {
+      setCompleting(false);
       router.push(`/(duty)/payment?id=${bookingId}`);
       return;
     }
-    // Pre-paid / billed rides: no collection step — complete the trip
-    setCompleting(true);
+    // Pre-paid / billed rides: no collection step — complete the trip.
+    // Must succeed before advancing, or the roster never shows the trip as done.
     try {
       await updateBookingStatus(bookingId, 'completed');
-    } catch (_) {}
+    } catch (e: any) {
+      setError(e?.message || 'Could not complete the trip — check your connection and retry.');
+      setCompleting(false);
+      return;
+    }
     setCompleting(false);
     router.replace(`/(duty)/review-request?id=${bookingId}`);
   }
@@ -220,6 +230,11 @@ export default function EndTripScreen() {
 
       {/* CTA */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
+        {error ? (
+          <Text style={{ fontFamily: FONTS.display, fontSize: 13, color: '#DC2626', textAlign: 'center', marginBottom: 10 }}>
+            {error}
+          </Text>
+        ) : null}
         <TouchableOpacity
           style={[styles.collectButton, (!canSubmit || completing) && styles.collectButtonDisabled]}
           disabled={!canSubmit || completing}

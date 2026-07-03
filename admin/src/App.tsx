@@ -19,13 +19,13 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 }
 import {
   getBookings, getDrivers, getVehicles, getCustomers, getStats, getLeads,
-  getStoredAdminKey, clearAdminKey, getStoredAdminUser, setStoredAdminUser, updateMyProfile,
+  getStoredAdminToken, clearAdminToken, getStoredAdminUser, setStoredAdminUser, updateMyProfile,
   type AdminProfile,
 } from './api'
 import { Sidebar, MobileNav, useIsMobile, YL, ModalShell, ModalHeader, Button, Stack } from './components/ui'
 import type { Page } from './components/ui'
 import Dashboard from './pages/Dashboard'
-import { BookingsList, BookingDrawer } from './pages/Bookings'
+import { BookingsList, BookingDrawer } from './pages/bookings'
 import DriversPage from './pages/Drivers'
 import VehiclesPage from './pages/Vehicles'
 import CustomersPage from './pages/Customers'
@@ -37,7 +37,7 @@ import TeamPage from './pages/Team'
 import AvailabilityPage from './pages/Availability'
 import EmptyLegPage from './pages/EmptyLeg'
 import FinancePage from './pages/Finance'
-import { CreateBookingModal, AddDriverModal, AddVehicleModal } from './pages/Modals'
+import { CreateBookingModal, AddDriverModal, AddVehicleModal } from './pages/modals'
 import Login from './pages/Login'
 
 function ProfileModal({ open, admin, onClose, onSaved }: {
@@ -106,7 +106,7 @@ function ProfileModal({ open, admin, onClose, onSaved }: {
 
 export default function App() {
   const isMobile = useIsMobile()
-  const [authed, setAuthed]   = React.useState(() => !!getStoredAdminKey())
+  const [authed, setAuthed]   = React.useState(() => !!getStoredAdminToken())
   const [admin, setAdmin]     = React.useState<AdminProfile | null>(() => getStoredAdminUser())
   const [page, setPage]       = React.useState<Page>('dashboard')
   const [bookings, setBookings]   = React.useState<Booking[]>([])
@@ -131,7 +131,11 @@ export default function App() {
     setPage('bookings')
   }, [])
 
-  const handleSignOut = () => { clearAdminKey(); setAuthed(false) }
+  const handleSignOut = () => { clearAdminToken(); setAuthed(false) }
+
+  // Current page, readable from inside the stable refresh callback
+  const pageRef = React.useRef(page)
+  pageRef.current = page
 
   const refresh = React.useCallback(async (isInitial = false) => {
     if (isInitial) { setError(null); setLoading(true) }
@@ -149,21 +153,23 @@ export default function App() {
           setCustomers(c.customers)
           setLeads(l.leads)
         }).catch((e) => {
-          if (e.message?.includes('UNAUTHORIZED')) { clearAdminKey(); setAuthed(false) }
+          if (e.message?.includes('UNAUTHORIZED')) { clearAdminToken(); setAuthed(false) }
         })
       } else {
-        const [b, d, v, c, s, l] = await Promise.all([
-          getBookings(), getDrivers(), getVehicles(), getCustomers(), getStats(), getLeads(),
-        ])
-        setBookings(b.bookings)
-        setDrivers(d.drivers)
-        setVehicles(v.vehicles)
-        setCustomers(c.customers)
-        setStats(s)
-        setLeads(l.leads)
+        // Poll: always refetch bookings/drivers/stats; only refetch
+        // vehicles/customers/leads when their page is open.
+        const tasks: Promise<void>[] = [
+          getBookings().then(b => setBookings(b.bookings)),
+          getDrivers().then(d => setDrivers(d.drivers)),
+          getStats().then(s => setStats(s)),
+        ]
+        if (pageRef.current === 'vehicles') tasks.push(getVehicles().then(v => setVehicles(v.vehicles)))
+        if (pageRef.current === 'customers') tasks.push(getCustomers().then(c => setCustomers(c.customers)))
+        if (pageRef.current === 'leads') tasks.push(getLeads().then(l => setLeads(l.leads)))
+        await Promise.all(tasks)
       }
     } catch (e: any) {
-      if (e.message?.includes('UNAUTHORIZED')) { clearAdminKey(); setAuthed(false); return }
+      if (e.message?.includes('UNAUTHORIZED')) { clearAdminToken(); setAuthed(false); return }
       if (isInitial) setError(e.message)
       else setNetworkError(e.message)
     } finally {
@@ -176,14 +182,20 @@ export default function App() {
 
   const counts = {
     bookings: bookings.filter(b => ['pending', 'confirmed', 'assigned', 'arrived', 'in_progress'].includes(b.status)).length,
-    drivers: drivers.filter(d => d.status === 'available').length,
+    drivers: drivers.filter(d => d.status === 'available' && d.employmentStatus !== 'exited').length,
   }
 
   // Keep drawer in sync when background poll refreshes booking data
   React.useEffect(() => {
     if (!openBooking) return
     const fresh = bookings.find(b => b.id === openBooking.id)
-    if (fresh && JSON.stringify(fresh) !== JSON.stringify(openBooking)) setOpenBooking(fresh)
+    if (fresh && fresh !== openBooking && (
+      fresh.status !== openBooking.status ||
+      fresh.paymentStatus !== openBooking.paymentStatus ||
+      fresh.assignedDriver?.id !== openBooking.assignedDriver?.id ||
+      fresh.assignedVehicle?.licensePlate !== openBooking.assignedVehicle?.licensePlate ||
+      fresh.pricing?.totalPrice !== openBooking.pricing?.totalPrice
+    )) setOpenBooking(fresh)
   }, [bookings])
 
   const handleBookingUpdate = (updated: Booking) => {
@@ -215,7 +227,7 @@ export default function App() {
       <div style={{ color: YL.redInk, fontSize: 14 }}>Failed to connect to server.</div>
       <div style={{ color: YL.ink2, fontSize: 12, maxWidth: 400, textAlign: 'center' }}>{error}</div>
       {error.includes('UNAUTHORIZED') ? (
-        <button onClick={() => { clearAdminKey(); setAuthed(false); setError(null) }} style={{ padding: '8px 16px', background: YL.yellow, border: `1px solid ${YL.yellowDeep}`, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>Sign out</button>
+        <button onClick={() => { clearAdminToken(); setAuthed(false); setError(null) }} style={{ padding: '8px 16px', background: YL.yellow, border: `1px solid ${YL.yellowDeep}`, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>Sign out</button>
       ) : (
         <button onClick={() => { setError(null); setLoading(true); refresh(true) }} style={{ padding: '8px 16px', background: YL.yellow, border: `1px solid ${YL.yellowDeep}`, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>Retry</button>
       )}
@@ -223,6 +235,9 @@ export default function App() {
   )
 
   const isSuperAdmin = admin?.role === 'superadmin'
+  // Exited drivers are excluded from all assignment pickers; only the Drivers
+  // page (with its own filter) sees the full list.
+  const activeDrivers = drivers.filter(d => d.employmentStatus !== 'exited')
 
   const navProps = {
     active: page, setActive: setPage, counts,
@@ -243,10 +258,10 @@ export default function App() {
             <button onClick={() => setNetworkError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 16, lineHeight: 1, padding: '0 4px' }}>×</button>
           </div>
         )}
-        {page === 'dashboard'  && <Dashboard bookings={bookings} drivers={drivers} stats={stats} adminName={admin?.name} onOpen={setOpenBooking} onAssignRequest={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} onNavigateToBookings={navigateToBookings} />}
+        {page === 'dashboard'  && <Dashboard bookings={bookings} drivers={activeDrivers} stats={stats} adminName={admin?.name} onOpen={setOpenBooking} onAssignRequest={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} onNavigateToBookings={navigateToBookings} />}
         {page === 'bookings'   && <BookingsList bookings={bookings} onOpen={setOpenBooking} onNewBooking={() => setShowNewBooking(true)} initialFilters={bookingFilters} onClearFilters={() => setBookingFilters({})} />}
-        {page === 'drivers'    && <DriversPage drivers={drivers} onUpdate={d => setDrivers(prev => prev.map(x => x.id === d.id ? d : x))} onAddDriver={() => setShowAddDriver(true)} onAddVehicle={() => setShowAddVehicle(true)} />}
-        {page === 'vehicles'   && <VehiclesPage vehicles={vehicles} drivers={drivers} onUpdate={v => setVehicles(prev => prev.map(x => x.id === v.id ? v : x))} onAddVehicle={() => setShowAddVehicle(true)} onVehiclesRefresh={() => getVehicles().then(r => setVehicles(r.vehicles)).catch(() => {})} />}
+        {page === 'drivers'    && <DriversPage drivers={drivers} isSuperAdmin={isSuperAdmin} onUpdate={d => setDrivers(prev => prev.map(x => x.id === d.id ? d : x))} onAddDriver={() => setShowAddDriver(true)} onAddVehicle={() => setShowAddVehicle(true)} />}
+        {page === 'vehicles'   && <VehiclesPage vehicles={vehicles} drivers={activeDrivers} onUpdate={v => setVehicles(prev => prev.map(x => x.id === v.id ? v : x))} onAddVehicle={() => setShowAddVehicle(true)} onVehiclesRefresh={() => getVehicles().then(r => setVehicles(r.vehicles)).catch(() => {})} />}
         {page === 'customers'  && <CustomersPage customers={customers} onUpdate={c => setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...c } : x))} onRefresh={() => getCustomers().then(r => setCustomers(r.customers)).catch(() => {})} />}
         {page === 'leads'      && <LeadsPage leads={leads} bookings={bookings} onUpdate={l => setLeads(prev => prev.map(x => x.id === l.id ? { ...x, ...l } : x))} onBookingCreated={b => { setBookings(prev => [b, ...prev]); setPage('bookings') }} />}
         {page === 'pricing'    && <PricingPage isSuperAdmin={isSuperAdmin} />}
@@ -257,11 +272,11 @@ export default function App() {
         {page === 'settings'   && <SettingsPage />}
         {page === 'team'       && <TeamPage selfPhone={admin?.phone ?? ''} />}
 
-        <BookingDrawer booking={openBooking} drivers={drivers} vehicles={vehicles} customers={customers} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate} onDelete={id => setBookings(prev => prev.filter(b => b.id !== id))} isSuperAdmin={isSuperAdmin} />
+        <BookingDrawer booking={openBooking} drivers={activeDrivers} vehicles={vehicles} customers={customers} onClose={() => setOpenBooking(null)} onUpdate={handleBookingUpdate} onDelete={id => setBookings(prev => prev.filter(b => b.id !== id))} isSuperAdmin={isSuperAdmin} />
 
-        <CreateBookingModal open={showNewBooking} onClose={() => setShowNewBooking(false)} drivers={drivers} customers={customers} onCreated={(b) => { if (b) setBookings(prev => [b, ...prev]); setPage('bookings'); refresh() }} />
+        <CreateBookingModal open={showNewBooking} onClose={() => setShowNewBooking(false)} drivers={activeDrivers} customers={customers} onCreated={(b) => { if (b) setBookings(prev => [b, ...prev]); setPage('bookings'); refresh() }} />
         <AddDriverModal open={showAddDriver} onClose={() => setShowAddDriver(false)} vehicles={vehicles} onCreated={() => { getDrivers().then(r => setDrivers(r.drivers)); getVehicles().then(r => setVehicles(r.vehicles)) }} />
-        <AddVehicleModal open={showAddVehicle} onClose={() => setShowAddVehicle(false)} drivers={drivers} onCreated={() => { getVehicles().then(r => setVehicles(r.vehicles)); getDrivers().then(r => setDrivers(r.drivers)) }} />
+        <AddVehicleModal open={showAddVehicle} onClose={() => setShowAddVehicle(false)} drivers={activeDrivers} onCreated={() => { getVehicles().then(r => setVehicles(r.vehicles)); getDrivers().then(r => setDrivers(r.drivers)) }} />
         <ProfileModal open={showProfile} admin={admin} onClose={() => setShowProfile(false)} onSaved={a => setAdmin(a)} />
       </div>
       {isMobile && <MobileNav {...navProps} />}

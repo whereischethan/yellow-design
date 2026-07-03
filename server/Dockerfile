@@ -15,7 +15,9 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 COPY package*.json ./
 COPY prisma ./prisma/
 RUN npm ci --omit=dev
-RUN npx prisma generate
+# Pin the CLI: prod deps omit `prisma`, and a bare npx would fetch Prisma 7+
+# whose schema format is incompatible with this project (v5).
+RUN npx prisma@5.22.0 generate
 COPY --from=builder /app/dist ./dist
 COPY start.sh ./
 RUN chmod +x start.sh

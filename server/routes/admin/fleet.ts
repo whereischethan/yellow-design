@@ -6,6 +6,61 @@ import { requireSuperAdmin, buildBooking } from './shared'
 
 const router = Router()
 
+// ─── One-time maintenance: backfill Booking.driverId/vehicleId from legacy JSON ──
+// blobs (introduced when the FK columns were added), then resync driver.trips /
+// vehicle.trips from the now-correct FK-based counts. Remove after running once.
+router.post('/maintenance/backfill-booking-fk', requireSuperAdmin, async (_req, res) => {
+  try {
+    const rows = await prisma.booking.findMany({
+      where: { OR: [{ driverId: null }, { vehicleId: null }] },
+      select: { id: true, assignedDriverJson: true, assignedVehicleJson: true, driverId: true, vehicleId: true },
+    })
+    const vehiclesByPlate = new Map(
+      (await prisma.vehicle.findMany({ select: { id: true, plate: true, driverId: true } })).map(v => [v.plate, v])
+    )
+
+    let driverUpdates = 0, vehicleUpdates = 0
+    for (const row of rows) {
+      const data: { driverId?: string; vehicleId?: string } = {}
+      if (!row.driverId && row.assignedDriverJson) {
+        try {
+          const d = JSON.parse(row.assignedDriverJson)
+          if (d?.id) { data.driverId = d.id; driverUpdates++ }
+        } catch {}
+      }
+      if (!row.vehicleId) {
+        let vehicle = null
+        if (row.assignedVehicleJson) {
+          try {
+            const v = JSON.parse(row.assignedVehicleJson)
+            const plate = v?.licensePlate ?? v?.plate
+            if (plate) vehicle = vehiclesByPlate.get(plate)
+          } catch {}
+        }
+        if (!vehicle && data.driverId) vehicle = [...vehiclesByPlate.values()].find(v => v.driverId === data.driverId)
+        if (vehicle) { data.vehicleId = vehicle.id; vehicleUpdates++ }
+      }
+      if (Object.keys(data).length > 0) await prisma.booking.update({ where: { id: row.id }, data })
+    }
+
+    // Resync driver.trips and vehicle.trips from corrected FK-based counts
+    const drivers = await prisma.driver.findMany({ select: { id: true } })
+    for (const d of drivers) {
+      const count = await prisma.booking.count({ where: { driverId: d.id, status: 'completed' } })
+      await prisma.driver.update({ where: { id: d.id }, data: { trips: count } })
+    }
+    const vehicles = await prisma.vehicle.findMany({ select: { id: true } })
+    for (const v of vehicles) {
+      const count = await prisma.booking.count({ where: { vehicleId: v.id, status: 'completed' } })
+      await prisma.vehicle.update({ where: { id: v.id }, data: { trips: count } })
+    }
+
+    res.json({ backfilled: rows.length, driverUpdates, vehicleUpdates, driversResynced: drivers.length, vehiclesResynced: vehicles.length })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Drivers ──────────────────────────────────────────────────────────────────
 
 router.get('/drivers', async (_req, res) => {

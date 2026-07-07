@@ -6,6 +6,7 @@ import fleetRouter from './fleet'
 import customersRouter from './customers'
 import financeRouter from './finance'
 import configRouter from './config'
+import payrollRouter from './payroll'
 
 const router = Router()
 
@@ -21,5 +22,6 @@ router.use(fleetRouter)
 router.use(customersRouter)
 router.use(financeRouter)
 router.use(configRouter)
+router.use(payrollRouter)
 
 export default router

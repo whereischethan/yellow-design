@@ -378,11 +378,12 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
         const stopPlaceIds = stops.filter(s => s.placeId).map(s => s.placeId)
         result = await calcPricing({ originPlaceId: addressPlaceId, tripType: 'airport', stopPlaceIds })
       } else if (bookingCategory === 'outstation') {
-        if (!outstationOriginPlaceId) { setFareEditMode(true); setPricingLoading(false); return }
+        if (!outstationOriginPlaceId || !outstationDestPlaceId) { setFareEditMode(true); setPricingLoading(false); return }
         result = await calcPricing({
           originPlaceId: outstationOriginPlaceId,
-          destPlaceId: outstationDestPlaceId || undefined,
+          destPlaceId: outstationDestPlaceId,
           tripType: 'outstation',
+          tripKind: outstationTripKind,
         })
       } else {
         result = await calcPricing({ tripType: 'hourly', durationHours: hourlyDuration })
@@ -782,25 +783,9 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
           <Stack gap={16}>
             <Stack gap={8}>
               <FieldLabel required>Vehicle class</FieldLabel>
-              {bookingCategory === 'airport' && (
-                <TilePicker value={vehicleType} onChange={setVehicleType} options={[
-                  { value: 'yellowSky', label: 'Yellow Sky', desc: 'Kia Carens Clavis · 6 seats' },
-                ]}/>
-              )}
-              {bookingCategory === 'outstation' && (
-                <TilePicker value={vehicleType} onChange={setVehicleType} options={[
-                  { value: 'yellowSky',   label: 'Yellow Sky',   desc: 'Kia Carens Clavis · 6 seats' },
-                  { value: 'yellowEarth', label: 'Yellow Earth',  desc: 'Long-distance · 4 seats' },
-                  { value: 'sedan',       label: 'Sedan',         desc: 'Economy · 4 seats' },
-                  { value: 'suv',         label: 'SUV',           desc: 'Premium · 6 seats' },
-                ]}/>
-              )}
-              {bookingCategory === 'hourly' && (
-                <TilePicker value={vehicleType} onChange={setVehicleType} options={[
-                  { value: 'yellowSky', label: 'Yellow Sky', desc: 'Kia Carens Clavis · 6 seats' },
-                  { value: 'sedan',     label: 'Sedan',      desc: 'Economy · 4 seats' },
-                ]}/>
-              )}
+              <TilePicker value={vehicleType} onChange={setVehicleType} options={[
+                { value: 'yellowSky', label: 'Yellow Sky', desc: 'Kia Carens Clavis · 6 seats' },
+              ]}/>
             </Stack>
             <Stack gap={8}>
               <FieldLabel hint="optional">Assign driver now</FieldLabel>
@@ -837,7 +822,7 @@ export function CreateBookingModal({ open, onClose, drivers, customers = [], onC
             <div style={{ background: YL.bg, border: `1px solid ${YL.line}`, borderRadius: 10, overflow: 'hidden' }}>
               {(() => {
                 const fmtDt = (s: string) => { if (!s) return '—'; const ist = toISTISO(new Date(s)); const [dp,tp] = ist.split('T'); const [y,mo,d] = dp.split('-').map(Number); const [h,mi] = tp.split(':').map(Number); const ap = h>=12?'PM':'AM'; const MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${d} ${MONS[mo-1]} ${y} · ${h%12||12}:${String(mi).padStart(2,'0')} ${ap}` }
-                const vehicleLabel: Record<string,string> = { yellowSky: 'Yellow Sky', yellowEarth: 'Yellow Earth', sedan: 'Sedan', suv: 'SUV' }
+                const vehicleLabel: Record<string,string> = { yellowSky: 'Yellow Sky' }
                 const baseRows: [string, string][] = [
                   ['Customer', pickedCustomer ? pickedCustomer.name || pickedCustomer.phone : (isGuest ? guestName || 'Guest' : '—')],
                   ['Phone', pickedCustomer ? formatPhone(pickedCustomer.phone) : (isGuest ? `${guestCountryCode} ${guestPhone}` : '—')],

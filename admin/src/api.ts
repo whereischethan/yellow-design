@@ -113,12 +113,20 @@ export const exitDriver       = (id: string, note?: string) =>
 export const reactivateDriver = (id: string) =>
   adminFetch(`/drivers/${id}/reactivate`, { method: 'POST' })
 
+export const getDriverShifts = (id: string) => adminFetch(`/drivers/${id}/shifts`)
+export const getDriverSalary = (id: string) => adminFetch(`/drivers/${id}/salary`)
+export const putDriverSalary = (id: string, body: object) =>
+  adminFetch(`/drivers/${id}/salary`, { method: 'PUT', body: JSON.stringify(body) })
+export const getDriverExternalEarnings = (id: string) => adminFetch(`/drivers/${id}/external-earnings`)
+export const createDriverExternalEarning = (id: string, body: object) =>
+  adminFetch(`/drivers/${id}/external-earnings`, { method: 'POST', body: JSON.stringify(body) })
+export const getDriverCashFloat = (id: string) => adminFetch(`/drivers/${id}/cash-float`)
+
 export const getVehicles   = ()             => adminFetch('/vehicles')
 export const createVehicle = (body: object) => adminFetch('/vehicles', { method: 'POST', body: JSON.stringify(body) })
 export const patchVehicle  = (id: string, body: object) =>
   adminFetch(`/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const syncVehicleTrips = ()          => adminFetch('/vehicles/sync-trips', { method: 'POST' })
-export const assignAllTripsToVehicle = (id: string) => adminFetch(`/vehicles/${id}/assign-all-trips`, { method: 'POST' })
 
 export const getCustomers = () => adminFetch('/customers')
 export const patchCustomer = (id: string, body: object) =>
@@ -135,7 +143,7 @@ export const patchLead  = (id: string, body: object) =>
 export const getPricing  = ()               => adminFetch('/pricing')
 export const savePricing = (config: object) =>
   adminFetch('/pricing', { method: 'PUT', body: JSON.stringify({ config }) })
-export const calcPricing = (body: { originPlaceId?: string; destPlaceId?: string; tripType?: string; distanceKm?: number; stopPlaceIds?: string[]; durationHours?: number }) =>
+export const calcPricing = (body: { originPlaceId?: string; destPlaceId?: string; tripType?: string; distanceKm?: number; stopPlaceIds?: string[]; durationHours?: number; tripKind?: 'oneway' | 'round'; nights?: number }) =>
   adminFetch('/pricing/calculate', { method: 'POST', body: JSON.stringify(body) })
 
 export const generatePaymentLink = (id: string, type: 'upi' | 'standard' = 'upi') =>

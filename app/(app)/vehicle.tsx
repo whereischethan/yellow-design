@@ -141,7 +141,6 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
   const pricing: PricingResponse | null = params.pricing ? JSON.parse(params.pricing) : null
 
   const yellowSkyPrice = pricing?.vehicleOptions?.yellowSky?.totalPrice
-    ?? pricing?.vehicleOptions?.suv?.totalPrice
     ?? pricing?.totalPrice
     ?? 0
 

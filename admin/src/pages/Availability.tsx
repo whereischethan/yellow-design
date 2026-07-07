@@ -257,7 +257,7 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
             active.map((slot, i) =>
               slot.kind === 'block'
                 ? <BlockRow key={`b-${slot.block!.id}`} block={slot.block!} onDelete={handleDelete} last={i === active.length - 1} />
-                : <BookingRow key={`bk-${slot.booking!.id}`} booking={slot.booking!} last={i === active.length - 1} />
+                : <AvailabilityBookingRow key={`bk-${slot.booking!.id}`} booking={slot.booking!} last={i === active.length - 1} />
             )
           )}
         </Section>
@@ -289,7 +289,7 @@ export default function AvailabilityPage({ bookings }: { bookings: Booking[] }) 
             {past.map((slot, i) =>
               slot.kind === 'block'
                 ? <BlockRow key={`b-${slot.block!.id}`} block={slot.block!} onDelete={handleDelete} last={i === past.length - 1} />
-                : <BookingRow key={`bk-${slot.booking!.id}`} booking={slot.booking!} last={i === past.length - 1} />
+                : <AvailabilityBookingRow key={`bk-${slot.booking!.id}`} booking={slot.booking!} last={i === past.length - 1} />
             )}
           </Section>
         )}
@@ -346,7 +346,7 @@ function BlockRow({ block, onDelete, last }: { block: Block; onDelete: (id: numb
   )
 }
 
-function BookingRow({ booking, last }: { booking: Booking; last: boolean }) {
+function AvailabilityBookingRow({ booking, last }: { booking: Booking; last: boolean }) {
   const pickupName = booking.pickup?.placeName || booking.pickup?.location || '—'
   const dropName   = booking.drop?.placeName   || booking.drop?.location   || '—'
   const dt = new Date(booking.pickup.dateTime)

@@ -21,7 +21,7 @@ router.get('/drivers/:id/bookings', async (req, res) => {
   try {
     const driverId = String(req.params.id)
     const rows = await prisma.booking.findMany({
-      where: { assignedDriverJson: { contains: driverId } },
+      where: { driverId },
       orderBy: { createdAt: 'desc' },
       take: 50,
     })
@@ -340,45 +340,14 @@ router.patch('/vehicles/:id', async (req, res) => {
 
 router.post('/vehicles/sync-trips', async (req, res) => {
   try {
-    const vehicles = await prisma.vehicle.findMany({ select: { id: true, plate: true } })
+    const vehicles = await prisma.vehicle.findMany({ select: { id: true } })
     for (const v of vehicles) {
       const count = await prisma.booking.count({
-        where: { assignedVehicleJson: { contains: v.plate }, status: 'completed' },
+        where: { vehicleId: v.id, status: 'completed' },
       })
       await prisma.vehicle.update({ where: { id: v.id }, data: { trips: count } })
     }
     res.json({ synced: vehicles.length })
-  } catch (e: any) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
-router.post('/vehicles/:id/assign-all-trips', async (req, res) => {
-  try {
-    const vehicle = await prisma.vehicle.findUnique({ where: { id: String(req.params.id) } })
-    if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' })
-
-    const vehicleJson = JSON.stringify({
-      make: vehicle.make, model: vehicle.model,
-      licensePlate: vehicle.plate, color: vehicle.color,
-    })
-
-    // Only update completed bookings that have no vehicle assigned yet
-    const { count } = await prisma.booking.updateMany({
-      where: {
-        status: 'completed',
-        OR: [{ assignedVehicleJson: null }, { assignedVehicleJson: '' }],
-      },
-      data: { assignedVehicleJson: vehicleJson },
-    })
-
-    // Re-sync trip count for this vehicle
-    const tripCount = await prisma.booking.count({
-      where: { assignedVehicleJson: { contains: vehicle.plate }, status: 'completed' },
-    })
-    await prisma.vehicle.update({ where: { id: vehicle.id }, data: { trips: tripCount } })
-
-    res.json({ assigned: count, trips: tripCount })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }

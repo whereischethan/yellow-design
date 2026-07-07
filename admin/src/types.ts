@@ -22,6 +22,26 @@ export interface Driver {
   docPolice?: string | null
 }
 
+export interface Shift {
+  id: string
+  driverId: string
+  vehicleId?: string | null
+  clockInAt: string
+  clockOutAt?: string | null
+  clockInOdometer?: number | null
+  clockOutOdometer?: number | null
+  status: 'active' | 'closed'
+}
+
+export interface SalaryStructure {
+  id: string
+  driverId: string
+  baseMonthly: number
+  outstationAllowance: number
+  profitShareRatePct: number
+  effectiveFrom: string
+}
+
 export interface Vehicle {
   id: string
   plate: string

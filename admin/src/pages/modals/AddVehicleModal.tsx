@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Driver } from '../../types'
 import { createVehicle } from '../../api'
-import { YL, Icons, Stack, Button, Input, Avatar, Mono, ModalShell, ModalHeader, FieldLabel, TilePicker, FormInput, DatePicker, formatPhone } from '../../components/ui'
+import { YL, Icons, Stack, Button, Input, Avatar, Mono, ModalShell, ModalHeader, FieldLabel, FormInput, DatePicker, formatPhone } from '../../components/ui'
 
 interface AddVehicleModalProps {
   open: boolean
@@ -19,7 +19,7 @@ export function AddVehicleModal({ open, onClose, drivers, onCreated }: AddVehicl
   const [model, setModel] = React.useState('Carens Clavis')
   const [year, setYear] = React.useState('2024')
   const [color, setColor] = React.useState('Yellow')
-  const [classKey, setClassKey] = React.useState('yellowSky')
+  const classKey = 'yellowSky'
   const [insuranceExpiry, setInsuranceExpiry] = React.useState('')
   const [fcExpiry, setFcExpiry] = React.useState('')
   const [driverId, setDriverId] = React.useState('')
@@ -64,14 +64,6 @@ export function AddVehicleModal({ open, onClose, drivers, onCreated }: AddVehicl
 
       <div style={{ padding: 24, overflow: 'auto', flex: 1, minHeight: 0 }}>
         <Stack gap={18}>
-          <Stack gap={8}>
-            <FieldLabel required>Vehicle class</FieldLabel>
-            <TilePicker value={classKey} onChange={setClassKey} options={[
-              { value: 'yellowSky',   label: 'Yellow Sky',   desc: 'Airport transfers' },
-              { value: 'yellowEarth', label: 'Yellow Earth', desc: 'Outstation / long-distance' },
-            ]}/>
-          </Stack>
-
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <FormInput label="Make" required placeholder="Kia, Tata, Toyota…" value={make} onChange={(e: any) => setMake(e.target.value)}/>
             <FormInput label="Model" required placeholder="Carens Clavis, Nexon…" value={model} onChange={(e: any) => setModel(e.target.value)}/>

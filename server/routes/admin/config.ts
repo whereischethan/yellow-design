@@ -4,6 +4,7 @@ import prisma from '../../lib/prisma'
 import { COMPANY_KEYS } from '../../lib/invoice'
 import { getEmptyLegStatus } from '../../lib/emptyLeg'
 import { requireSuperAdmin } from './shared'
+import { BLR_AIRPORT_PLACE_ID, getTotalDistance, calcAirportPrice, calcOutstationPrice, calcHourlyPrice } from '../../lib/pricingCalc'
 
 const router = Router()
 
@@ -123,9 +124,7 @@ router.put('/pricing', requireSuperAdmin, async (req, res) => {
 
 router.post('/pricing/calculate', async (req, res) => {
   try {
-    const { originPlaceId, destPlaceId, tripType = 'airport', distanceKm: manualKm, stopPlaceIds = [], durationHours } = req.body
-    const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || ''
-    const BLR_AIRPORT_PLACE_ID = 'ChIJZWJEdf4crjsRjkEpoelwbCk'
+    const { originPlaceId, destPlaceId, tripType = 'airport', distanceKm: manualKm, stopPlaceIds = [], durationHours, tripKind, nights } = req.body
 
     const rows = await prisma.pricingConfig.findMany()
     const cfg: Record<string, number> = rows.reduce((acc, r) => ({ ...acc, [r.key]: parseFloat(r.value) }), {} as Record<string, number>)
@@ -133,13 +132,8 @@ router.post('/pricing/calculate', async (req, res) => {
     // Hourly: no distance calculation needed
     if (tripType === 'hourly') {
       const hours = parseFloat(durationHours) || 4
-      const hourlyRate = cfg.hourly_base_rate ?? 500
-      const gstRate = (cfg.hourly_gst ?? 5) / 100
-      const base = Math.round(hours * hourlyRate)
-      const gst = Math.round(base * gstRate)
-      const total = base + gst
-      return res.json({ distanceKm: 0, durationMinutes: hours * 60, tripType, basePrice: base, fareBeforeTax: base, gst, toll: 0, totalPrice: total,
-        breakdown: { hours: `${hours}h`, rate: `₹${hourlyRate}/hr`, gst: `${cfg.hourly_gst ?? 5}%` } })
+      const pricing = calcHourlyPrice(hours, cfg)
+      return res.json({ distanceKm: 0, durationMinutes: hours * 60, tripType, ...pricing })
     }
 
     let distanceKm: number
@@ -148,49 +142,24 @@ router.post('/pricing/calculate', async (req, res) => {
     if (manualKm !== undefined) {
       distanceKm = parseFloat(manualKm)
       durationMinutes = Math.round(distanceKm * 1.5)
-    } else if (originPlaceId && GOOGLE_MAPS_KEY) {
-      // For outstation use destPlaceId when provided; otherwise fall back to airport
-      const destinationId = (tripType === 'outstation' && destPlaceId) ? destPlaceId : BLR_AIRPORT_PLACE_ID
-      const waypoints: string[] = [originPlaceId, ...stopPlaceIds, destinationId]
-      const legResults = await Promise.all(
-        waypoints.slice(0, -1).map(async (from, i) => {
-          const to = waypoints[i + 1]
-          const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=place_id:${encodeURIComponent(from)}&destinations=place_id:${encodeURIComponent(to)}&key=${GOOGLE_MAPS_KEY}&mode=driving`
-          const r = await fetch(url)
-          const data = await r.json() as any
-          const el = data?.rows?.[0]?.elements?.[0]
-          if (!el || el.status !== 'OK') throw new Error('Could not calculate distance for a leg')
-          return { km: el.distance.value / 1000, mins: el.duration.value / 60 }
-        })
-      )
-      distanceKm = Math.round(legResults.reduce((s, l) => s + l.km, 0) * 10) / 10
-      durationMinutes = Math.round(legResults.reduce((s, l) => s + l.mins, 0))
+    } else if (originPlaceId) {
+      if (tripType === 'outstation') {
+        if (!destPlaceId) return res.status(400).json({ error: 'destPlaceId required' })
+        ;({ distanceKm, durationMinutes } = await getTotalDistance(originPlaceId, destPlaceId, stopPlaceIds))
+      } else {
+        ;({ distanceKm, durationMinutes } = await getTotalDistance(originPlaceId, BLR_AIRPORT_PLACE_ID, stopPlaceIds))
+      }
     } else {
       return res.status(400).json({ error: 'originPlaceId or distanceKm required' })
     }
 
     if (tripType === 'outstation') {
-      const perKm = cfg.outstation_per_km ?? 18
-      const driverBata = cfg.outstation_driver_bata ?? 500
-      const gstRate = (cfg.outstation_gst ?? 5) / 100
-      const base = distanceKm * perKm
-      const withBata = base + driverBata
-      const gst = Math.round(withBata * gstRate)
-      const total = Math.round(withBata + gst)
-      return res.json({ distanceKm, durationMinutes, tripType, basePrice: Math.round(base), fareBeforeTax: Math.round(base), gst, toll: 0, totalPrice: total,
-        breakdown: { distanceFare: `₹${Math.round(base)} @ ₹${perKm}/km`, driverBata: `₹${driverBata}`, gst: `${cfg.outstation_gst ?? 5}%` } })
+      const pricing = calcOutstationPrice(distanceKm, cfg, { tripKind, nights })
+      return res.json({ distanceKm, durationMinutes, tripType, ...pricing })
     }
 
-    const perKm = cfg.airport_per_km ?? 32
-    const tripCharge = cfg.airport_trip_charge ?? 100
-    const toll = cfg.airport_toll ?? 185
-    const gstRate = (cfg.airport_gst ?? 5) / 100
-    const kmFare = Math.round(distanceKm * perKm)
-    const fareBeforeTax = kmFare + tripCharge + toll
-    const gst = Math.round(fareBeforeTax * gstRate)
-    const total = fareBeforeTax + gst
-    res.json({ distanceKm, durationMinutes, tripType, fareBeforeTax, gst, toll: 0, totalPrice: total, basePrice: fareBeforeTax,
-      breakdown: { kmFare: `₹${kmFare} @ ₹${perKm}/km`, tripCharge: `₹${tripCharge}`, toll: `+₹${toll} toll`, gst: `${cfg.airport_gst ?? 5}% on ₹${fareBeforeTax}` } })
+    const pricing = calcAirportPrice(distanceKm, cfg)
+    res.json({ distanceKm, durationMinutes, tripType, ...pricing })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }

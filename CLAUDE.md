@@ -104,7 +104,6 @@ Bookings store nested data (pickup, drop, flight, pricing, driver, vehicle) as J
 | `pages/Customers.tsx` | Customer list |
 | `pages/Leads.tsx` | Quote leads from customer app |
 | `pages/Pricing.tsx` | Pricing config editor |
-| `pages/Content.tsx` | App copy (static UI, not wired to backend yet) |
 
 ### Customer ↔ Admin data flow
 

@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Driver } from '../types'
-import { patchDriver, getDriverBookings, impersonate, exitDriver, reactivateDriver, DRIVER_APP_URL } from '../api'
-import type { Booking } from '../types'
+import { patchDriver, getDriverBookings, impersonate, exitDriver, reactivateDriver, DRIVER_APP_URL, getDriverShifts, getDriverSalary, putDriverSalary } from '../api'
+import type { Booking, Shift, SalaryStructure } from '../types'
 import { YL, Icons, Mono, Stack, Button, Chip, PageHeader, Avatar, fmtDate, formatPhone, useIsMobile, ModalShell, ModalHeader } from '../components/ui'
 
 interface Props {
@@ -35,16 +35,29 @@ function DocImage({ label, value }: { label: string; value?: string | null }) {
 }
 
 function DriverDrawer({ driver, onClose, onUpdate, isSuperAdmin }: { driver: Driver | null; onClose: () => void; onUpdate: (d: Driver) => void; isSuperAdmin?: boolean }) {
-  const [tab, setTab] = React.useState<'details' | 'trips'>('details')
+  const [tab, setTab] = React.useState<'details' | 'trips' | 'shifts'>('details')
   const [trips, setTrips] = React.useState<Booking[]>([])
   const [tripsLoading, setTripsLoading] = React.useState(false)
   const [completedCount, setCompletedCount] = React.useState<number | null>(null)
   const [totalEarnings, setTotalEarnings] = React.useState<number | null>(null)
   const [opening, setOpening] = React.useState(false)
+  const [shifts, setShifts] = React.useState<Shift[]>([])
+  const [shiftsLoading, setShiftsLoading] = React.useState(false)
+  const [salary, setSalary] = React.useState<SalaryStructure | null>(null)
+  const [salaryDraft, setSalaryDraft] = React.useState({ base_monthly: '', outstation_allowance: '', profit_share_rate_pct: '' })
+  const [savingSalary, setSavingSalary] = React.useState(false)
 
   React.useEffect(() => {
     if (!driver) return
-    setTab('details'); setTrips([]); setCompletedCount(null); setTotalEarnings(null)
+    setTab('details'); setTrips([]); setCompletedCount(null); setTotalEarnings(null); setShifts([])
+    getDriverSalary(driver.id).then((r: any) => {
+      setSalary(r.salary)
+      setSalaryDraft({
+        base_monthly: r.salary?.baseMonthly != null ? String(r.salary.baseMonthly) : '',
+        outstation_allowance: r.salary?.outstationAllowance != null ? String(r.salary.outstationAllowance) : '',
+        profit_share_rate_pct: r.salary?.profitShareRatePct != null ? String(r.salary.profitShareRatePct) : '',
+      })
+    }).catch(() => {})
   }, [driver?.id])
 
   const loadTrips = async () => {
@@ -57,6 +70,35 @@ function DriverDrawer({ driver, onClose, onUpdate, isSuperAdmin }: { driver: Dri
       setTotalEarnings(r.totalEarnings)
     } finally {
       setTripsLoading(false)
+    }
+  }
+
+  const loadShifts = async () => {
+    if (!driver || shifts.length > 0) return
+    setShiftsLoading(true)
+    try {
+      const r = await getDriverShifts(driver.id)
+      setShifts(r.shifts)
+    } finally {
+      setShiftsLoading(false)
+    }
+  }
+
+  const handleSaveSalary = async () => {
+    if (!driver) return
+    setSavingSalary(true)
+    try {
+      const r = await putDriverSalary(driver.id, {
+        base_monthly: Number(salaryDraft.base_monthly) || 0,
+        outstation_allowance: Number(salaryDraft.outstation_allowance) || 0,
+        profit_share_rate_pct: Number(salaryDraft.profit_share_rate_pct) || 0,
+        effective_from: new Date().toISOString().slice(0, 10),
+      })
+      setSalary(r.salary)
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setSavingSalary(false)
     }
   }
 
@@ -109,10 +151,10 @@ function DriverDrawer({ driver, onClose, onUpdate, isSuperAdmin }: { driver: Dri
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${YL.line}`, background: YL.bg }}>
-        {(['details', 'trips'] as const).map(t => (
-          <button key={t} onClick={() => { setTab(t); if (t === 'trips') loadTrips() }}
+        {(['details', 'trips', 'shifts'] as const).map(t => (
+          <button key={t} onClick={() => { setTab(t); if (t === 'trips') loadTrips(); if (t === 'shifts') loadShifts() }}
             style={{ padding: '10px 20px', background: 'transparent', border: 'none', borderBottom: tab === t ? `2px solid ${YL.ink}` : '2px solid transparent', fontSize: 12.5, fontWeight: tab === t ? 700 : 500, color: tab === t ? YL.ink : YL.ink2, cursor: 'pointer', textTransform: 'capitalize' }}>
-            {t === 'trips' ? `Trips (${completedCount ?? driver.trips})` : 'Details'}
+            {t === 'trips' ? `Trips (${completedCount ?? driver.trips})` : t === 'shifts' ? 'Shifts' : 'Details'}
           </button>
         ))}
       </div>
@@ -180,6 +222,32 @@ function DriverDrawer({ driver, onClose, onUpdate, isSuperAdmin }: { driver: Dri
                 <DocImage label="Police verification" value={driver.docPolice} />
               </Stack>
             </div>
+
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: YL.ink, marginBottom: 4 }}>Compensation</div>
+              <div style={{ fontSize: 11.5, color: YL.ink3, marginBottom: 14 }}>Fixed salary + outstation allowance + profit share on external platform (Uber/Ola) trips.</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 10.5, color: YL.ink3, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Base monthly (₹)</div>
+                  <input value={salaryDraft.base_monthly} onChange={e => setSalaryDraft(s => ({ ...s, base_monthly: e.target.value }))} type="number"
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${YL.line}`, borderRadius: 7, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, outline: 'none', background: YL.bg }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, color: YL.ink3, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Outstation allowance (₹/trip)</div>
+                  <input value={salaryDraft.outstation_allowance} onChange={e => setSalaryDraft(s => ({ ...s, outstation_allowance: e.target.value }))} type="number"
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${YL.line}`, borderRadius: 7, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, outline: 'none', background: YL.bg }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, color: YL.ink3, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Profit share (%)</div>
+                  <input value={salaryDraft.profit_share_rate_pct} onChange={e => setSalaryDraft(s => ({ ...s, profit_share_rate_pct: e.target.value }))} type="number"
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${YL.line}`, borderRadius: 7, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, color: YL.ink, outline: 'none', background: YL.bg }} />
+                </div>
+              </div>
+              <Button size="sm" variant="secondary" onClick={handleSaveSalary} disabled={savingSalary}>
+                {savingSalary ? 'Saving…' : 'Save compensation'}
+              </Button>
+              {salary?.effectiveFrom && <div style={{ marginTop: 8, fontSize: 11, color: YL.ink3 }}>Effective from {fmtDate(salary.effectiveFrom)}</div>}
+            </div>
           </Stack>
         )}
 
@@ -218,6 +286,39 @@ function DriverDrawer({ driver, onClose, onUpdate, isSuperAdmin }: { driver: Dri
                 {b.pickup?.dateTime && <Mono size={10.5} color={YL.ink3}>{fmtDate(b.pickup.dateTime)}</Mono>}
               </div>
             ))}
+          </Stack>
+        )}
+
+        {tab === 'shifts' && (
+          <Stack gap={0}>
+            {shiftsLoading && <div style={{ padding: '40px 0', textAlign: 'center', color: YL.ink2, fontSize: 13 }}>Loading…</div>}
+            {!shiftsLoading && shifts.length === 0 && <div style={{ padding: '40px 0', textAlign: 'center', color: YL.ink3, fontSize: 13 }}>No shifts yet.</div>}
+            {shifts.map(s => {
+              const hours = s.clockOutAt
+                ? ((new Date(s.clockOutAt).getTime() - new Date(s.clockInAt).getTime()) / 3600000).toFixed(1)
+                : null
+              const km = s.clockInOdometer != null && s.clockOutOdometer != null ? Math.max(0, s.clockOutOdometer - s.clockInOdometer) : null
+              return (
+                <div key={s.id} style={{ padding: '14px 0', borderBottom: `1px solid ${YL.line}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Stack gap={3}>
+                      <Mono size={12} weight={600}>{fmtDate(s.clockInAt)}</Mono>
+                      <div style={{ fontSize: 11.5, color: YL.ink2 }}>
+                        {new Date(s.clockInAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                        {' → '}
+                        {s.clockOutAt ? new Date(s.clockOutAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'active'}
+                      </div>
+                    </Stack>
+                    <Stack gap={4} style={{ alignItems: 'flex-end' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: s.status === 'active' ? YL.greenSoft : YL.bg, color: s.status === 'active' ? YL.greenInk : YL.ink2 }}>
+                        {s.status === 'active' ? 'On duty' : 'Closed'}
+                      </span>
+                      {hours && <Mono size={11.5} weight={600}>{hours} hrs{km != null ? ` · ${km} km` : ''}</Mono>}
+                    </Stack>
+                  </div>
+                </div>
+              )
+            })}
           </Stack>
         )}
       </div>

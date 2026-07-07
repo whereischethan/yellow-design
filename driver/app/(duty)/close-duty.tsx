@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { YL, FONTS } from '@/constants/theme';
 import { useDuty } from '@/context/DutyContext';
 import { useDriverAuth } from '@/context/DriverAuthContext';
-import { saveReading } from '@/lib/api';
+import { saveReading, clockOut } from '@/lib/api';
 import { calcKwh, calcEfficiency, calcCo2Grams } from '@/lib/energy';
 import { DEFAULT_BATTERY_KWH } from '@/lib/config';
 
@@ -99,6 +99,7 @@ export default function CloseDutyScreen() {
     };
     try {
       await saveReading(reading);
+      await clockOut(endOdo);
     } catch (e: any) {
       setError(e?.message || 'Could not save closing readings — check your connection and retry.');
       setSubmitting(false);

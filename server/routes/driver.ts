@@ -452,6 +452,57 @@ router.post('/push-token', requireDriver, async (req: DriverRequest, res: Respon
   }
 })
 
+// ── Shifts ────────────────────────────────────────────────────────────────────
+
+router.post('/shifts/clock-in', requireDriver, async (req: DriverRequest, res: Response) => {
+  try {
+    const existing = await prisma.shift.findFirst({ where: { driverId: req.driverId!, status: 'active' } })
+    if (existing) return res.json({ shift: existing })
+
+    const { odometer } = req.body
+    const vehicle = await prisma.vehicle.findFirst({ where: { driverId: req.driverId } })
+    const shift = await prisma.shift.create({
+      data: {
+        driverId: req.driverId!,
+        vehicleId: vehicle?.id ?? null,
+        clockInOdometer: odometer != null ? parseFloat(odometer) : null,
+      },
+    })
+    return res.json({ shift })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+router.post('/shifts/clock-out', requireDriver, async (req: DriverRequest, res: Response) => {
+  try {
+    const active = await prisma.shift.findFirst({ where: { driverId: req.driverId!, status: 'active' } })
+    if (!active) return res.status(400).json({ error: 'No active shift to clock out of' })
+
+    const { odometer } = req.body
+    const shift = await prisma.shift.update({
+      where: { id: active.id },
+      data: {
+        status: 'closed',
+        clockOutAt: new Date(),
+        clockOutOdometer: odometer != null ? parseFloat(odometer) : null,
+      },
+    })
+    return res.json({ shift })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+router.get('/shifts/active', requireDriver, async (req: DriverRequest, res: Response) => {
+  try {
+    const shift = await prisma.shift.findFirst({ where: { driverId: req.driverId!, status: 'active' } })
+    return res.json({ shift })
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
 // ── Readings ──────────────────────────────────────────────────────────────────
 
 router.post('/readings', requireDriver, async (req: DriverRequest, res: Response) => {

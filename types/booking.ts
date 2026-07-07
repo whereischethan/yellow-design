@@ -14,10 +14,6 @@ export interface VehiclePricing {
 
 export interface VehicleOptions {
   yellowSky?: VehiclePricing;
-  yellow?: VehiclePricing;
-  // legacy fields from old API shape
-  sedan?: VehiclePricing;
-  suv?: VehiclePricing;
 }
 
 export interface EmptyLegInfo {
@@ -41,7 +37,7 @@ export interface PricingResponse {
   extraKmCharge?: number;
 }
 
-export type VehicleType = 'yellowSky' | 'yellow' | 'sedan' | 'suv';
+export type VehicleType = 'yellowSky';
 export type TripType = 'pickup' | 'drop' | 'outstation' | 'hourly';
 
 export interface LocationData {
@@ -121,7 +117,6 @@ export interface Booking extends CreateBookingRequest {
   assignedDriver?: AssignedDriverInfo;
   assignedVehicle?: AssignedVehicleInfo;
   rating?: { rating: number; comment?: string; ratedAt: string };
-  pendingAmount?: number;
   paymentStatus?: string;
   createdAt: string;
 }

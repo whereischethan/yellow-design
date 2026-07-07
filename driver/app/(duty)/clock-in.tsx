@@ -12,7 +12,7 @@ import { router } from 'expo-router'
 import { YL, FONTS } from '@/constants/theme'
 import { useDriverAuth } from '@/context/DriverAuthContext'
 import { useDuty } from '@/context/DutyContext'
-import { getDriverMe, getDriverBookings, saveReading } from '@/lib/api'
+import { getDriverMe, getDriverBookings, saveReading, clockIn as clockInApi } from '@/lib/api'
 import { estimatedRangeKm } from '@/lib/energy'
 
 function greeting(name: string): string {
@@ -71,6 +71,7 @@ export default function ClockInScreen() {
     try {
       clockIn()
       saveReading({ type: 'clock_in' }).catch(() => {})
+      clockInApi().catch(() => {})
       router.replace('/(duty)/handoff')
     } finally {
       setClocking(false)

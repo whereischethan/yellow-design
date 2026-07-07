@@ -87,6 +87,26 @@ export async function updateBookingStatus(id: string, status: string) {
   })
 }
 
+// ── Shifts ──────────────────────────────────────────────────────────────────────
+
+export async function clockIn(odometer?: number) {
+  return driverFetch('/shifts/clock-in', {
+    method: 'POST',
+    body: JSON.stringify({ odometer }),
+  })
+}
+
+export async function clockOut(odometer?: number) {
+  return driverFetch('/shifts/clock-out', {
+    method: 'POST',
+    body: JSON.stringify({ odometer }),
+  })
+}
+
+export async function getActiveShift() {
+  return driverFetch('/shifts/active')
+}
+
 // ── Readings ──────────────────────────────────────────────────────────────────
 
 export async function saveReading(data: {

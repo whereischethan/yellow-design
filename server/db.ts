@@ -8,8 +8,6 @@ export async function seedPricingDefaults() {
     ['airport_gst', '5'],
     ['airport_meet_greet', '100'],
     ['hourly_base_rate', '500'],
-    ['hourly_included_km', '0'],
-    ['hourly_extra_rate', '500'],
     ['outstation_per_km', '18'],
     ['outstation_driver_bata', '500'],
     ['outstation_night_halt', '1000'],

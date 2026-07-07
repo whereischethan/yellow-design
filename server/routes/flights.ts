@@ -9,15 +9,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
   if (!flight_number) return res.status(400).json({ error: 'flight_number required' })
 
   if (!FLIGHT_API_KEY) {
-    return res.json({
-      flightNumber: flight_number.toUpperCase(),
-      airline: 'IndiGo',
-      departure: date ? `${date}T20:00:00+05:30` : new Date().toISOString(),
-      arrival: date ? `${date}T22:00:00+05:30` : new Date().toISOString(),
-      status: 'scheduled',
-      terminal: 'T2',
-      gate: '',
-    })
+    return res.status(503).json({ error: 'Flight lookup unavailable' })
   }
 
   try {

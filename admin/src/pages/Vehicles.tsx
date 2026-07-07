@@ -1,6 +1,6 @@
 import React from 'react'
 import type { Vehicle, Driver } from '../types'
-import { patchVehicle, syncVehicleTrips, assignAllTripsToVehicle } from '../api'
+import { patchVehicle, syncVehicleTrips } from '../api'
 import { YL, Icons, Mono, Stack, Button, Chip, Card, PageHeader, Avatar, fmtDate, useIsMobile, DatePicker, Input, formatPhone } from '../components/ui'
 
 
@@ -73,8 +73,6 @@ function VehicleDrawer({ vehicle, drivers, onClose, onUpdate, isMobile }: Drawer
   const [eColor, setEColor] = React.useState('')
   const [eClass, setEClass] = React.useState('')
   const [eIsEv, setEIsEv] = React.useState(false)
-  const [assigning, setAssigning] = React.useState(false)
-  const [assignResult, setAssignResult] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (vehicle) {
@@ -85,7 +83,6 @@ function VehicleDrawer({ vehicle, drivers, onClose, onUpdate, isMobile }: Drawer
       setDriverId(vehicle.driver_id ?? null)
       setDriverPickerOpen(false)
       setEditMode(false)
-      setAssignResult(null)
     }
   }, [vehicle])
 
@@ -124,21 +121,6 @@ function VehicleDrawer({ vehicle, drivers, onClose, onUpdate, isMobile }: Drawer
       onClose()
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handleAssignAllTrips = async () => {
-    if (!confirm(`Assign all completed bookings without a vehicle to ${vehicle.plate}? This cannot be undone.`)) return
-    setAssigning(true)
-    setAssignResult(null)
-    try {
-      const res = await assignAllTripsToVehicle(vehicle.id) as any
-      setAssignResult(`Done — ${res.assigned} bookings updated · ${res.trips} total trips`)
-      onUpdate({ ...vehicle, trips: res.trips })
-    } catch (e: any) {
-      setAssignResult(`Error: ${e.message}`)
-    } finally {
-      setAssigning(false)
     }
   }
 
@@ -185,14 +167,6 @@ function VehicleDrawer({ vehicle, drivers, onClose, onUpdate, isMobile }: Drawer
                       <Input value={v} onChange={(e: any) => s(e.target.value)} style={{ height: 30, fontSize: 12.5, textAlign: 'right', width: 160 }}/>
                     </div>
                   ))}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ fontSize: 12.5, color: YL.ink2 }}>Class</span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {[['yellowSky', 'Yellow Sky'], ['yellowEarth', 'Yellow Earth']].map(([k, l]) => (
-                        <button key={k} onClick={() => setEClass(k)} style={{ padding: '4px 10px', fontSize: 11.5, borderRadius: 6, border: `1.5px solid ${eClass === k ? YL.yellowDeep : YL.line}`, background: eClass === k ? YL.yellow : YL.bg, cursor: 'pointer', fontFamily: 'inherit', color: YL.ink }}>{l}</button>
-                      ))}
-                    </div>
-                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 12.5, color: YL.ink2 }}>Electric vehicle (EV)</span>
                     <button onClick={() => setEIsEv(p => !p)} style={{ width: 40, height: 22, borderRadius: 11, background: eIsEv ? YL.greenInk : YL.line, border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 150ms' }}>
@@ -284,15 +258,6 @@ function VehicleDrawer({ vehicle, drivers, onClose, onUpdate, isMobile }: Drawer
                 </div>
               )}
             </Card>
-
-            <Card>
-              <div style={{ fontSize: 11, color: YL.ink2, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 500, marginBottom: 10 }}>Trip history</div>
-              <div style={{ fontSize: 12.5, color: YL.ink2, marginBottom: 10 }}>Assign all completed bookings without a vehicle to this car.</div>
-              <Button variant="secondary" onClick={handleAssignAllTrips} disabled={assigning} style={{ width: '100%', justifyContent: 'center' }}>
-                {assigning ? 'Assigning…' : `Assign all past trips to ${vehicle.plate}`}
-              </Button>
-              {assignResult && <div style={{ marginTop: 8, fontSize: 12, color: assignResult.startsWith('Error') ? YL.gulmohar : YL.greenInk }}>{assignResult}</div>}
-            </Card>
           </Stack>
         </div>
 
@@ -319,7 +284,6 @@ interface Props {
 export default function VehiclesPage({ vehicles, drivers, onUpdate, onAddVehicle, onVehiclesRefresh }: Props) {
   const isMobile = useIsMobile()
   const [filter, setFilter] = React.useState<string>('all')
-  const [classFilter, setClassFilter] = React.useState<string>('all')
   const [selected, setSelected] = React.useState<Vehicle | null>(null)
   const [syncing, setSyncing] = React.useState(false)
 
@@ -340,7 +304,6 @@ export default function VehiclesPage({ vehicles, drivers, onUpdate, onAddVehicle
       if (filter === 'on-trip' && !(v.status === 'on-trip' || v.status === 'assigned')) return false
       if (filter !== 'on-trip' && v.status !== filter) return false
     }
-    if (classFilter !== 'all' && v.class_key !== classFilter) return false
     return true
   })
 
@@ -398,14 +361,6 @@ export default function VehiclesPage({ vehicles, drivers, onUpdate, onAddVehicle
             </Chip>
           ))}
         </div>
-        {!isMobile && <div style={{ width: 1, height: 22, background: YL.line }}/>}
-        {!isMobile && (
-          <div style={{ display: 'flex', gap: 6 }}>
-            {[['all', 'All classes'], ['yellowSky', 'Yellow Sky'], ['yellowEarth', 'Yellow Earth']].map(([k, l]) => (
-              <Chip key={k} active={classFilter === k} onClick={() => setClassFilter(k)}>{l}</Chip>
-            ))}
-          </div>
-        )}
       </div>
 
       {!isMobile && (

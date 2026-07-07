@@ -71,6 +71,8 @@ model Booking {
   guestPhone          String? @map("guest_phone")
   assignedDriverJson  String? @map("assigned_driver_json")
   assignedVehicleJson String? @map("assigned_vehicle_json")
+  driverId            String? @map("driver_id")
+  vehicleId           String? @map("vehicle_id")
   razorpayOrderId     String? @map("razorpay_order_id")
   razorpayPaymentId   String? @map("razorpay_payment_id")
   razorpayLinkId      String? @map("razorpay_link_id")
@@ -86,12 +88,16 @@ model Booking {
   createdAt           String  @default(dbgenerated("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')")) @map("created_at")
 
   user           User?           @relation(fields: [userId], references: [id])
+  driver         Driver?         @relation(fields: [driverId], references: [id])
+  assignedVehicle Vehicle?       @relation(fields: [vehicleId], references: [id])
   invoice        Invoice?
   customInvoices CustomInvoice[]
 
   @@index([status])
   @@index([userId])
   @@index([createdAt])
+  @@index([driverId])
+  @@index([vehicleId])
   @@map("bookings")
 }
 
@@ -166,6 +172,10 @@ model Driver {
   vehicles Vehicle[]
   readings DriverReading[]
   location DriverLocation?
+  bookings Booking[]
+  shifts   Shift[]
+  salaryStructure    SalaryStructure?
+  externalEarnings   ExternalPlatformEarning[]
 
   @@map("drivers")
 }
@@ -202,9 +212,59 @@ model Vehicle {
   fcExpiry        String? @map("fc_expiry")
   maintenanceNote String? @map("maintenance_note")
 
-  driver Driver? @relation(fields: [driverId], references: [id])
+  driver   Driver?   @relation(fields: [driverId], references: [id])
+  bookings Booking[]
+  shifts   Shift[]
 
   @@map("vehicles")
+}
+
+model Shift {
+  id               String    @id @default(cuid())
+  driverId         String    @map("driver_id")
+  vehicleId        String?   @map("vehicle_id")
+  clockInAt        DateTime  @default(now()) @map("clock_in_at")
+  clockOutAt       DateTime? @map("clock_out_at")
+  clockInOdometer  Float?    @map("clock_in_odometer")
+  clockOutOdometer Float?    @map("clock_out_odometer")
+  status           String    @default("active") @map("status") // active | closed
+
+  driver  Driver   @relation(fields: [driverId], references: [id])
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
+
+  @@index([driverId])
+  @@index([status])
+  @@map("shifts")
+}
+
+model SalaryStructure {
+  id                  String @id @default(cuid())
+  driverId            String @unique @map("driver_id")
+  baseMonthly         Int    @map("base_monthly")
+  outstationAllowance Int    @default(0) @map("outstation_allowance") // per outstation trip
+  profitShareRatePct  Float  @default(0) @map("profit_share_rate_pct") // driver's % share of external-platform profit
+  effectiveFrom       String @map("effective_from")
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@map("salary_structures")
+}
+
+model ExternalPlatformEarning {
+  id          String   @id @default(cuid())
+  driverId    String   @map("driver_id")
+  vehicleId   String?  @map("vehicle_id")
+  platform    String   // 'uber' | 'ola'
+  periodStart String   @map("period_start")
+  periodEnd   String   @map("period_end")
+  grossAmount Int      @map("gross_amount")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@map("external_platform_earnings")
 }
 
 model Lead {

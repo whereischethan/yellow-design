@@ -68,6 +68,11 @@ router.post('/bookings', async (req, res) => {
     const tripCode = await genTripCode()
     const bookingStatus = assignedDriver ? 'assigned' : 'confirmed'
 
+    // assignedVehicle rarely carries a real Vehicle.id (it's often derived from the driver's
+    // denormalized plate string) — the driver's current vehicle assignment is the source of truth.
+    const resolvedVehicleId = assignedVehicle?.id
+      ?? (assignedDriver?.id ? (await prisma.vehicle.findFirst({ where: { driverId: assignedDriver.id } }))?.id ?? null : null)
+
     // Resolve userId: explicit > find/create by guestPhone > null
     let resolvedUserId: string | null = userId || null
     if (!resolvedUserId && guestPhone) {
@@ -97,6 +102,8 @@ router.post('/bookings', async (req, res) => {
         guestPhone: guestPhone ?? null,
         assignedDriverJson: assignedDriver ? JSON.stringify(slimAssignedDriver(assignedDriver)) : null,
         assignedVehicleJson: assignedVehicle ? JSON.stringify(assignedVehicle) : null,
+        driverId: assignedDriver?.id ?? null,
+        vehicleId: resolvedVehicleId,
         status: bookingStatus,
         paymentStatus: 'pending',
         sendSms: sendSmsBody !== undefined ? Boolean(sendSmsBody) : true,
@@ -163,10 +170,18 @@ router.patch('/bookings/:id', async (req, res) => {
     const data: any = {}
 
     if (status !== undefined) data.status = status
-    if (assignedDriver !== undefined) data.assignedDriverJson = assignedDriver ? JSON.stringify(slimAssignedDriver(assignedDriver)) : null
+    if (assignedDriver !== undefined) {
+      data.assignedDriverJson = assignedDriver ? JSON.stringify(slimAssignedDriver(assignedDriver)) : null
+      data.driverId = assignedDriver?.id ?? null
+    }
     // Assigning a driver moves the booking to "assigned" unless a status was sent explicitly
     if (assignedDriver && status === undefined && ['pending', 'confirmed'].includes(row.status)) data.status = 'assigned'
-    if (assignedVehicle !== undefined) data.assignedVehicleJson = assignedVehicle ? JSON.stringify(assignedVehicle) : null
+    if (assignedVehicle !== undefined) {
+      data.assignedVehicleJson = assignedVehicle ? JSON.stringify(assignedVehicle) : null
+      // assignedVehicle rarely carries a real Vehicle.id — fall back to the driver's current vehicle
+      data.vehicleId = assignedVehicle?.id
+        ?? (assignedDriver?.id ? (await prisma.vehicle.findFirst({ where: { driverId: assignedDriver.id } }))?.id ?? null : null)
+    }
     if (paymentStatus !== undefined) data.paymentStatus = paymentStatus
     if (paymentMethod !== undefined) data.paymentMethod = paymentMethod
     if (driverCollect !== undefined) data.driverCollect = Boolean(driverCollect)

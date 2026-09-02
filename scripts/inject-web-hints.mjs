@@ -29,6 +29,13 @@ const META_PIXEL = `<!-- Meta Pixel Code -->
     /></noscript>
     <!-- End Meta Pixel Code -->`
 
+// ─── Google Ads conversion tracking ────────────────────────────────────────────
+// TODO: replace AW-XXXXXXXXX (and the id in lib/gtag.ts) with the real conversion ID once created
+const hasGtagAlready = html.includes('googletagmanager.com/gtag')
+
+const GTAG_SCRIPT = `<script async src="https://www.googletagmanager.com/gtag/js?id=AW-XXXXXXXXX"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)};gtag('js',new Date());gtag('config','AW-XXXXXXXXX');</script>`
+
 // ─── Performance hints ────────────────────────────────────────────────────────
 const HINTS = `
   <link rel="preconnect" href="https://yellow-design-backend-dmevc5oa4q-el.a.run.app" />
@@ -39,7 +46,8 @@ const HINTS = `
   <link rel="preload" href="/assets/node_modules/@expo-google-fonts/bricolage-grotesque/600SemiBold/BricolageGrotesque_600SemiBold.e5b5fc505484ff3ca24da73cba67c660.ttf" as="font" type="font/ttf" crossorigin="anonymous" />
   <link rel="preload" href="/assets/node_modules/@expo-google-fonts/jetbrains-mono/400Regular/JetBrainsMono_400Regular.a0147b5ab9e4946e81879aef45313def.ttf" as="font" type="font/ttf" crossorigin="anonymous" />
   ${hasClarityAlready ? '' : CLARITY_SCRIPT}
-    ${hasPixelAlready ? '' : META_PIXEL}`
+    ${hasPixelAlready ? '' : META_PIXEL}
+    ${hasGtagAlready ? '' : GTAG_SCRIPT}`
 
 // ─── Inject before the icon link (or before </head>) ─────────────────────────
 if (html.includes('<link rel="icon"')) {
@@ -53,5 +61,6 @@ writeFileSync(path, html)
 const parts = []
 if (!hasClarityAlready) parts.push('Clarity')
 if (!hasPixelAlready)   parts.push('Meta Pixel')
+if (!hasGtagAlready)    parts.push('Google Ads gtag')
 parts.push('performance hints')
 console.log(`Injected: ${parts.join(', ')} → dist/index.html`)

@@ -22,6 +22,12 @@ export interface EmptyLegInfo {
   message: string;
 }
 
+export interface PromoInfo {
+  type: 'flatFare';
+  message: string;
+  originalFareBeforeTax: number;   // standard fare, for strikethrough display
+}
+
 export interface PricingResponse {
   distanceKm: number;
   durationMinutes: number;
@@ -32,6 +38,7 @@ export interface PricingResponse {
   breakdown: PricingBreakdown;
   vehicleOptions: VehicleOptions;
   emptyLeg?: EmptyLegInfo;
+  promo?: PromoInfo;
   // legacy compat
   basePrice?: number;
   extraKmCharge?: number;

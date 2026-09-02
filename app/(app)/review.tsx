@@ -9,6 +9,7 @@ import YButton from '../../components/YButton'
 import RouteVisualizer from '../../components/RouteVisualizer'
 import { createPaymentOrder, verifyPaymentAndCreateBooking, logLead, getApiBase } from '../../lib/api'
 import { pixelInitiateCheckout, pixelPurchase } from '../../lib/pixel'
+import { gtagPurchase } from '../../lib/gtag'
 import { useAuth } from '../../context/AuthContext'
 import type { PricingResponse, BookingLocation, FlightInfo, VehicleType, CreateBookingRequest } from '../../types/booking'
 
@@ -72,6 +73,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
   const { user, updateUser } = useAuth()
   const isNewUser = (user?.bookingCount ?? 0) === 0
   const hasEmptyLeg = !!pricing?.emptyLeg
+  const hasPromo = !!pricing?.promo
 
   const [firstRideConfig, setFirstRideConfig] = useState({ pct: 10, threshold: 1000 })
   useEffect(() => {
@@ -86,17 +88,17 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
       .catch(() => {})
   }, [])
 
-  // Empty leg is exclusive — no first-ride or referral discount stacks with it
+  // Empty leg and the flat-fare promo are exclusive — no first-ride or referral discount stacks with either
   function calcFirstRideDiscount(fare: number): number {
     if (fare < firstRideConfig.threshold) return 0
     return Math.round(fare * firstRideConfig.pct / 100)
   }
-  const newUserDiscount = !hasEmptyLeg && isNewUser ? calcFirstRideDiscount(baseTotal) : 0
+  const newUserDiscount = !hasEmptyLeg && !hasPromo && isNewUser ? calcFirstRideDiscount(baseTotal) : 0
   const newUserPct = firstRideConfig.pct
 
   const availableCredits = user?.referralCredits ?? 0
   const hasReferralPromo = !!(user?.referredById && availableCredits === 0)
-  const showDiscount = !hasEmptyLeg && (availableCredits > 0 || hasReferralPromo)
+  const showDiscount = !hasEmptyLeg && !hasPromo && (availableCredits > 0 || hasReferralPromo)
 
   const [applyCredits, setApplyCredits] = useState(false)
   const discountAmount = Math.round(baseTotal * 0.1)
@@ -178,6 +180,7 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
     updateUser({ bookingCount: (user?.bookingCount ?? 0) + 1 })
     // Purchase pixel — eventID matches the Conversions API event sent by the server
     pixelPurchase({ value: booking.pricing?.totalPrice ?? total, bookingId: booking.id })
+    gtagPurchase({ value: booking.pricing?.totalPrice ?? total, bookingId: booking.id })
     router.replace({
       pathname: '/(app)/confirmed',
       params: { booking: JSON.stringify(booking) },
@@ -455,11 +458,13 @@ const vehicleType = (params.vehicleType ?? 'yellowSky') as VehicleType
             <FareLine label="10% referral discount" value={`−₹${creditsToApply.toLocaleString('en-IN')}`} />
           )}
 
-          <View style={{ alignItems: 'center', marginTop: (newUserDiscount > 0 || creditsToApply > 0 || pricing?.emptyLeg) ? 10 : 0 }}>
+          <View style={{ alignItems: 'center', marginTop: (newUserDiscount > 0 || creditsToApply > 0 || hasEmptyLeg || hasPromo) ? 10 : 0 }}>
             <Text style={styles.totalAmount}>₹{total.toLocaleString('en-IN')}</Text>
             <Text style={{ fontFamily: FONTS.display, fontSize: 12, color: YL.ink3, marginTop: 6 }}>
               {hasEmptyLeg
                 ? 'Special rate · all inclusive'
+                : hasPromo
+                ? `${pricing?.promo?.message ?? 'Limited time flat fare'} · all inclusive`
                 : newUserDiscount > 0 && creditsToApply > 0
                 ? `First ride ${newUserPct}% off + referral · all inclusive`
                 : newUserDiscount > 0

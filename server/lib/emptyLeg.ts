@@ -193,6 +193,7 @@ export interface ActiveWindow {
 export interface EmptyLegStatus {
   dropOverride: boolean
   pickupOverride: boolean
+  promoFlatActive: boolean
   config: Record<string, number>
   activeWindows: ActiveWindow[]
   upcomingWindows: ActiveWindow[]   // windows that open in the future today
@@ -209,6 +210,7 @@ export async function getEmptyLegStatus(): Promise<EmptyLegStatus> {
 
   const dropOverride   = (cfg.empty_leg_drops_active   ?? 0) === 1
   const pickupOverride = (cfg.empty_leg_pickups_active ?? 0) === 1
+  const promoFlatActive = (cfg.promo_flat_active ?? 0) === 1
 
   const preStartMin  = cfgNum(cfg, 'empty_leg_pre_start_min',  240)
   const preEndMin    = cfgNum(cfg, 'empty_leg_pre_end_min',     60)
@@ -282,5 +284,5 @@ export async function getEmptyLegStatus(): Promise<EmptyLegStatus> {
     }
   }
 
-  return { dropOverride, pickupOverride, config: cfg, activeWindows, upcomingWindows, todaysBookings, specialRateViewsToday: getSpecialRateViewsToday() }
+  return { dropOverride, pickupOverride, promoFlatActive, config: cfg, activeWindows, upcomingWindows, todaysBookings, specialRateViewsToday: getSpecialRateViewsToday() }
 }

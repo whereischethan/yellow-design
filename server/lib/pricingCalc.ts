@@ -98,6 +98,37 @@ export function calcAirportPrice(distanceKm: number, cfg: Record<string, number>
   }
 }
 
+export function calcPromoFlatPrice(distanceKm: number, cfg: Record<string, number>) {
+  const flatFare    = cfg.promo_flat_fare ?? 1200
+  const kmThreshold = cfg.promo_flat_km_threshold ?? 40
+  const perKmBeyond = cfg.promo_flat_per_km_beyond ?? 32
+  const gstRate     = (cfg.airport_gst ?? 5) / 100
+  const meetGreet   = cfg.airport_meet_greet ?? 100
+
+  const extraKm = Math.max(0, distanceKm - kmThreshold)
+  const extraKmCharge = Math.round(extraKm * perKmBeyond)
+  const fareBeforeTax = Math.round(flatFare + extraKmCharge)
+  const gst = Math.round(fareBeforeTax * gstRate)
+  const total = fareBeforeTax + gst
+
+  return {
+    fareBeforeTax,
+    gst,
+    toll: 0,
+    totalPrice: total,
+    basePrice: fareBeforeTax,
+    extraKmCharge,
+    optionalMeetGreet: meetGreet,
+    breakdown: {
+      distanceFare: `Flat ₹${flatFare} up to ${kmThreshold} km`,
+      tripCharge: extraKm > 0 ? `+${extraKm} km × ₹${perKmBeyond}/km = ₹${extraKmCharge}` : 'No extra km charge',
+      toll: 'Included',
+      fareExGst: `= ₹${fareBeforeTax} (ex-GST)`,
+      gst: `+₹${gst} GST (${(gstRate * 100).toFixed(0)}%)`,
+    },
+  }
+}
+
 export function calcOutstationPrice(
   oneWayDistanceKm: number,
   cfg: Record<string, number>,

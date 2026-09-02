@@ -25,6 +25,10 @@ export default function Root({ children }: PropsWithChildren) {
         {/* Microsoft Clarity — session recording + heatmaps (async, non-blocking) */}
         <script dangerouslySetInnerHTML={{ __html: `(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script","wofj0t94ji");` }} />
 
+        {/* Google Ads conversion tracking — TODO: replace AW-XXXXXXXXX with the real conversion ID once created (must match lib/gtag.ts) */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=AW-XXXXXXXXX" />
+        <script dangerouslySetInnerHTML={{ __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)};gtag('js',new Date());gtag('config','AW-XXXXXXXXX');` }} />
+
         <style dangerouslySetInnerHTML={{ __html: `
           * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
           html, body, #root { height: 100%; touch-action: pan-x pan-y; }

@@ -220,7 +220,7 @@ router.get('/empty-leg/status', async (_req, res) => {
 router.patch('/empty-leg/toggle', requireSuperAdmin, async (req, res) => {
   try {
     const { key, value } = req.body
-    const allowed = ['empty_leg_drops_active', 'empty_leg_pickups_active']
+    const allowed = ['empty_leg_drops_active', 'empty_leg_pickups_active', 'promo_flat_active']
     if (!allowed.includes(key)) return res.status(400).json({ error: 'Invalid key' })
     await prisma.pricingConfig.upsert({
       where: { key },
@@ -242,6 +242,7 @@ router.patch('/empty-leg/config', requireSuperAdmin, async (req, res) => {
       'empty_leg_pre_radius_km', 'empty_leg_post_radius_km',
       'home_base_fare', 'home_base_radius_km',
       'first_ride_discount_pct', 'first_ride_discount_threshold',
+      'promo_flat_fare', 'promo_flat_km_threshold', 'promo_flat_per_km_beyond',
     ]
     const entries = Object.entries(req.body).filter(([k]) => allowed.includes(k))
     await Promise.all(entries.map(([key, value]) =>

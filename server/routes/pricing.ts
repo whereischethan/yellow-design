@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express'
 import prisma from '../lib/prisma'
 import { checkHomeBase, checkEmptyLeg, recordSpecialRateView, type SpecialRate } from '../lib/emptyLeg'
-import { BLR_AIRPORT_PLACE_ID, getTotalDistance, calcAirportPrice, calcOutstationPrice, calcHourlyPrice } from '../lib/pricingCalc'
+import { BLR_AIRPORT_PLACE_ID, getTotalDistance, calcAirportPrice, calcPromoFlatPrice, calcOutstationPrice, calcHourlyPrice } from '../lib/pricingCalc'
 
 const router = Router()
 
@@ -44,6 +44,16 @@ router.post('/', async (req: Request, res: Response) => {
 
     const gstRate = (cfg.airport_gst ?? 5) / 100
     let pricing = calcAirportPrice(distanceKm, cfg)
+
+    // Limited-time flat fare promo — only used when it's actually cheaper than standard pricing
+    let promoApplied = false
+    if ((cfg.promo_flat_active ?? 0) === 1) {
+      const promoPricing = calcPromoFlatPrice(distanceKm, cfg)
+      if (promoPricing.fareBeforeTax < pricing.fareBeforeTax) {
+        pricing = promoPricing
+        promoApplied = true
+      }
+    }
 
     let specialRate: SpecialRate | null = null
 
@@ -108,6 +118,13 @@ router.post('/', async (req: Request, res: Response) => {
       ...pricing,
       vehicleOptions: { yellowSky: pricing },
       ...(specialRate ? { emptyLeg: { type: specialRate.type, savedAmount: specialRate.savedAmount, message: specialRate.message } } : {}),
+      ...(promoApplied && !specialRate ? {
+        promo: {
+          type: 'flatFare',
+          message: 'Limited time flat fare',
+          originalFareBeforeTax: calcAirportPrice(distanceKm, cfg).fareBeforeTax,
+        },
+      } : {}),
     })
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Pricing calculation failed' })

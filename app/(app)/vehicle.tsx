@@ -21,6 +21,7 @@ import { checkAvailability, notifyAvailability, logLead, getApiBase } from '../.
 import { useAuth } from '../../context/AuthContext'
 import { SUPPORT_WHATSAPP } from '../../constants/config'
 import { pixelViewContent, pixelLead, pixelInitiateCheckout } from '../../lib/pixel'
+import { gtagLead } from '../../lib/gtag'
 import type { PricingResponse, BookingLocation, FlightInfo } from '../../types/booking'
 
 const SCREEN_W = Dimensions.get('window').width
@@ -162,17 +163,18 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
   const { user } = useAuth()
   const isNewUser = (user?.bookingCount ?? 0) === 0
   const hasEmptyLeg = !!pricing?.emptyLeg
+  const hasPromo = !!pricing?.promo
   const originalFare = hasEmptyLeg ? yellowSkyPrice + (pricing?.emptyLeg?.savedAmount ?? 0) : yellowSkyPrice
   function calcFirstRideDiscount(fare: number): number {
     if (fare < firstRideConfig.threshold) return 0
     return Math.round(fare * firstRideConfig.pct / 100)
   }
-  // Empty leg is exclusive — no first-ride discount stacks with it
-  const newUserDiscount = !hasEmptyLeg && isNewUser ? calcFirstRideDiscount(yellowSkyPrice) : 0
+  // Empty leg and the flat-fare promo are exclusive — no first-ride discount stacks with either
+  const newUserDiscount = !hasEmptyLeg && !hasPromo && isNewUser ? calcFirstRideDiscount(yellowSkyPrice) : 0
   const newUserPct = firstRideConfig.pct
   const effectivePrice = yellowSkyPrice - newUserDiscount
   const totalSaved = (hasEmptyLeg ? pricing!.emptyLeg!.savedAmount : 0) + newUserDiscount
-  const showDiscount = hasEmptyLeg || isNewUser
+  const showDiscount = hasEmptyLeg || hasPromo || isNewUser
 
   const [availability, setAvailability] = useState<{
     checked: boolean
@@ -234,6 +236,7 @@ const pickup: BookingLocation | null = params.pickup ? JSON.parse(params.pickup)
         // Lead + InitiateCheckout with IDs matching the server Conversions API events
         pixelLead({ value: effectivePrice, eventID: `lead_${leadId}` })
         pixelInitiateCheckout({ value: effectivePrice, eventID: `checkout_${leadId}` })
+        gtagLead({ value: effectivePrice, leadId })
       }
     })
   }, [])
@@ -343,9 +346,11 @@ tripType: params.tripType,
           {showDiscount && (
             <View style={styles.specialRateBadge}>
               <Text style={styles.specialRateText}>
-                {isNewUser && !hasEmptyLeg
-                  ? `✦ ${newUserPct}% FIRST RIDE`
-                  : pricing!.emptyLeg!.type === 'homeBase' ? 'HOME RATE' : '✦ SPECIAL RATE'}
+                {hasEmptyLeg
+                  ? (pricing!.emptyLeg!.type === 'homeBase' ? 'HOME RATE' : '✦ SPECIAL RATE')
+                  : hasPromo
+                  ? '✦ FLAT FARE'
+                  : `✦ ${newUserPct}% FIRST RIDE`}
               </Text>
             </View>
           )}
